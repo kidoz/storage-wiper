@@ -1,0 +1,17 @@
+# cppcheck suppressions for Storage Wiper
+# Format: [error id]:[filename]:[line]
+
+# Suppress specific warnings for external library code
+unmatchedSuppression
+
+# GTK/Adwaita macros generate false positives
+*:*/usr/include/gtk-4.0/*
+*:*/usr/include/libadwaita-1/*
+*:*/usr/include/glib-2.0/*
+
+# Suppress missingIncludeSystem warnings (system headers)
+missingIncludeSystem
+
+# Allow C-style casts in system API calls (ioctl, etc.)
+cstyleCast:*/src/services/DiskService.cpp
+cstyleCast:*/src/services/WipeService.cpp

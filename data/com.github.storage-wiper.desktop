@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Storage Wiper
+GenericName=Secure Disk Eraser
+Comment=Securely wipe storage devices with DoD-compliant algorithms
+Exec=storage_wiper
+Icon=com.github.storage-wiper
+Terminal=false
+Type=Application
+Categories=Utility;System;Security;
+Keywords=wipe;erase;secure;disk;storage;dod;sanitize;
+StartupNotify=true
+StartupWMClass=com.github.storage-wiper
+X-GNOME-UsesNotifications=true

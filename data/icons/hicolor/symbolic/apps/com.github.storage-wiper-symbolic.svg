@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- HDD body (scaled from main icon: 20,32,88,64 @ 128 -> 2.5,4,11,8 @ 16) -->
+  <rect x="2" y="3" width="12" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.25"/>
+
+  <!-- Disk platter (scaled from cx=56,cy=64 @ 128 -> cx=7,cy=7 @ 16) -->
+  <circle cx="6" cy="7" r="2.5" fill="none" stroke="currentColor" stroke-width="1"/>
+  <circle cx="6" cy="7" r="0.75" fill="currentColor"/>
+
+  <!-- Read/write arm -->
+  <path d="M9 5.5 L12 4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+  <circle cx="9" cy="5.5" r="0.75" fill="currentColor"/>
+
+  <!-- Activity LED -->
+  <circle cx="12" cy="9" r="0.75" fill="currentColor"/>
+
+  <!-- Wipe swoosh (scaled from M16,88 Q40,72 64,76 Q88,80 112,64 @ 128) -->
+  <path d="M1 12 Q4 10 8 10.5 Q12 11 15 9" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" fill="none"/>
+</svg>

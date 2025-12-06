@@ -1,0 +1,33 @@
+# Maintainer: Your Name <your.email@example.com>
+
+pkgname=storage-wiper
+pkgver=1.0.0
+pkgrel=2
+pkgdesc='Secure disk wiping tool with GTK4/libadwaita interface and DoD-compliant algorithms'
+arch=('x86_64')
+url='https://github.com/kidoz/storage-wiper'
+license=('MIT')
+depends=(
+  'gtk4'
+  'libadwaita'
+  'polkit'
+)
+makedepends=(
+  'meson'
+  'ninja'
+)
+source=("$pkgname-$pkgver.tar.gz::https://github.com/kidoz/storage-wiper/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  arch-meson "$pkgname-$pkgver" build
+  meson compile -C build
+}
+
+package() {
+  meson install -C build --destdir "$pkgdir"
+
+  # Install license
+  install -Dm644 "$pkgname-$pkgver/LICENSE.md" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

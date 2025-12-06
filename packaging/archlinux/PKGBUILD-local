@@ -1,0 +1,44 @@
+# Maintainer: Your Name <your.email@example.com>
+# Local development PKGBUILD - builds from parent directory
+
+pkgname=storage-wiper
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Secure disk wiping tool with GTK4/libadwaita interface and DoD-compliant algorithms'
+arch=('x86_64')
+url='https://github.com/kidoz/storage-wiper'
+license=('MIT')
+depends=(
+  'gtk4'
+  'libadwaita'
+  'polkit'
+)
+makedepends=(
+  'meson'
+  'ninja'
+)
+
+# No source array - we copy from local directory
+source=()
+sha256sums=()
+
+prepare() {
+  # Copy source from parent project directory
+  cp -r "$(dirname "$(pwd)")/../.." "$srcdir/$pkgname-$pkgver"
+
+  # Clean any existing build artifacts
+  rm -rf "$srcdir/$pkgname-$pkgver/builddir"
+}
+
+build() {
+  arch-meson "$pkgname-$pkgver" build
+  meson compile -C build
+}
+
+package() {
+  meson install -C build --destdir "$pkgdir"
+
+  # Install license
+  install -Dm644 "$pkgname-$pkgver/LICENSE.md" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

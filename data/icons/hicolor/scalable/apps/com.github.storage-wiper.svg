@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <!-- Background gradient - GNOME blue -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3584e4"/>
+      <stop offset="100%" stop-color="#1c71d8"/>
+    </linearGradient>
+    <!-- HDD body gradient -->
+    <linearGradient id="hdd" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f6f5f4"/>
+      <stop offset="100%" stop-color="#deddda"/>
+    </linearGradient>
+    <!-- Platter gradient -->
+    <linearGradient id="platter" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c0bfbc"/>
+      <stop offset="100%" stop-color="#9a9996"/>
+    </linearGradient>
+    <!-- Wipe effect gradient -->
+    <linearGradient id="wipe" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ff7800"/>
+      <stop offset="100%" stop-color="#e66100"/>
+    </linearGradient>
+    <!-- Shadow -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect width="128" height="128" rx="24" fill="url(#bg)"/>
+
+  <!-- HDD body -->
+  <rect x="20" y="32" width="88" height="64" rx="8" fill="url(#hdd)" filter="url(#shadow)"/>
+
+  <!-- HDD inner frame -->
+  <rect x="26" y="38" width="76" height="52" rx="4" fill="#77767b" opacity="0.2"/>
+
+  <!-- Disk platter -->
+  <circle cx="56" cy="64" r="22" fill="url(#platter)"/>
+  <circle cx="56" cy="64" r="16" fill="#e8e6e3"/>
+  <circle cx="56" cy="64" r="10" fill="#c0bfbc"/>
+  <circle cx="56" cy="64" r="4" fill="#5e5c64"/>
+
+  <!-- Platter shine -->
+  <ellipse cx="50" cy="58" rx="6" ry="3" fill="#fff" opacity="0.4"/>
+
+  <!-- Read/write arm -->
+  <path d="M78 52 L92 44 L96 48 L82 58 L78 56 Z" fill="#5e5c64"/>
+  <circle cx="78" cy="54" r="3" fill="#3d3846"/>
+
+  <!-- Activity LED -->
+  <circle cx="92" cy="82" r="4" fill="#33d17a"/>
+  <circle cx="92" cy="82" r="2" fill="#8ff0a4"/>
+
+  <!-- Wipe/Eraser swoosh -->
+  <path d="M16 88 Q40 72 64 76 Q88 80 112 64"
+        stroke="url(#wipe)" stroke-width="8" stroke-linecap="round" fill="none" opacity="0.9"/>
+  <path d="M20 94 Q48 78 72 82 Q96 86 108 74"
+        stroke="#ffbe6f" stroke-width="4" stroke-linecap="round" fill="none" opacity="0.7"/>
+
+  <!-- Sparkle effects (data being wiped) -->
+  <circle cx="32" cy="84" r="2" fill="#fff" opacity="0.9"/>
+  <circle cx="48" cy="78" r="1.5" fill="#fff" opacity="0.8"/>
+  <circle cx="80" cy="76" r="2" fill="#fff" opacity="0.85"/>
+  <circle cx="96" cy="70" r="1.5" fill="#fff" opacity="0.7"/>
+</svg>
