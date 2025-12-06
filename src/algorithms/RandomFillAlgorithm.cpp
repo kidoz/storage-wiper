@@ -1,0 +1,50 @@
+#include "algorithms/RandomFillAlgorithm.hpp"
+#include "interfaces/IWipeService.hpp"
+#include <vector>
+#include <random>
+#include <unistd.h>
+#include <algorithm>
+
+bool RandomFillAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
+                                  const std::atomic<bool>& cancel_flag) {
+    // Handle zero-size case
+    if (size == 0) {
+        return true;
+    }
+
+    std::random_device random_device;
+    std::mt19937 random_generator(random_device());
+    std::uniform_int_distribution<uint8_t> byte_distribution(0, 255);
+
+    std::vector<uint8_t> buffer(BUFFER_SIZE);
+    uint64_t written = 0;
+
+    while (written < size && !cancel_flag.load()) {
+        // Generate fresh random data for each buffer
+        for (auto& byte : buffer) {
+            byte = byte_distribution(random_generator);
+        }
+
+        size_t to_write = std::min(static_cast<uint64_t>(BUFFER_SIZE), size - written);
+        ssize_t result = write(fd, buffer.data(), to_write);
+
+        if (result <= 0) {
+            return false;
+        }
+
+        written += static_cast<uint64_t>(result);
+
+        if (callback) {
+            WipeProgress progress{};
+            progress.bytes_written = written;
+            progress.total_bytes = size;
+            progress.current_pass = 1;
+            progress.total_passes = 1;
+            progress.percentage = (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
+            progress.status = "Writing random data...";
+            callback(progress);
+        }
+    }
+
+    return !cancel_flag.load();
+}

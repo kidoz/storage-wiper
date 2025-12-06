@@ -1,0 +1,11 @@
+option('enable_clang_tidy',
+  type: 'boolean',
+  value: false,
+  description: 'Enable clang-tidy analysis (run: meson compile -C builddir clang-tidy)'
+)
+
+option('enable_cppcheck',
+  type: 'boolean',
+  value: false,
+  description: 'Enable cppcheck analysis (run: meson compile -C builddir cppcheck)'
+)
