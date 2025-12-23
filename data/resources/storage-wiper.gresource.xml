@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/org/storage/wiper">
+    <file preprocess="xml-stripblanks">ui/main-window.ui</file>
+    <file preprocess="xml-stripblanks">ui/disk-row.ui</file>
+    <file preprocess="xml-stripblanks">ui/algorithm-row.ui</file>
+  </gresource>
+</gresources>

@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <object class="GtkBox" id="main_content">
+    <property name="orientation">vertical</property>
+    <property name="spacing">0</property>
+
+    <!-- Content area with padding -->
+    <child>
+      <object class="GtkBox" id="content_box">
+        <property name="orientation">vertical</property>
+        <property name="spacing">12</property>
+        <property name="margin-start">12</property>
+        <property name="margin-end">12</property>
+        <property name="margin-top">12</property>
+        <property name="margin-bottom">12</property>
+
+        <!-- Disk selection section title -->
+        <child>
+          <object class="GtkLabel" id="disk_section_title">
+            <property name="label">&lt;b&gt;Select Storage Device&lt;/b&gt;</property>
+            <property name="use-markup">true</property>
+            <property name="halign">start</property>
+          </object>
+        </child>
+
+        <!-- Disk list in scrolled window -->
+        <child>
+          <object class="GtkScrolledWindow" id="disk_scroll">
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hscrollbar-policy">never</property>
+            <property name="min-content-height">200</property>
+            <style>
+              <class name="card"/>
+            </style>
+            <child>
+              <object class="GtkListBox" id="disk_list">
+                <property name="selection-mode">single</property>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <!-- Wiping options section title -->
+        <child>
+          <object class="GtkLabel" id="options_section_title">
+            <property name="label">&lt;b&gt;Wiping Options&lt;/b&gt;</property>
+            <property name="use-markup">true</property>
+            <property name="halign">start</property>
+            <property name="margin-top">12</property>
+          </object>
+        </child>
+
+        <!-- Algorithm options container -->
+        <child>
+          <object class="GtkBox" id="options_box">
+            <property name="orientation">vertical</property>
+            <property name="spacing">8</property>
+            <property name="margin-start">12</property>
+            <property name="margin-end">12</property>
+            <property name="margin-top">12</property>
+            <property name="margin-bottom">12</property>
+            <style>
+              <class name="card"/>
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+
+    <!-- Progress bar (hidden initially) -->
+    <child>
+      <object class="GtkProgressBar" id="progress_bar">
+        <property name="visible">false</property>
+        <property name="margin-start">12</property>
+        <property name="margin-end">12</property>
+        <property name="margin-top">12</property>
+      </object>
+    </child>
+
+    <!-- Progress label (hidden initially) -->
+    <child>
+      <object class="GtkLabel" id="progress_label">
+        <property name="visible">false</property>
+        <property name="margin-start">12</property>
+        <property name="margin-end">12</property>
+        <property name="margin-bottom">6</property>
+        <style>
+          <class name="dim-label"/>
+        </style>
+      </object>
+    </child>
+
+    <!-- Separator before action bar -->
+    <child>
+      <object class="GtkSeparator">
+        <property name="orientation">horizontal</property>
+      </object>
+    </child>
+
+    <!-- Action bar -->
+    <child>
+      <object class="GtkBox" id="action_bar">
+        <property name="orientation">horizontal</property>
+        <property name="spacing">12</property>
+        <property name="margin-start">12</property>
+        <property name="margin-end">12</property>
+        <property name="margin-top">12</property>
+        <property name="margin-bottom">12</property>
+
+        <!-- Warning label -->
+        <child>
+          <object class="GtkLabel" id="warning_label">
+            <property name="label">Warning: This will permanently destroy all data!</property>
+            <property name="hexpand">true</property>
+            <property name="halign">start</property>
+            <style>
+              <class name="warning"/>
+            </style>
+          </object>
+        </child>
+
+        <!-- Cancel button (hidden initially) -->
+        <child>
+          <object class="GtkButton" id="cancel_button">
+            <property name="label">Cancel</property>
+            <property name="visible">false</property>
+            <style>
+              <class name="destructive-action"/>
+            </style>
+          </object>
+        </child>
+
+        <!-- Wipe button -->
+        <child>
+          <object class="GtkButton" id="wipe_button">
+            <property name="label">Start Wipe</property>
+            <property name="sensitive">false</property>
+            <style>
+              <class name="destructive-action"/>
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

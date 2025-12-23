@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <object class="GtkBox" id="row_content">
+    <property name="orientation">horizontal</property>
+    <property name="spacing">12</property>
+    <property name="margin-start">12</property>
+    <property name="margin-end">12</property>
+    <property name="margin-top">8</property>
+    <property name="margin-bottom">8</property>
+
+    <!-- Disk icon -->
+    <child>
+      <object class="GtkImage" id="disk_icon">
+        <property name="icon-name">drive-harddisk-symbolic</property>
+        <property name="pixel-size">32</property>
+      </object>
+    </child>
+
+    <!-- Info container -->
+    <child>
+      <object class="GtkBox" id="info_box">
+        <property name="orientation">vertical</property>
+        <property name="spacing">4</property>
+        <property name="hexpand">true</property>
+
+        <!-- Disk name and model -->
+        <child>
+          <object class="GtkLabel" id="name_label">
+            <property name="halign">start</property>
+            <property name="use-markup">true</property>
+          </object>
+        </child>
+
+        <!-- Size and additional info -->
+        <child>
+          <object class="GtkLabel" id="info_label">
+            <property name="halign">start</property>
+            <style>
+              <class name="dim-label"/>
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+
+    <!-- Mounted indicator -->
+    <child>
+      <object class="GtkLabel" id="mounted_label">
+        <property name="label">MOUNTED</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="warning"/>
+        </style>
+      </object>
+    </child>
+  </object>
+</interface>

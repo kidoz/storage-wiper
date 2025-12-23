@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <object class="GtkBox" id="row_content">
+    <property name="orientation">horizontal</property>
+    <property name="spacing">12</property>
+    <property name="margin-bottom">4</property>
+
+    <!-- Radio button -->
+    <child>
+      <object class="GtkCheckButton" id="radio_button">
+        <!-- Group will be set programmatically -->
+      </object>
+    </child>
+
+    <!-- Label container -->
+    <child>
+      <object class="GtkBox" id="label_box">
+        <property name="orientation">vertical</property>
+        <property name="spacing">2</property>
+
+        <!-- Algorithm name with pass count -->
+        <child>
+          <object class="GtkLabel" id="name_label">
+            <property name="halign">start</property>
+          </object>
+        </child>
+
+        <!-- Algorithm description -->
+        <child>
+          <object class="GtkLabel" id="description_label">
+            <property name="halign">start</property>
+            <style>
+              <class name="dim-label"/>
+              <class name="caption"/>
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>
