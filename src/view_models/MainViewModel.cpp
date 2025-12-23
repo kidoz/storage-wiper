@@ -1,4 +1,4 @@
-#include "viewmodels/MainViewModel.hpp"
+#include "view_models/MainViewModel.hpp"
 
 #include <glib.h>
 #include <iostream>

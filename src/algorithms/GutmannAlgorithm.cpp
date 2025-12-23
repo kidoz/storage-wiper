@@ -1,5 +1,5 @@
 #include "algorithms/GutmannAlgorithm.hpp"
-#include "interfaces/IWipeService.hpp"
+#include "models/WipeTypes.hpp"
 #include <algorithm>
 #include <random>
 #include <string>

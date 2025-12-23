@@ -46,6 +46,7 @@ A modern, secure disk wiping application built with GTK4 and libadwaita for Linu
 
 ### Runtime Dependencies
 - GTK4 (≥ 4.0)
+- gtkmm-4.0 (≥ 4.6)
 - libadwaita-1 (≥ 1.0)
 - Linux kernel with `/sys/block` support
 - Root privileges (for disk access)
@@ -56,6 +57,7 @@ A modern, secure disk wiping application built with GTK4 and libadwaita for Linu
 - g++ or clang++ with C++20 support
 - pkg-config
 - GTK4 development files
+- gtkmm-4.0 development files
 - libadwaita development files
 
 ### Optional (for development)
@@ -70,7 +72,7 @@ A modern, secure disk wiping application built with GTK4 and libadwaita for Linu
 
 ```bash
 # Install dependencies
-sudo pacman -S gtk4 libadwaita meson ninja gcc pkgconf just
+sudo pacman -S gtk4 gtkmm-4.0 libadwaita meson ninja gcc pkgconf just
 
 # Clone repository
 git clone https://github.com/yourusername/storage-wiper.git
@@ -91,14 +93,14 @@ sudo meson install -C builddir
 
 **Debian/Ubuntu:**
 ```bash
-sudo apt install libgtk-4-dev libadwaita-1-dev meson ninja-build g++ pkg-config
+sudo apt install libgtk-4-dev libgtkmm-4.0-dev libadwaita-1-dev meson ninja-build g++ pkg-config
 meson setup builddir
 meson compile -C builddir
 ```
 
 **Fedora:**
 ```bash
-sudo dnf install gtk4-devel libadwaita-devel meson ninja-build gcc-c++ pkgconfig
+sudo dnf install gtk4-devel gtkmm4.0-devel libadwaita-devel meson ninja-build gcc-c++ pkgconfig
 meson setup builddir
 meson compile -C builddir
 ```

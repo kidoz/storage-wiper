@@ -1,10 +1,12 @@
 #include "Application.hpp"
-#include "views/MainWindow.hpp"
-#include "viewmodels/MainViewModel.hpp"
 #include "services/DiskService.hpp"
+#include "services/IDiskService.hpp"
+#include "services/IWipeService.hpp"
 #include "services/WipeService.hpp"
-#include "interfaces/IDiskService.hpp"
-#include "interfaces/IWipeService.hpp"
+#include "view_models/MainViewModel.hpp"
+#include "views/MainWindow.hpp"
+#include <gtkmm.h>
+#include <gtkmm/init.h>
 #include <iostream>
 
 StorageWiperApp::StorageWiperApp()
@@ -33,7 +35,12 @@ auto StorageWiperApp::container() -> di::Container& {
 }
 
 void StorageWiperApp::on_startup(GtkApplication*, gpointer) {
+    // Initialize Adwaita
     adw_init();
+
+    // Initialize gtkmm type system for hybrid C API / gtkmm usage
+    // This is required when using raw C GtkApplication with gtkmm widgets
+    Gtk::init_gtkmm_internals();
 }
 
 void StorageWiperApp::on_activate(GtkApplication* app, gpointer user_data) {

@@ -1,5 +1,5 @@
 #include "algorithms/DoD522022MAlgorithm.hpp"
-#include "interfaces/IWipeService.hpp"
+#include "models/WipeTypes.hpp"
 #include <algorithm>
 #include <format>
 #include <random>

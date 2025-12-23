@@ -9,6 +9,7 @@ url='https://github.com/kidoz/storage-wiper'
 license=('MIT')
 depends=(
   'gtk4'
+  'gtkmm-4.0'
   'libadwaita'
   'polkit'
 )

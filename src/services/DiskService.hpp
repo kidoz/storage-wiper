@@ -1,6 +1,6 @@
 #pragma once
 
-#include "interfaces/IDiskService.hpp"
+#include "services/IDiskService.hpp"
 
 class DiskService : public IDiskService {
 public:

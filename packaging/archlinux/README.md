@@ -45,6 +45,7 @@ makepkg --printsrcinfo > .SRCINFO
 
 **Runtime:**
 - gtk4
+- gtkmm-4.0
 - libadwaita
 - polkit (for privilege elevation)
 

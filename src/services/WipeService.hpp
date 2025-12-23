@@ -1,6 +1,6 @@
 #pragma once
 
-#include "interfaces/IWipeService.hpp"
+#include "services/IWipeService.hpp"
 #include <atomic>
 #include <chrono>
 #include <mutex>

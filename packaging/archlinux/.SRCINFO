@@ -8,6 +8,7 @@ pkgbase = storage-wiper
 	makedepends = meson
 	makedepends = ninja
 	depends = gtk4
+	depends = gtkmm-4.0
 	depends = libadwaita
 	depends = polkit
 	source = storage-wiper-1.0.0.tar.gz

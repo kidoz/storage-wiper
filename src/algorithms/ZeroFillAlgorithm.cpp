@@ -1,5 +1,5 @@
 #include "algorithms/ZeroFillAlgorithm.hpp"
-#include "interfaces/IWipeService.hpp"
+#include "models/WipeTypes.hpp"
 #include <vector>
 #include <unistd.h>
 #include <algorithm>

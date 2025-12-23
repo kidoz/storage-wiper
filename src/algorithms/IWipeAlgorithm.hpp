@@ -5,14 +5,11 @@
 
 #pragma once
 
-#include <cstdint>
-#include <functional>
-#include <string>
-#include <atomic>
+#include "models/WipeTypes.hpp"
 
-// Forward declarations - actual definitions in IWipeService.hpp
-struct WipeProgress;
-using ProgressCallback = std::function<void(const WipeProgress&)>;
+#include <atomic>
+#include <cstdint>
+#include <string>
 
 /**
  * @class IWipeAlgorithm

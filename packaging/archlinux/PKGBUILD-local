@@ -10,6 +10,7 @@ url='https://github.com/kidoz/storage-wiper'
 license=('MIT')
 depends=(
   'gtk4'
+  'gtkmm-4.0'
   'libadwaita'
   'polkit'
 )
@@ -22,12 +23,17 @@ makedepends=(
 source=()
 sha256sums=()
 
+# Project root is two directories up from packaging/archlinux
+_projectdir="${startdir}/../.."
+
 prepare() {
   # Copy source from parent project directory
-  cp -r "$(dirname "$(pwd)")/../.." "$srcdir/$pkgname-$pkgver"
+  cp -r "$_projectdir" "$srcdir/$pkgname-$pkgver"
 
   # Clean any existing build artifacts
   rm -rf "$srcdir/$pkgname-$pkgver/builddir"
+  rm -rf "$srcdir/$pkgname-$pkgver/packaging/archlinux/pkg"
+  rm -rf "$srcdir/$pkgname-$pkgver/packaging/archlinux/src"
 }
 
 build() {

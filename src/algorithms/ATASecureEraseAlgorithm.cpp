@@ -1,5 +1,5 @@
 #include "algorithms/ATASecureEraseAlgorithm.hpp"
-#include "interfaces/IWipeService.hpp"
+#include "models/WipeTypes.hpp"
 
 bool ATASecureEraseAlgorithm::execute([[maybe_unused]] int fd, [[maybe_unused]] uint64_t size,
                                      ProgressCallback callback,

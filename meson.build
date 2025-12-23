@@ -30,14 +30,29 @@ add_project_arguments(
 
 # Dependencies
 gtk4_dep = dependency('gtk4', version: '>=4.0', required: true)
+gtkmm_dep = dependency('gtkmm-4.0', version: '>=4.6', required: true)
 adwaita_dep = dependency('libadwaita-1', version: '>=1.0', required: true)
+
+# GNOME module for GResource compilation
+gnome = import('gnome')
+
+# Compile GResource bundle
+resources = gnome.compile_resources(
+  'storage-wiper-resources',
+  'data/resources/storage-wiper.gresource.xml',
+  source_dir: 'data/resources',
+  c_name: 'storage_wiper'
+)
 
 # Source files
 sources = files(
   'src/main.cpp',
   'src/Application.cpp',
+  'src/view_models/MainViewModel.cpp',
   'src/views/MainWindow.cpp',
-  'src/viewmodels/MainViewModel.cpp',
+  'src/views/MainWindowContent.cpp',
+  'src/views/DiskRow.cpp',
+  'src/views/AlgorithmRow.cpp',
   'src/services/DiskService.cpp',
   'src/services/WipeService.cpp',
   'src/algorithms/ZeroFillAlgorithm.cpp',
@@ -53,15 +68,28 @@ sources = files(
 # Header files (for IDE support)
 headers = files(
   'src/Application.hpp',
+  # Core infrastructure
+  'src/core/Command.hpp',
+  'src/core/Observable.hpp',
+  # Dependency injection
   'src/di/Container.hpp',
-  'src/mvvm/Observable.hpp',
-  'src/mvvm/Command.hpp',
-  'src/views/MainWindow.hpp',
-  'src/viewmodels/MainViewModel.hpp',
+  # Models
+  'src/models/DiskInfo.hpp',
+  'src/models/ViewTypes.hpp',
+  'src/models/WipeTypes.hpp',
+  # Services
+  'src/services/IDiskService.hpp',
+  'src/services/IWipeService.hpp',
   'src/services/DiskService.hpp',
   'src/services/WipeService.hpp',
-  'src/interfaces/IDiskService.hpp',
-  'src/interfaces/IWipeService.hpp',
+  # ViewModels
+  'src/view_models/MainViewModel.hpp',
+  # Views
+  'src/views/AlgorithmRow.hpp',
+  'src/views/DiskRow.hpp',
+  'src/views/MainWindow.hpp',
+  'src/views/MainWindowContent.hpp',
+  # Algorithms
   'src/algorithms/IWipeAlgorithm.hpp',
   'src/algorithms/ZeroFillAlgorithm.hpp',
   'src/algorithms/RandomFillAlgorithm.hpp',
@@ -71,6 +99,7 @@ headers = files(
   'src/algorithms/GutmannAlgorithm.hpp',
   'src/algorithms/GOSTAlgorithm.hpp',
   'src/algorithms/ATASecureEraseAlgorithm.hpp',
+  # Utilities
   'src/util/FileDescriptor.hpp',
   'src/util/Result.hpp',
 )
@@ -82,8 +111,9 @@ inc = include_directories('src')
 executable(
   'storage_wiper',
   sources,
+  resources,
   include_directories: inc,
-  dependencies: [gtk4_dep, adwaita_dep],
+  dependencies: [gtk4_dep, gtkmm_dep, adwaita_dep],
   install: true,
   cpp_args: []
 )
@@ -145,6 +175,7 @@ message('  Project: @0@ v@1@'.format(meson.project_name(), meson.project_version
 message('  Build type: @0@'.format(get_option('buildtype')))
 message('  C++ Standard: @0@'.format(get_option('cpp_std')))
 message('  GTK4 Version: @0@'.format(gtk4_dep.version()))
+message('  gtkmm4 Version: @0@'.format(gtkmm_dep.version()))
 message('  Adwaita Version: @0@'.format(adwaita_dep.version()))
 message('  Install prefix: @0@'.format(get_option('prefix')))
 if clang_tidy.found()
