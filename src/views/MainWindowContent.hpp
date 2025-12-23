@@ -74,6 +74,9 @@ private:
     std::queue<std::function<void()>> pending_tasks_;
     mutable std::mutex task_mutex_;
 
+    // Flag to ignore selection changes during list updates
+    bool updating_disk_list_ = false;
+
     // Subscription IDs for cleanup
     std::vector<size_t> subscriptions_;
 

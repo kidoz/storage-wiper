@@ -152,6 +152,15 @@ void MainWindowContent::bind_can_wipe() {
 void MainWindowContent::update_disk_list(const std::vector<DiskInfo>& disks) {
     if (!disk_list_) return;
 
+    // Save the selected path before clearing (clearing triggers row-selected with nullptr)
+    std::string selected_path;
+    if (view_model_) {
+        selected_path = view_model_->selected_disk_path.get();
+    }
+
+    // Set flag to ignore selection changes during list rebuild
+    updating_disk_list_ = true;
+
     // Clear existing rows
     while (auto* child = disk_list_->get_first_child()) {
         disk_list_->remove(*child);
@@ -163,21 +172,26 @@ void MainWindowContent::update_disk_list(const std::vector<DiskInfo>& disks) {
         disk_list_->append(*row);
     }
 
-    // Restore selection from ViewModel if a disk was previously selected
-    if (view_model_) {
-        const auto& selected_path = view_model_->selected_disk_path.get();
-        if (!selected_path.empty()) {
-            for (int i = 0; ; ++i) {
-                auto* row = disk_list_->get_row_at_index(i);
-                if (!row) break;
+    // Restore selection if a disk was previously selected
+    if (!selected_path.empty()) {
+        for (int i = 0; ; ++i) {
+            auto* row = disk_list_->get_row_at_index(i);
+            if (!row) break;
 
-                auto* disk_row = dynamic_cast<DiskRow*>(row);
-                if (disk_row && disk_row->get_disk_path() == selected_path) {
-                    disk_list_->select_row(*row);
-                    break;
-                }
+            auto* disk_row = dynamic_cast<DiskRow*>(row);
+            if (disk_row && disk_row->get_disk_path() == selected_path) {
+                disk_list_->select_row(*row);
+                break;
             }
         }
+    }
+
+    // Re-enable selection handling
+    updating_disk_list_ = false;
+
+    // Manually trigger selection update to ensure ViewModel state is correct
+    if (!selected_path.empty() && view_model_) {
+        view_model_->select_disk(selected_path);
     }
 }
 
@@ -248,6 +262,9 @@ void MainWindowContent::update_progress_visibility(bool visible) {
 
 void MainWindowContent::on_disk_selected(Gtk::ListBoxRow* row) {
     if (!view_model_) return;
+
+    // Ignore selection changes during list updates (e.g., when clearing rows)
+    if (updating_disk_list_) return;
 
     if (row) {
         auto* disk_row = dynamic_cast<DiskRow*>(row);
