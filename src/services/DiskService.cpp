@@ -4,6 +4,10 @@
 // Standard library
 #include <algorithm>
 #include <array>
+#include <cerrno>
+#include <cctype>
+#include <cstring>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <format>
@@ -29,6 +33,14 @@ namespace rng = std::ranges;
 
 namespace {
     constexpr auto BYTES_PER_SECTOR = uint64_t{512};
+
+    auto is_partition_suffix(std::string_view suffix) noexcept -> bool {
+        if (suffix.empty()) {
+            return false;
+        }
+        const auto first = static_cast<unsigned char>(suffix.front());
+        return std::isdigit(first) || suffix.front() == 'p';
+    }
 }
 
 auto DiskService::get_available_disks() -> std::vector<DiskInfo> {
@@ -45,7 +57,7 @@ auto DiskService::get_available_disks() -> std::vector<DiskInfo> {
 
     auto is_virtual_device = [&virtual_patterns](std::string_view name) noexcept {
         return rng::any_of(virtual_patterns, [name](const char* pattern) {
-            return name.find(pattern) != std::string_view::npos;
+            return name.contains(pattern);
         });
     };
     
@@ -60,7 +72,7 @@ auto DiskService::get_available_disks() -> std::vector<DiskInfo> {
         
         const auto device_path = std::format("/dev/{}", device_name);
         
-        if (!validate_device_path(device_path)) {
+        if (auto valid = validate_device_path(device_path); !valid) {
             continue;
         }
         
@@ -72,21 +84,33 @@ auto DiskService::get_available_disks() -> std::vector<DiskInfo> {
     return disks;
 }
 
-auto DiskService::unmount_disk(const std::string& path) -> bool {
-    if (!validate_device_path(path)) {
-        return false;
+auto DiskService::unmount_disk(const std::string& path) -> std::expected<void, util::Error> {
+    if (auto valid = validate_device_path(path); !valid) {
+        return std::unexpected(valid.error());
     }
     
     // Try force unmount first, then lazy unmount as fallback
     constexpr std::array unmount_flags{MNT_FORCE, MNT_DETACH};
     
-    return rng::any_of(unmount_flags, [&path](int flags) noexcept {
-        return ::umount2(path.c_str(), flags) == 0;
+    int last_errno = 0;
+    const auto unmounted = rng::any_of(unmount_flags, [&path, &last_errno](int flags) noexcept {
+        if (::umount2(path.c_str(), flags) == 0) {
+            return true;
+        }
+        last_errno = errno;
+        return false;
     });
+
+    if (unmounted) {
+        return {};
+    }
+
+    return std::unexpected(util::Error{
+        std::format("Failed to unmount {}: {}", path, std::strerror(last_errno)), last_errno});
 }
 
 auto DiskService::is_disk_writable(const std::string& path) -> bool {
-    if (!validate_device_path(path)) {
+    if (auto valid = validate_device_path(path); !valid) {
         return false;
     }
 
@@ -94,21 +118,26 @@ auto DiskService::is_disk_writable(const std::string& path) -> bool {
     return fd.is_valid();
 }
 
-auto DiskService::get_disk_size(const std::string& path) -> uint64_t {
-    if (!validate_device_path(path)) {
-        return 0;
+auto DiskService::get_disk_size(const std::string& path) -> std::expected<uint64_t, util::Error> {
+    if (auto valid = validate_device_path(path); !valid) {
+        return std::unexpected(valid.error());
     }
 
     const util::FileDescriptor fd{::open(path.c_str(), O_RDONLY)};
     if (!fd) {
-        return 0;
+        return std::unexpected(util::Error{
+            std::format("Failed to open device: {}", std::strerror(errno)), errno});
     }
 
     uint64_t size{};
-    return (::ioctl(fd.get(), BLKGETSIZE64, &size) == 0) ? size : 0;
+    if (::ioctl(fd.get(), BLKGETSIZE64, &size) != 0) {
+        return std::unexpected(util::Error{
+            std::format("Failed to query device size: {}", std::strerror(errno)), errno});
+    }
+    return size;
 }
 
-auto DiskService::validate_device_path(const std::string& path) -> bool {
+auto DiskService::validate_device_path(const std::string& path) -> std::expected<void, util::Error> {
     // Whitelist of allowed device prefixes (physical disks only)
     // Explicitly excludes /dev/mapper/* and /dev/dm-* (LVM logical volumes)
     // Physical disks that are LVM Physical Volumes (PVs) ARE allowed
@@ -127,12 +156,19 @@ auto DiskService::validate_device_path(const std::string& path) -> bool {
         });
 
     if (!has_valid_prefix) {
-        return false;
+        return std::unexpected(util::Error{"Device path prefix not allowed"});
     }
 
     // Verify it's actually a block device
     struct stat st{};
-    return (::stat(path.c_str(), &st) == 0) && S_ISBLK(st.st_mode);
+    if (::stat(path.c_str(), &st) != 0) {
+        return std::unexpected(util::Error{
+            std::format("Failed to stat device path: {}", std::strerror(errno)), errno});
+    }
+    if (!S_ISBLK(st.st_mode)) {
+        return std::unexpected(util::Error{"Device path is not a block device"});
+    }
+    return {};
 }
 
 auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
@@ -201,7 +237,9 @@ auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
         while (auto* entry = ::getmntent(mtab.get())) {
             const std::string_view mount_device{entry->mnt_fsname};
             
-            if (mount_device == device_path || mount_device.find(device_name) != std::string_view::npos) {
+            if (mount_device == device_path ||
+                (mount_device.starts_with(device_path) &&
+                 is_partition_suffix(mount_device.substr(device_path.size())))) {
                 info.is_mounted = true;
                 info.mount_point = entry->mnt_dir;
                 info.filesystem = entry->mnt_type;

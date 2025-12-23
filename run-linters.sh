@@ -30,7 +30,7 @@ run_clang_tidy() {
     # Run clang-tidy on all source files
     find src -name "*.cpp" | while read -r file; do
         echo "Checking $file..."
-        clang-tidy "$file" -p . -- -std=c++20 || true
+        clang-tidy "$file" -p . -- -std=c++23 || true
     done
 
     echo -e "${GREEN}clang-tidy analysis complete!${NC}"
@@ -46,7 +46,7 @@ run_cppcheck() {
 
     cppcheck \
         --enable=warning,style,performance,portability \
-        --std=c++20 \
+        --std=c++23 \
         --inline-suppr \
         --suppressions-list=.cppcheck-suppressions \
         --suppress=missingIncludeSystem \

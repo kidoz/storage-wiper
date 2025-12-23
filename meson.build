@@ -4,7 +4,7 @@ project(
   version: '1.0.0',
   license: 'MIT',
   default_options: [
-    'cpp_std=c++20',
+    'cpp_std=c++23',
     'warning_level=3',      # Enables -Wall -Wextra
     'werror=true',          # Treat warnings as errors
     'buildtype=release',
@@ -72,6 +72,7 @@ headers = files(
   'src/algorithms/GOSTAlgorithm.hpp',
   'src/algorithms/ATASecureEraseAlgorithm.hpp',
   'src/util/FileDescriptor.hpp',
+  'src/util/Result.hpp',
 )
 
 # Include directories
@@ -131,7 +132,7 @@ if cppcheck.found() and get_option('enable_cppcheck')
       '--enable=warning,style,performance,portability',
       '--inline-suppr',
       '--suppressions-list=@0@/.cppcheck-suppressions'.format(meson.project_source_root()),
-      '--std=c++20',
+      '--std=c++23',
       '--project=@0@/compile_commands.json'.format(meson.project_build_root()),
     ]
   )

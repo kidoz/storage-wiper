@@ -8,7 +8,10 @@
 
 #pragma once
 
+#include "util/Result.hpp"
+
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <string>
 #include <vector>
@@ -54,7 +57,7 @@ public:
      * @param path Device path to unmount
      * @return True if successful, false otherwise
      */
-    virtual auto unmount_disk(const std::string& path) -> bool = 0;
+    virtual auto unmount_disk(const std::string& path) -> std::expected<void, util::Error> = 0;
 
     /**
      * @brief Check if disk is writable
@@ -68,12 +71,12 @@ public:
      * @param path Device path
      * @return Size in bytes, 0 on error
      */
-    [[nodiscard]] virtual auto get_disk_size(const std::string& path) -> uint64_t = 0;
+    [[nodiscard]] virtual auto get_disk_size(const std::string& path) -> std::expected<uint64_t, util::Error> = 0;
 
     /**
      * @brief Validate device path for security
      * @param path Device path to validate
      * @return True if path is valid and safe, false otherwise
      */
-    [[nodiscard]] virtual auto validate_device_path(const std::string& path) -> bool = 0;
+    [[nodiscard]] virtual auto validate_device_path(const std::string& path) -> std::expected<void, util::Error> = 0;
 };

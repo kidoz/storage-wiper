@@ -127,9 +127,10 @@ void MainViewModel::load_algorithms() {
 
 void MainViewModel::update_can_wipe() {
     const auto& path = selected_disk_path.get();
+    const auto valid = disk_service_->validate_device_path(path);
     bool can = !path.empty() &&
                !is_wipe_in_progress.get() &&
-               disk_service_->validate_device_path(path) &&
+               valid &&
                disk_service_->is_disk_writable(path);
 
     if (can) {
@@ -153,9 +154,13 @@ void MainViewModel::start_wipe() {
         return;
     }
 
-    if (!disk_service_->validate_device_path(path)) {
+    if (auto valid_path = disk_service_->validate_device_path(path); !valid_path) {
+        auto message = std::string{"Selected device path is not valid or safe to wipe."};
+        if (!valid_path.error().message.empty()) {
+            message += "\n\nError: " + valid_path.error().message;
+        }
         show_message(MessageInfo::Type::ERROR, "Invalid Device",
-                     "Selected device path is not valid or safe to wipe.");
+                     message);
         return;
     }
 
