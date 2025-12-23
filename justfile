@@ -2,6 +2,7 @@
 # Usage: just <command>
 
 # Default recipe - show available commands
+build_dir := "build"
 default:
     @just --list
 
@@ -9,45 +10,47 @@ default:
 
 # Configure and build (release)
 build:
-    @if [ ! -d builddir ]; then meson setup builddir; fi
-    meson compile -C builddir
+    @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}}; fi
+    @meson setup {{build_dir}} --reconfigure -Dbuildtype=release >/dev/null
+    meson compile -C {{build_dir}}
 
 # Configure and build (debug)
 build-debug:
-    @if [ ! -d builddir-debug ]; then meson setup builddir-debug -Dbuildtype=debug; fi
-    meson compile -C builddir-debug
+    @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}}; fi
+    @meson setup {{build_dir}} --reconfigure -Dbuildtype=debug >/dev/null
+    meson compile -C {{build_dir}}
 
 # Clean build directory and rebuild
 rebuild:
-    rm -rf builddir
-    meson setup builddir
-    meson compile -C builddir
+    rm -rf {{build_dir}}
+    meson setup {{build_dir}}
+    meson compile -C {{build_dir}}
 
 # Clean all build artifacts
 clean:
-    rm -rf builddir builddir-debug
+    rm -rf {{build_dir}}
 
 # === Run Commands ===
 
 # Run application (requires root for disk access, preserves DBUS session)
 run: build
-    sudo -E DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" ./builddir/storage_wiper
+    sudo -E DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" ./{{build_dir}}/storage_wiper
 
 # Run debug build
 run-debug: build-debug
-    sudo -E DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" ./builddir-debug/storage_wiper
+    sudo -E DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" ./{{build_dir}}/storage_wiper
 
 # Run with GTK inspector enabled
 run-inspect: build
-    GTK_DEBUG=interactive sudo -E DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" ./builddir/storage_wiper
+    GTK_DEBUG=interactive sudo -E DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" ./{{build_dir}}/storage_wiper
 
 # Run without root (limited functionality - can view disks but not wipe)
 run-noroot: build
-    ./builddir/storage_wiper
+    ./{{build_dir}}/storage_wiper
 
 # Run via pkexec (production-like, shows auth dialog)
 run-pkexec: build
-    pkexec ./builddir/storage_wiper
+    pkexec ./{{build_dir}}/storage_wiper
 
 # === Development Commands ===
 
@@ -57,17 +60,17 @@ watch:
 
 # Check for compiler warnings
 check: build
-    meson compile -C builddir 2>&1 | grep -E "warning:|error:" || echo "No warnings or errors"
+    meson compile -C {{build_dir}} 2>&1 | grep -E "warning:|error:" || echo "No warnings or errors"
 
 # Run clang-tidy (if available)
 lint:
-    @if [ ! -d builddir ]; then meson setup builddir -Denable_clang_tidy=true; fi
-    meson compile -C builddir clang-tidy || echo "clang-tidy not available"
+    @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}} -Denable_clang_tidy=true; fi
+    meson compile -C {{build_dir}} clang-tidy || echo "clang-tidy not available"
 
 # Run cppcheck (if available)
 cppcheck:
-    @if [ ! -d builddir ]; then meson setup builddir -Denable_cppcheck=true; fi
-    meson compile -C builddir cppcheck || echo "cppcheck not available"
+    @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}} -Denable_cppcheck=true; fi
+    meson compile -C {{build_dir}} cppcheck || echo "cppcheck not available"
 
 # Format code (requires clang-format)
 format:
@@ -77,11 +80,11 @@ format:
 
 # Install to system (requires root)
 install: build
-    sudo meson install -C builddir
+    sudo meson install -C {{build_dir}}
 
 # Uninstall from system
 uninstall:
-    sudo ninja -C builddir uninstall 2>/dev/null || echo "Nothing to uninstall"
+    sudo ninja -C {{build_dir}} uninstall 2>/dev/null || echo "Nothing to uninstall"
 
 # === Packaging Commands ===
 
@@ -98,7 +101,7 @@ pkg-arch-install: pkg-arch
 # Show build configuration
 info:
     @echo "=== Meson Configuration ==="
-    @meson configure builddir 2>/dev/null || echo "Run 'just build' first"
+    @meson configure {{build_dir}} 2>/dev/null || echo "Run 'just build' first"
 
 # Show project structure
 tree:
