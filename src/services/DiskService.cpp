@@ -89,25 +89,65 @@ auto DiskService::unmount_disk(const std::string& path) -> std::expected<void, u
     if (auto valid = validate_device_path(path); !valid) {
         return std::unexpected(valid.error());
     }
-    
-    // Try force unmount first, then lazy unmount as fallback
-    constexpr std::array unmount_flags{MNT_FORCE, MNT_DETACH};
-    
-    int last_errno = 0;
-    const auto unmounted = rng::any_of(unmount_flags, [&path, &last_errno](int flags) noexcept {
-        if (::umount2(path.c_str(), flags) == 0) {
-            return true;
-        }
-        last_errno = errno;
-        return false;
-    });
 
-    if (unmounted) {
+    // Collect all mount points for this device and its partitions
+    std::vector<std::string> mount_points;
+
+    if (auto mtab_deleter = [](FILE* f) { if (f) ::endmntent(f); };
+        std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"), mtab_deleter}) {
+
+        while (auto* entry = ::getmntent(mtab.get())) {
+            const std::string_view mount_device{entry->mnt_fsname};
+
+            // Match device itself or any partition (e.g., /dev/sda, /dev/sda1, /dev/sda2)
+            if (mount_device == path ||
+                (mount_device.starts_with(path) && mount_device.size() > path.size())) {
+                mount_points.push_back(entry->mnt_dir);
+            }
+        }
+    }
+
+    if (mount_points.empty()) {
+        // Nothing mounted - success
         return {};
     }
 
-    return std::unexpected(util::Error{
-        std::format("Failed to unmount {}: {}", path, std::strerror(last_errno)), last_errno});
+    // Unmount in reverse order (nested mounts)
+    std::ranges::reverse(mount_points);
+
+    std::string failed_mount;
+    int last_errno = 0;
+
+    for (const auto& mount_point : mount_points) {
+        // Try lazy unmount (MNT_DETACH) - most reliable for busy filesystems
+        if (::umount2(mount_point.c_str(), MNT_DETACH) != 0) {
+            // Try force unmount as fallback
+            if (::umount2(mount_point.c_str(), MNT_FORCE) != 0) {
+                last_errno = errno;
+                failed_mount = mount_point;
+                // Continue trying other mount points
+            }
+        }
+    }
+
+    // Check if anything is still mounted
+    if (auto mtab_deleter = [](FILE* f) { if (f) ::endmntent(f); };
+        std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"), mtab_deleter}) {
+
+        while (auto* entry = ::getmntent(mtab.get())) {
+            const std::string_view mount_device{entry->mnt_fsname};
+
+            if (mount_device == path ||
+                (mount_device.starts_with(path) && mount_device.size() > path.size())) {
+                // Still mounted
+                const std::string error_str = last_errno ? std::strerror(last_errno) : "Device busy";
+                return std::unexpected(util::Error{
+                    std::format("Failed to unmount {}: {}", entry->mnt_dir, error_str), last_errno});
+            }
+        }
+    }
+
+    return {};
 }
 
 auto DiskService::is_disk_writable(const std::string& path) -> bool {

@@ -175,7 +175,7 @@ void MainViewModel::start_wipe() {
             mounted_message << " (via LVM)";
         }
         mounted_message << ".\n\n";
-        mounted_message << "⚠️ Do you want to unmount the disk and proceed with wiping?\n\n";
+        mounted_message << "Do you want to unmount the disk and proceed with wiping?\n\n";
         mounted_message << "Algorithm: " << wipe_service_->get_algorithm_name(selected_algorithm.get()) << "\n";
         mounted_message << "WARNING: This will permanently destroy ALL data!";
 
