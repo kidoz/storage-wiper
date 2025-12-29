@@ -280,10 +280,39 @@ auto DBusClient::get_disk_size(const std::string& path)
     return std::unexpected(util::Error{"Disk not found"});
 }
 
-auto DBusClient::unmount_disk(const std::string& /*path*/)
+auto DBusClient::unmount_disk(const std::string& path)
     -> std::expected<void, util::Error> {
-    // Not implemented via D-Bus helper for now
-    return std::unexpected(util::Error{"Unmount not supported via D-Bus"});
+    if (!proxy_) {
+        return std::unexpected(util::Error{"Not connected to helper service"});
+    }
+
+    GError* error = nullptr;
+    GVariant* result = g_dbus_proxy_call_sync(
+        proxy_,
+        "UnmountDevice",
+        g_variant_new("(s)", path.c_str()),
+        G_DBUS_CALL_FLAGS_NONE,
+        DBUS_TIMEOUT_MS,
+        nullptr,
+        &error
+    );
+
+    if (!result) {
+        auto msg = std::string(error ? error->message : "unknown error");
+        g_clear_error(&error);
+        return std::unexpected(util::Error{msg});
+    }
+
+    gboolean success = FALSE;
+    const gchar* error_message = nullptr;
+    g_variant_get(result, "(b&s)", &success, &error_message);
+    g_variant_unref(result);
+
+    if (!success) {
+        return std::unexpected(util::Error{error_message ? error_message : "Unmount failed"});
+    }
+
+    return {};
 }
 
 void DBusClient::load_algorithms() {

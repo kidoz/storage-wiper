@@ -128,18 +128,10 @@ void MainViewModel::load_algorithms() {
 void MainViewModel::update_can_wipe() {
     const auto& path = selected_disk_path.get();
     const auto valid = disk_service_->validate_device_path(path);
+    // Allow wipe for mounted disks - we'll prompt to unmount in start_wipe()
     bool can = !path.empty() &&
                !is_wipe_in_progress.get() &&
-               valid &&
-               disk_service_->is_disk_writable(path);
-
-    if (can) {
-        if (auto disk_info = find_disk_info(path)) {
-            if (disk_info->is_mounted) {
-                can = false;
-            }
-        }
-    }
+               valid;
 
     can_wipe.set(can);
     wipe_command->raise_can_execute_changed();
@@ -170,23 +162,33 @@ void MainViewModel::start_wipe() {
         return;
     }
 
-    if (auto disk_info = find_disk_info(path)) {
-        if (disk_info->is_mounted) {
-            std::ostringstream mounted_message;
-            mounted_message << "The selected device is currently mounted";
-            if (!disk_info->mount_point.empty()) {
-                mounted_message << " at '" << disk_info->mount_point << "'";
-            }
-            mounted_message << ".\n\n";
-            mounted_message << "Please unmount the disk before wiping (for example, using your file "
-                               "manager or `sudo umount " << path << "`) and then refresh the disk list.";
+    auto disk_info = find_disk_info(path);
 
-            show_message(MessageInfo::Type::ERROR, "Disk Is Mounted", mounted_message.str());
-            return;
+    // Check if disk is mounted - offer to unmount first
+    if (disk_info && disk_info->is_mounted) {
+        std::ostringstream mounted_message;
+        mounted_message << "The selected device is currently mounted";
+        if (!disk_info->mount_point.empty()) {
+            mounted_message << " at '" << disk_info->mount_point << "'";
         }
+        if (disk_info->is_lvm_pv) {
+            mounted_message << " (via LVM)";
+        }
+        mounted_message << ".\n\n";
+        mounted_message << "⚠️ Do you want to unmount the disk and proceed with wiping?\n\n";
+        mounted_message << "Algorithm: " << wipe_service_->get_algorithm_name(selected_algorithm.get()) << "\n";
+        mounted_message << "WARNING: This will permanently destroy ALL data!";
+
+        show_message(MessageInfo::Type::CONFIRMATION, "Unmount and Wipe?", mounted_message.str(),
+                     [this, path](bool confirmed) {
+                         if (confirmed) {
+                             unmount_and_wipe(path);
+                         }
+                     });
+        return;
     }
 
-    // Show confirmation dialog
+    // Show standard confirmation dialog for unmounted disks
     std::ostringstream message;
     message << "Are you sure you want to wipe '" << path << "'?\n\n";
     message << "Algorithm: " << wipe_service_->get_algorithm_name(selected_algorithm.get()) << "\n";
@@ -222,6 +224,41 @@ void MainViewModel::confirm_wipe() {
         show_message(MessageInfo::Type::ERROR, "Failed to Start",
                      "Could not start wipe operation. Another operation may be in progress.");
     }
+}
+
+void MainViewModel::unmount_and_wipe(const std::string& path) {
+    // Try to unmount the disk first
+    auto unmount_result = disk_service_->unmount_disk(path);
+
+    if (!unmount_result) {
+        std::ostringstream error_msg;
+        error_msg << "Failed to unmount the disk.\n\n";
+        error_msg << "Error: " << unmount_result.error().message << "\n\n";
+        error_msg << "Please close any applications using the disk and try again,\n";
+        error_msg << "or manually unmount using: sudo umount " << path;
+
+        show_message(MessageInfo::Type::ERROR, "Unmount Failed", error_msg.str());
+        return;
+    }
+
+    // Refresh disk list to update mount status
+    load_disks();
+
+    // Proceed with wipe confirmation
+    std::ostringstream message;
+    message << "Disk unmounted successfully!\n\n";
+    message << "Are you sure you want to wipe '" << path << "'?\n\n";
+    message << "Algorithm: " << wipe_service_->get_algorithm_name(selected_algorithm.get()) << "\n";
+    message << "Description: " << wipe_service_->get_algorithm_description(selected_algorithm.get()) << "\n\n";
+    message << "WARNING: This will permanently destroy ALL data on the disk!\n";
+    message << "This action cannot be undone!";
+
+    show_message(MessageInfo::Type::CONFIRMATION, "Confirm Disk Wipe", message.str(),
+                 [this](bool confirmed) {
+                     if (confirmed) {
+                         confirm_wipe();
+                     }
+                 });
 }
 
 void MainViewModel::handle_wipe_progress(const WipeProgress& progress) {

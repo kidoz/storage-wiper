@@ -138,6 +138,7 @@ private:
     void load_algorithms();
     void update_can_wipe();
     void start_wipe();
+    void unmount_and_wipe(const std::string& path);
     void handle_wipe_progress(const WipeProgress& progress);
     void handle_wipe_completion(bool success, const std::string& error_message = "");
     void show_message(MessageInfo::Type type, const std::string& title, const std::string& message,

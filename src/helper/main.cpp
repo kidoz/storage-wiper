@@ -57,6 +57,11 @@ const char* introspection_xml = R"XML(
       <arg name="path" type="s" direction="in"/>
       <arg name="writable" type="b" direction="out"/>
     </method>
+    <method name="UnmountDevice">
+      <arg name="path" type="s" direction="in"/>
+      <arg name="success" type="b" direction="out"/>
+      <arg name="error_message" type="s" direction="out"/>
+    </method>
     <method name="GetAlgorithms">
       <arg name="algorithms" type="a(ussi)" direction="out"/>
     </method>
@@ -245,6 +250,29 @@ void handle_is_device_writable(GDBusMethodInvocation* invocation,
 }
 
 /**
+ * Handle UnmountDevice method call
+ */
+void handle_unmount_device(GDBusMethodInvocation* invocation,
+                            GVariant* parameters) {
+    // Use wipe-disk authorization since unmount is a precursor to wiping
+    if (!check_authorization(invocation, POLKIT_ACTION_WIPE_DISK)) {
+        return;
+    }
+
+    const char* path = nullptr;
+    g_variant_get(parameters, "(&s)", &path);
+
+    auto result = g_disk_service->unmount_disk(path ? path : "");
+
+    g_dbus_method_invocation_return_value(invocation,
+        g_variant_new("(bs)",
+            result.has_value() ? TRUE : FALSE,
+            result.has_value() ? "" : result.error().message.c_str()
+        )
+    );
+}
+
+/**
  * Handle GetAlgorithms method call
  */
 void handle_get_algorithms(GDBusMethodInvocation* invocation) {
@@ -360,6 +388,8 @@ void handle_method_call(GDBusConnection* /*connection*/,
         handle_validate_device_path(invocation, parameters);
     } else if (g_strcmp0(method_name, "IsDeviceWritable") == 0) {
         handle_is_device_writable(invocation, parameters);
+    } else if (g_strcmp0(method_name, "UnmountDevice") == 0) {
+        handle_unmount_device(invocation, parameters);
     } else if (g_strcmp0(method_name, "GetAlgorithms") == 0) {
         handle_get_algorithms(invocation);
     } else if (g_strcmp0(method_name, "StartWipe") == 0) {
