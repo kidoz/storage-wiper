@@ -39,12 +39,16 @@ void DiskRow::populate_from_disk_info() {
     auto name_markup = std::format("<b>{}</b> - {}", disk_.path, disk_.model);
     name_label_->set_markup(name_markup);
 
-    // Build info text: size, type, mount status
+    // Build info text: size, type, LVM/mount status
     auto size_gb = static_cast<double>(disk_.size_bytes) / (1024.0 * 1024.0 * 1024.0);
-    auto info_text = std::format("{} GB", static_cast<int>(size_gb));
+    auto info_text = std::format("{:.1f} GB", size_gb);
 
     if (disk_.is_ssd) {
         info_text += " (SSD)";
+    }
+
+    if (disk_.is_lvm_pv) {
+        info_text += " [LVM]";
     }
 
     if (disk_.is_mounted) {
@@ -53,6 +57,6 @@ void DiskRow::populate_from_disk_info() {
 
     info_label_->set_text(info_text);
 
-    // Show/hide mounted indicator
+    // Show/hide mounted indicator (also show if LVM volume is mounted)
     mounted_label_->set_visible(disk_.is_mounted);
 }

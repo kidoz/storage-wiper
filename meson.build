@@ -32,6 +32,8 @@ add_project_arguments(
 gtk4_dep = dependency('gtk4', version: '>=4.0', required: true)
 gtkmm_dep = dependency('gtkmm-4.0', version: '>=4.6', required: true)
 adwaita_dep = dependency('libadwaita-1', version: '>=1.0', required: true)
+polkit_dep = dependency('polkit-gobject-1', required: true)
+gio_dep = dependency('gio-2.0', required: true)
 
 # GNOME module for GResource compilation
 gnome = import('gnome')
@@ -44,7 +46,7 @@ resources = gnome.compile_resources(
   c_name: 'storage_wiper'
 )
 
-# Source files
+# Source files for main GUI application
 sources = files(
   'src/main.cpp',
   'src/Application.cpp',
@@ -53,6 +55,11 @@ sources = files(
   'src/views/MainWindowContent.cpp',
   'src/views/DiskRow.cpp',
   'src/views/AlgorithmRow.cpp',
+  'src/services/DBusClient.cpp',
+)
+
+# Source files shared between GUI and helper (services/algorithms)
+shared_sources = files(
   'src/services/DiskService.cpp',
   'src/services/WipeService.cpp',
   'src/algorithms/ZeroFillAlgorithm.cpp',
@@ -63,6 +70,11 @@ sources = files(
   'src/algorithms/GutmannAlgorithm.cpp',
   'src/algorithms/GOSTAlgorithm.cpp',
   'src/algorithms/ATASecureEraseAlgorithm.cpp',
+)
+
+# Source files for privileged helper
+helper_sources = files(
+  'src/helper/main.cpp',
 )
 
 # Header files (for IDE support)
@@ -82,6 +94,7 @@ headers = files(
   'src/services/IWipeService.hpp',
   'src/services/DiskService.hpp',
   'src/services/WipeService.hpp',
+  'src/services/DBusClient.hpp',
   # ViewModels
   'src/view_models/MainViewModel.hpp',
   # Views
@@ -107,20 +120,33 @@ headers = files(
 # Include directories
 inc = include_directories('src')
 
-# Executable
+# Main GUI application
 executable(
   'storage_wiper',
   sources,
+  shared_sources,
   resources,
   include_directories: inc,
-  dependencies: [gtk4_dep, gtkmm_dep, adwaita_dep],
+  dependencies: [gtk4_dep, gtkmm_dep, adwaita_dep, gio_dep],
   install: true,
+  cpp_args: []
+)
+
+# Privileged helper daemon
+executable(
+  'storage-wiper-helper',
+  helper_sources,
+  shared_sources,
+  include_directories: inc,
+  dependencies: [gio_dep, polkit_dep],
+  install: true,
+  install_dir: get_option('libdir') / 'storage-wiper',
   cpp_args: []
 )
 
 # Desktop file installation
 install_data(
-  'data/com.github.storage-wiper.desktop',
+  'data/su.kidoz.storage_wiper.desktop',
   install_dir: get_option('datadir') / 'applications'
 )
 
@@ -130,10 +156,28 @@ install_data(
   install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps'
 )
 
-# PolicyKit policy installation (for pkexec privilege elevation)
+# PolicyKit policy installation (for D-Bus helper authorization)
 install_data(
-  'data/com.github.storage-wiper.policy',
+  'data/su.kidoz.storage_wiper.policy',
   install_dir: get_option('datadir') / 'polkit-1/actions'
+)
+
+# D-Bus system service file (for on-demand helper activation)
+# Use configure_file to substitute the correct libdir path
+configure_file(
+  input: 'data/dbus/su.kidoz.storage_wiper.Helper.service.in',
+  output: 'su.kidoz.storage_wiper.Helper.service',
+  configuration: {
+    'LIBDIR': get_option('prefix') / get_option('libdir')
+  },
+  install: true,
+  install_dir: get_option('datadir') / 'dbus-1/system-services'
+)
+
+# D-Bus system bus configuration (allows service to use system bus)
+install_data(
+  'data/dbus/su.kidoz.storage_wiper.Helper.conf',
+  install_dir: get_option('datadir') / 'dbus-1/system.d'
 )
 
 # Optional: clang-tidy support

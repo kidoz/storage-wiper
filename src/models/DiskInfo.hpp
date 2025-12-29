@@ -20,8 +20,9 @@ struct DiskInfo {
     bool is_removable = false; ///< Whether device is removable
     bool is_ssd = false;       ///< Whether device is an SSD
     std::string filesystem;    ///< Filesystem type if mounted
-    bool is_mounted = false;   ///< Mount status
+    bool is_mounted = false;   ///< Mount status (direct or via LVM/dm)
     std::string mount_point;   ///< Mount point path
+    bool is_lvm_pv = false;    ///< Whether device is an LVM Physical Volume or has dm holders
 
     auto operator==(const DiskInfo&) const -> bool = default;
 };

@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=su.kidoz.storage_wiper.Helper
+Exec=@LIBDIR@/storage-wiper/storage-wiper-helper
+User=root

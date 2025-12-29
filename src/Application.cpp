@@ -1,8 +1,7 @@
 #include "Application.hpp"
-#include "services/DiskService.hpp"
+#include "services/DBusClient.hpp"
 #include "services/IDiskService.hpp"
 #include "services/IWipeService.hpp"
-#include "services/WipeService.hpp"
 #include "view_models/MainViewModel.hpp"
 #include "views/MainWindow.hpp"
 #include <gtkmm.h>
@@ -13,7 +12,7 @@ StorageWiperApp::StorageWiperApp()
     : app_(nullptr)
     , main_window_(nullptr) {
 
-    app_ = gtk_application_new("org.storage.wiper", G_APPLICATION_DEFAULT_FLAGS);
+    app_ = gtk_application_new("su.kidoz.storage_wiper", G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect(app_, "activate", G_CALLBACK(on_activate), this);
     g_signal_connect(app_, "startup", G_CALLBACK(on_startup), this);
 }
@@ -68,9 +67,19 @@ void StorageWiperApp::on_activate(GtkApplication* app, gpointer user_data) {
 }
 
 void StorageWiperApp::configure_services() {
-    // Register services in DI container
-    container_.register_type<IDiskService, DiskService>(di::Lifetime::SINGLETON);
-    container_.register_type<IWipeService, WipeService>(di::Lifetime::SINGLETON);
+    // Create DBusClient and connect to the helper service
+    auto dbus_client = std::make_shared<DBusClient>();
+    if (!dbus_client->connect()) {
+        throw std::runtime_error(
+            "Failed to connect to storage-wiper-helper D-Bus service.\n"
+            "Make sure the service is installed and running.");
+    }
+
+    // Register DBusClient as both disk and wipe service (it implements both interfaces)
+    container_.register_instance<IDiskService>(
+        std::static_pointer_cast<IDiskService>(dbus_client));
+    container_.register_instance<IWipeService>(
+        std::static_pointer_cast<IWipeService>(dbus_client));
 }
 
 void StorageWiperApp::setup_main_window() {

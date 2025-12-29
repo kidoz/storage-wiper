@@ -1,0 +1,106 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+    "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node name="/su/kidoz/storage_wiper/Helper">
+  <interface name="su.kidoz.storage_wiper.Helper">
+    <!--
+      GetDisks:
+      Returns list of available block devices for wiping.
+      Each disk is returned as a struct with device info.
+
+      Authorization: su.kidoz.storage_wiper.list-disks
+    -->
+    <method name="GetDisks">
+      <arg name="disks" type="a(sssxbbsbs)" direction="out"/>
+      <!-- Array of structs:
+           s: path (/dev/sda)
+           s: model
+           s: serial
+           x: size_bytes (int64)
+           b: is_removable
+           b: is_ssd
+           s: filesystem
+           b: is_mounted
+           s: mount_point
+      -->
+    </method>
+
+    <!--
+      ValidateDevicePath:
+      Check if a device path is valid and safe to wipe.
+
+      Authorization: none (informational only)
+    -->
+    <method name="ValidateDevicePath">
+      <arg name="path" type="s" direction="in"/>
+      <arg name="valid" type="b" direction="out"/>
+      <arg name="error_message" type="s" direction="out"/>
+    </method>
+
+    <!--
+      IsDeviceWritable:
+      Check if we can write to the device.
+
+      Authorization: su.kidoz.storage_wiper.list-disks
+    -->
+    <method name="IsDeviceWritable">
+      <arg name="path" type="s" direction="in"/>
+      <arg name="writable" type="b" direction="out"/>
+    </method>
+
+    <!--
+      GetAlgorithms:
+      Returns list of available wipe algorithms.
+
+      Authorization: none (informational only)
+    -->
+    <method name="GetAlgorithms">
+      <arg name="algorithms" type="a(ussi)" direction="out"/>
+      <!-- Array of structs:
+           u: algorithm_id (uint32)
+           s: name
+           s: description
+           i: pass_count
+      -->
+    </method>
+
+    <!--
+      StartWipe:
+      Begin wiping a disk with the specified algorithm.
+      Progress is reported via the WipeProgress signal.
+
+      Authorization: su.kidoz.storage_wiper.wipe-disk
+    -->
+    <method name="StartWipe">
+      <arg name="device_path" type="s" direction="in"/>
+      <arg name="algorithm_id" type="u" direction="in"/>
+      <arg name="started" type="b" direction="out"/>
+      <arg name="error_message" type="s" direction="out"/>
+    </method>
+
+    <!--
+      CancelWipe:
+      Cancel the current wipe operation.
+
+      Authorization: su.kidoz.storage_wiper.wipe-disk
+    -->
+    <method name="CancelWipe">
+      <arg name="cancelled" type="b" direction="out"/>
+    </method>
+
+    <!--
+      WipeProgress:
+      Signal emitted during wipe operation to report progress.
+    -->
+    <signal name="WipeProgress">
+      <arg name="device_path" type="s"/>
+      <arg name="percentage" type="d"/>
+      <arg name="current_pass" type="i"/>
+      <arg name="total_passes" type="i"/>
+      <arg name="status" type="s"/>
+      <arg name="is_complete" type="b"/>
+      <arg name="has_error" type="b"/>
+      <arg name="error_message" type="s"/>
+    </signal>
+
+  </interface>
+</node>

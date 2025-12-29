@@ -57,4 +57,4 @@ makepkg --printsrcinfo > .SRCINFO
 
 - The package installs to `/usr` prefix (Arch Linux standard)
 - Uses `arch-meson` wrapper for consistent build flags
-- PolicyKit integration enables GUI privilege elevation via `pkexec`
+- D-Bus helper with PolicyKit authorization for privilege separation

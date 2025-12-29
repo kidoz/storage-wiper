@@ -4,6 +4,7 @@
 // Standard library
 #include <algorithm>
 #include <array>
+#include <vector>
 #include <cerrno>
 #include <cctype>
 #include <cstring>
@@ -181,7 +182,8 @@ auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
         .is_ssd = false,
         .filesystem = {},
         .is_mounted = false,
-        .mount_point = {}
+        .mount_point = {},
+        .is_lvm_pv = false
     };
     
     const auto device_name = fs::path{device_path}.filename().string();
@@ -229,14 +231,44 @@ auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
     }
     
     info.is_ssd = check_if_ssd(device_path);
-    
+
+    // Collect device-mapper (dm-*) holders for this device and its partitions
+    // This detects LVM, LUKS, and other dm-based setups
+    std::vector<std::string> dm_holders;
+
+    auto collect_holders = [&dm_holders](const fs::path& holders_path) {
+        if (!fs::exists(holders_path)) {
+            return;
+        }
+        for (const auto& holder : fs::directory_iterator{holders_path}) {
+            const auto holder_name = holder.path().filename().string();
+            if (holder_name.starts_with("dm-")) {
+                dm_holders.push_back(holder_name);
+            }
+        }
+    };
+
+    // Check holders of the device itself
+    collect_holders(sys_path + "/holders");
+
+    // Also check holders of partitions (e.g., /dev/nvme0n1p1 -> dm-0)
+    for (const auto& entry : fs::directory_iterator{sys_path}) {
+        const auto part_name = entry.path().filename().string();
+        if (part_name.starts_with(device_name) && part_name != device_name) {
+            collect_holders(entry.path() / "holders");
+        }
+    }
+
+    info.is_lvm_pv = !dm_holders.empty();
+
     // Check mount status using RAII wrapper
     if (auto mtab_deleter = [](FILE* f) { if (f) ::endmntent(f); };
         std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"), mtab_deleter}) {
-        
+
         while (auto* entry = ::getmntent(mtab.get())) {
             const std::string_view mount_device{entry->mnt_fsname};
-            
+
+            // Check direct mount of device or its partitions
             if (mount_device == device_path ||
                 (mount_device.starts_with(device_path) &&
                  is_partition_suffix(mount_device.substr(device_path.size())))) {
@@ -245,9 +277,52 @@ auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
                 info.filesystem = entry->mnt_type;
                 break;
             }
+
+            // Check if any dm-* holder is mounted (LVM/LUKS)
+            for (const auto& dm_name : dm_holders) {
+                const auto dm_path = std::format("/dev/{}", dm_name);
+                if (mount_device == dm_path || mount_device.starts_with("/dev/mapper/")) {
+                    // For /dev/mapper/* entries, resolve to check if it's our dm device
+                    // by checking if the mounted device's dm name matches
+                    if (mount_device == dm_path) {
+                        info.is_mounted = true;
+                        info.mount_point = entry->mnt_dir;
+                        info.filesystem = entry->mnt_type;
+                        break;
+                    }
+                }
+            }
+            if (info.is_mounted) break;
         }
     }
-    
+
+    // If we have dm holders but couldn't match mount by dm-* path,
+    // try matching by resolving /dev/mapper/* symlinks
+    if (!info.is_mounted && !dm_holders.empty()) {
+        if (auto mtab_deleter = [](FILE* f) { if (f) ::endmntent(f); };
+            std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"), mtab_deleter}) {
+
+            while (auto* entry = ::getmntent(mtab.get())) {
+                const std::string_view mount_device{entry->mnt_fsname};
+
+                if (mount_device.starts_with("/dev/mapper/")) {
+                    // Resolve the symlink to get the actual dm-* device
+                    std::error_code ec;
+                    const auto real_path = fs::read_symlink(std::string{mount_device}, ec);
+                    if (!ec) {
+                        const auto dm_name = real_path.filename().string();
+                        if (rng::find(dm_holders, dm_name) != dm_holders.end()) {
+                            info.is_mounted = true;
+                            info.mount_point = entry->mnt_dir;
+                            info.filesystem = entry->mnt_type;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     return info;
 }
 
