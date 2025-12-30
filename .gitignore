@@ -36,3 +36,6 @@ cppcheck-build-dir/
 
 # Documentation
 *.md~
+/packaging/archlinux/pkg/
+/packaging/archlinux/src/
+/packaging/archlinux/storage-wiper/

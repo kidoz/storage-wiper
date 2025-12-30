@@ -13,6 +13,7 @@
 #include <memory>
 
 // Forward declarations
+class DBusClient;
 class MainWindow;
 class MainViewModel;
 
@@ -58,4 +59,7 @@ private:
     // MVVM components
     std::unique_ptr<MainWindow> view_;
     std::shared_ptr<MainViewModel> view_model_;
+
+    // D-Bus client (kept for lifetime management)
+    std::shared_ptr<DBusClient> dbus_client_;
 };

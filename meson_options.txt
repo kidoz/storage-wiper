@@ -9,3 +9,9 @@ option('enable_cppcheck',
   value: false,
   description: 'Enable cppcheck analysis (run: meson compile -C builddir cppcheck)'
 )
+
+option('enable_tests',
+  type: 'boolean',
+  value: false,
+  description: 'Build and enable unit tests with Google Test (run: meson test -C builddir)'
+)

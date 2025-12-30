@@ -68,18 +68,21 @@ void StorageWiperApp::on_activate(GtkApplication* app, gpointer user_data) {
 
 void StorageWiperApp::configure_services() {
     // Create DBusClient and connect to the helper service
-    auto dbus_client = std::make_shared<DBusClient>();
-    if (!dbus_client->connect()) {
-        throw std::runtime_error(
-            "Failed to connect to storage-wiper-helper D-Bus service.\n"
-            "Make sure the service is installed and running.");
+    dbus_client_ = std::make_shared<DBusClient>();
+
+    // Attempt to connect - if it fails, reconnection logic will retry automatically
+    if (!dbus_client_->connect()) {
+        std::cerr << "Initial connection to storage-wiper-helper failed. "
+                  << "Will retry automatically when service becomes available." << std::endl;
+        // Don't throw - the reconnection logic will handle it
     }
 
     // Register DBusClient as both disk and wipe service (it implements both interfaces)
     container_.register_instance<IDiskService>(
-        std::static_pointer_cast<IDiskService>(dbus_client));
+        std::static_pointer_cast<IDiskService>(dbus_client_));
     container_.register_instance<IWipeService>(
-        std::static_pointer_cast<IWipeService>(dbus_client));
+        std::static_pointer_cast<IWipeService>(dbus_client_));
+    container_.register_instance<DBusClient>(dbus_client_);
 }
 
 void StorageWiperApp::setup_main_window() {
@@ -89,6 +92,32 @@ void StorageWiperApp::setup_main_window() {
 
     // Create ViewModel with injected dependencies
     view_model_ = std::make_shared<MainViewModel>(disk_service, wipe_service);
+
+    // Set up connection state callback
+    // Use weak_ptr to avoid preventing ViewModel destruction
+    std::weak_ptr<MainViewModel> weak_vm = view_model_;
+    dbus_client_->set_connection_state_callback(
+        [weak_vm](ConnectionState state, const std::string& error) {
+            // Schedule on main thread
+            auto* data = new std::pair<std::weak_ptr<MainViewModel>,
+                                       std::pair<ConnectionState, std::string>>(
+                weak_vm, {state, error});
+
+            g_idle_add([](gpointer user_data) -> gboolean {
+                auto* args = static_cast<std::pair<std::weak_ptr<MainViewModel>,
+                                                   std::pair<ConnectionState, std::string>>*>(user_data);
+                if (auto vm = args->first.lock()) {
+                    bool connected = (args->second.first == ConnectionState::CONNECTED);
+                    vm->set_connection_state(connected, args->second.second);
+                }
+                delete args;
+                return G_SOURCE_REMOVE;
+            }, data);
+        });
+
+    // Set initial connection state
+    bool initial_connected = (dbus_client_->get_connection_state() == ConnectionState::CONNECTED);
+    view_model_->set_connection_state(initial_connected, "");
 
     // Create View
     view_ = std::make_unique<MainWindow>(main_window_);

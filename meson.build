@@ -212,6 +212,54 @@ if cppcheck.found() and get_option('enable_cppcheck')
   )
 endif
 
+# ========== Testing Configuration ==========
+if get_option('enable_tests')
+  # Google Test dependencies
+  gtest_dep = dependency('gtest', required: true)
+  gmock_dep = dependency('gmock', required: true)
+
+  # Test sources
+  test_sources = files(
+    'tests/test_main.cpp',
+    'tests/unit/di/ContainerTest.cpp',
+    'tests/unit/algorithms/ZeroFillAlgorithmTest.cpp',
+    'tests/unit/algorithms/RandomFillAlgorithmTest.cpp',
+    'tests/unit/services/WipeServiceTest.cpp',
+    'tests/unit/view_models/MainViewModelTest.cpp',
+  )
+
+  # Test include directories
+  test_inc = include_directories('src', 'tests')
+
+  # Additional sources needed for tests (not in shared_sources)
+  test_extra_sources = files(
+    'src/view_models/MainViewModel.cpp',
+  )
+
+  # Build test executable
+  test_exe = executable(
+    'storage_wiper_tests',
+    test_sources,
+    shared_sources,
+    test_extra_sources,
+    include_directories: test_inc,
+    dependencies: [gtest_dep, gmock_dep, gio_dep],
+    cpp_args: ['-DUNIT_TESTING'],
+    install: false
+  )
+
+  # Register tests with Meson's test runner
+  test('unit_tests', test_exe,
+    timeout: 300,
+    is_parallel: true,
+    env: ['GTEST_COLOR=1']
+  )
+
+  message('  Tests: enabled')
+else
+  message('  Tests: disabled (enable with -Denable_tests=true)')
+endif
+
 # Configuration summary
 message('')
 message('Configuration Summary:')

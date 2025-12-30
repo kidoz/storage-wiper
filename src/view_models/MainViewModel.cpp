@@ -41,6 +41,11 @@ MainViewModel::MainViewModel(std::shared_ptr<IDiskService> disk_service,
             wipe_command->raise_can_execute_changed();
             cancel_command->raise_can_execute_changed();
         });
+    connection_subscription_id_ = is_connected.subscribe(
+        [this](bool) {
+            update_can_wipe();
+            refresh_command->raise_can_execute_changed();
+        });
 }
 
 MainViewModel::~MainViewModel() {
@@ -57,6 +62,7 @@ void MainViewModel::cleanup() {
     // Unsubscribe from observables
     selected_disk_path.unsubscribe(selected_disk_subscription_id_);
     is_wipe_in_progress.unsubscribe(wipe_in_progress_subscription_id_);
+    is_connected.unsubscribe(connection_subscription_id_);
 
     if (is_wipe_in_progress.get()) {
         wipe_service_->cancel_current_operation();
@@ -72,6 +78,13 @@ void MainViewModel::select_algorithm(WipeAlgorithm algorithm) {
 }
 
 void MainViewModel::load_disks() {
+    // Don't try to load disks if not connected to D-Bus service
+    if (!is_connected.get()) {
+        disks.set({});
+        update_can_wipe();
+        return;
+    }
+
     try {
         auto disk_list = disk_service_->get_available_disks();
         disks.set(disk_list);
@@ -129,7 +142,9 @@ void MainViewModel::update_can_wipe() {
     const auto& path = selected_disk_path.get();
     const auto valid = disk_service_->validate_device_path(path);
     // Allow wipe for mounted disks - we'll prompt to unmount in start_wipe()
-    bool can = !path.empty() &&
+    // Also require connection to the helper service
+    bool can = is_connected.get() &&
+               !path.empty() &&
                !is_wipe_in_progress.get() &&
                valid;
 
@@ -324,4 +339,14 @@ auto MainViewModel::find_disk_info(const std::string& path) const -> std::option
         return *it;
     }
     return std::nullopt;
+}
+
+void MainViewModel::set_connection_state(bool connected, const std::string& error_message) {
+    is_connected.set(connected);
+    connection_error.set(error_message);
+
+    if (connected) {
+        // Refresh disk list when we reconnect
+        load_disks();
+    }
 }

@@ -163,7 +163,7 @@ void emit_wipe_progress(const WipeProgress& progress) {
         DBUS_PATH,
         DBUS_INTERFACE,
         "WipeProgress",
-        g_variant_new("(sdiiisbbs)",
+        g_variant_new("(sdiisbbs)",
             g_current_wipe_device.c_str(),
             progress.percentage,
             progress.current_pass,

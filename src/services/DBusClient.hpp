@@ -19,6 +19,19 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <random>
+
+/**
+ * @enum ConnectionState
+ * @brief Connection state for D-Bus client
+ */
+enum class ConnectionState {
+    DISCONNECTED,      ///< No connection, not trying to connect
+    CONNECTING,        ///< Currently attempting to connect
+    CONNECTED,         ///< Successfully connected
+    RECONNECTING,      ///< Lost connection, attempting to reconnect
+    FAILED             ///< Permanent failure (max retries exceeded)
+};
 
 /**
  * @class DBusClient
@@ -50,6 +63,33 @@ public:
      */
     [[nodiscard]] auto is_connected() const -> bool;
 
+    /**
+     * @brief Get current connection state
+     * @return Current ConnectionState
+     */
+    [[nodiscard]] auto get_connection_state() const -> ConnectionState;
+
+    /**
+     * @brief Set callback for connection state changes
+     * @param callback Function called when state changes (state, error_message)
+     *
+     * Thread-safe. The callback is invoked on the GLib main loop thread.
+     */
+    using ConnectionStateCallback = std::function<void(ConnectionState, const std::string&)>;
+    void set_connection_state_callback(ConnectionStateCallback callback);
+
+    /**
+     * @brief Manually trigger a reconnection attempt
+     * @return true if reconnection started, false if already connected/connecting
+     */
+    auto request_reconnect() -> bool;
+
+    /**
+     * @brief Check if the helper service is available on D-Bus
+     * @return true if service name has an owner
+     */
+    [[nodiscard]] auto is_service_available() const -> bool;
+
     // IDiskService interface
     [[nodiscard]] auto get_available_disks() -> std::vector<DiskInfo> override;
     [[nodiscard]] auto validate_device_path(const std::string& path)
@@ -73,7 +113,7 @@ public:
 private:
     GDBusConnection* connection_ = nullptr;
     GDBusProxy* proxy_ = nullptr;
-    gulong signal_subscription_id_ = 0;
+    guint signal_subscription_id_ = 0;
     ProgressCallback progress_callback_;
     mutable std::mutex callback_mutex_;
 
@@ -87,10 +127,46 @@ private:
     std::vector<AlgorithmInfo> algorithms_;
     bool algorithms_loaded_ = false;
 
+    // Connection state management
+    ConnectionState connection_state_ = ConnectionState::DISCONNECTED;
+    mutable std::mutex state_mutex_;
+
+    // Reconnection configuration
+    static constexpr int MAX_RECONNECT_ATTEMPTS = 5;
+    static constexpr int INITIAL_RETRY_DELAY_MS = 500;
+    static constexpr int MAX_RETRY_DELAY_MS = 30000;
+    int reconnect_attempts_ = 0;
+    guint reconnect_timer_id_ = 0;
+
+    // Service name watching
+    guint name_watcher_id_ = 0;
+
+    // Connection state callback
+    ConnectionStateCallback state_callback_;
+    std::mutex state_callback_mutex_;
+
+    // Random number generator for jitter
+    std::mt19937 rng_{std::random_device{}()};
+
     void load_algorithms();
     void setup_signal_handler();
     void cleanup();
 
+    // State management
+    void set_state(ConnectionState new_state, const std::string& error_message = "");
+    void notify_state_change(ConnectionState state, const std::string& message);
+
+    // Reconnection logic
+    void schedule_reconnect();
+    auto attempt_reconnect() -> bool;
+    void reset_reconnect_state();
+    [[nodiscard]] auto get_retry_delay_ms() -> int;
+
+    // Service availability monitoring
+    void start_name_watching();
+    void stop_name_watching();
+
+    // Static callbacks
     static void on_signal_received(GDBusConnection* connection,
                                    const gchar* sender_name,
                                    const gchar* object_path,
@@ -98,4 +174,15 @@ private:
                                    const gchar* signal_name,
                                    GVariant* parameters,
                                    gpointer user_data);
+
+    static gboolean on_reconnect_timer(gpointer user_data);
+
+    static void on_name_appeared(GDBusConnection* connection,
+                                 const gchar* name,
+                                 const gchar* name_owner,
+                                 gpointer user_data);
+
+    static void on_name_vanished(GDBusConnection* connection,
+                                 const gchar* name,
+                                 gpointer user_data);
 };

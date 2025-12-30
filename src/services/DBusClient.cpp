@@ -20,7 +20,265 @@ DBusClient::~DBusClient() {
     cleanup();
 }
 
+auto DBusClient::get_connection_state() const -> ConnectionState {
+    std::lock_guard lock(state_mutex_);
+    return connection_state_;
+}
+
+void DBusClient::set_connection_state_callback(ConnectionStateCallback callback) {
+    std::lock_guard lock(state_callback_mutex_);
+    state_callback_ = std::move(callback);
+}
+
+auto DBusClient::request_reconnect() -> bool {
+    std::lock_guard lock(state_mutex_);
+
+    // Only allow reconnect if disconnected or failed
+    if (connection_state_ == ConnectionState::CONNECTED ||
+        connection_state_ == ConnectionState::CONNECTING ||
+        connection_state_ == ConnectionState::RECONNECTING) {
+        return false;
+    }
+
+    // Reset reconnect state and try again
+    reconnect_attempts_ = 0;
+    schedule_reconnect();
+    return true;
+}
+
+auto DBusClient::is_service_available() const -> bool {
+    if (!connection_) return false;
+
+    GError* error = nullptr;
+    GVariant* result = g_dbus_connection_call_sync(
+        connection_,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameHasOwner",
+        g_variant_new("(s)", DBUS_NAME),
+        G_VARIANT_TYPE("(b)"),
+        G_DBUS_CALL_FLAGS_NONE,
+        -1,
+        nullptr,
+        &error
+    );
+
+    if (!result) {
+        g_clear_error(&error);
+        return false;
+    }
+
+    gboolean has_owner = FALSE;
+    g_variant_get(result, "(b)", &has_owner);
+    g_variant_unref(result);
+
+    return has_owner != FALSE;
+}
+
+void DBusClient::set_state(ConnectionState new_state, const std::string& error_message) {
+    ConnectionState old_state;
+    {
+        std::lock_guard lock(state_mutex_);
+        old_state = connection_state_;
+        connection_state_ = new_state;
+    }
+
+    if (old_state != new_state) {
+        notify_state_change(new_state, error_message);
+    }
+}
+
+void DBusClient::notify_state_change(ConnectionState state, const std::string& message) {
+    ConnectionStateCallback callback;
+    {
+        std::lock_guard lock(state_callback_mutex_);
+        callback = state_callback_;
+    }
+
+    if (callback) {
+        callback(state, message);
+    }
+}
+
+void DBusClient::schedule_reconnect() {
+    // Cancel any existing timer
+    if (reconnect_timer_id_ != 0) {
+        g_source_remove(reconnect_timer_id_);
+        reconnect_timer_id_ = 0;
+    }
+
+    if (reconnect_attempts_ >= MAX_RECONNECT_ATTEMPTS) {
+        set_state(ConnectionState::FAILED, "Maximum reconnection attempts exceeded");
+        return;
+    }
+
+    set_state(ConnectionState::RECONNECTING, "");
+
+    int delay = get_retry_delay_ms();
+    reconnect_timer_id_ = g_timeout_add(delay, on_reconnect_timer, this);
+}
+
+auto DBusClient::attempt_reconnect() -> bool {
+    reconnect_attempts_++;
+
+    // Clean up existing resources but keep name watcher
+    if (signal_subscription_id_ != 0 && connection_) {
+        g_dbus_connection_signal_unsubscribe(connection_, signal_subscription_id_);
+        signal_subscription_id_ = 0;
+    }
+
+    if (proxy_) {
+        g_object_unref(proxy_);
+        proxy_ = nullptr;
+    }
+
+    // Don't close the connection - we need it for name watching
+    // Just try to create a new proxy
+    GError* error = nullptr;
+
+    if (!connection_) {
+        connection_ = g_bus_get_sync(G_BUS_TYPE_SYSTEM, nullptr, &error);
+        if (!connection_) {
+            std::string msg = error ? error->message : "unknown error";
+            g_clear_error(&error);
+            schedule_reconnect();
+            return false;
+        }
+        // Restart name watching with new connection
+        start_name_watching();
+    }
+
+    proxy_ = g_dbus_proxy_new_sync(
+        connection_,
+        G_DBUS_PROXY_FLAGS_NONE,
+        nullptr,
+        DBUS_NAME,
+        DBUS_PATH,
+        DBUS_INTERFACE,
+        nullptr,
+        &error
+    );
+
+    if (!proxy_) {
+        std::string msg = error ? error->message : "unknown error";
+        g_clear_error(&error);
+        schedule_reconnect();
+        return false;
+    }
+
+    // Successfully reconnected
+    setup_signal_handler();
+    reset_reconnect_state();
+    set_state(ConnectionState::CONNECTED, "");
+
+    // Reload algorithms since we have a fresh connection
+    algorithms_loaded_ = false;
+
+    return true;
+}
+
+void DBusClient::reset_reconnect_state() {
+    reconnect_attempts_ = 0;
+    if (reconnect_timer_id_ != 0) {
+        g_source_remove(reconnect_timer_id_);
+        reconnect_timer_id_ = 0;
+    }
+}
+
+auto DBusClient::get_retry_delay_ms() -> int {
+    // Exponential backoff: 500ms, 1s, 2s, 4s, 8s... up to 30s
+    int base_delay = INITIAL_RETRY_DELAY_MS * (1 << reconnect_attempts_);
+    base_delay = std::min(base_delay, MAX_RETRY_DELAY_MS);
+
+    // Add jitter (±25% of delay)
+    std::uniform_int_distribution<int> dist(-base_delay / 4, base_delay / 4);
+    return base_delay + dist(rng_);
+}
+
+void DBusClient::start_name_watching() {
+    if (name_watcher_id_ != 0) return;
+
+    name_watcher_id_ = g_bus_watch_name(
+        G_BUS_TYPE_SYSTEM,
+        DBUS_NAME,
+        G_BUS_NAME_WATCHER_FLAGS_NONE,
+        on_name_appeared,
+        on_name_vanished,
+        this,
+        nullptr  // user_data_free_func
+    );
+}
+
+void DBusClient::stop_name_watching() {
+    if (name_watcher_id_ != 0) {
+        g_bus_unwatch_name(name_watcher_id_);
+        name_watcher_id_ = 0;
+    }
+}
+
+gboolean DBusClient::on_reconnect_timer(gpointer user_data) {
+    auto* self = static_cast<DBusClient*>(user_data);
+    self->reconnect_timer_id_ = 0;  // Timer is one-shot
+    self->attempt_reconnect();
+    return G_SOURCE_REMOVE;
+}
+
+void DBusClient::on_name_appeared(GDBusConnection* /*connection*/,
+                                   const gchar* /*name*/,
+                                   const gchar* /*name_owner*/,
+                                   gpointer user_data) {
+    auto* self = static_cast<DBusClient*>(user_data);
+
+    ConnectionState current_state;
+    {
+        std::lock_guard lock(self->state_mutex_);
+        current_state = self->connection_state_;
+    }
+
+    // If we're not connected, try to connect now
+    if (current_state != ConnectionState::CONNECTED) {
+        // Cancel any pending reconnect timer - service is available now
+        if (self->reconnect_timer_id_ != 0) {
+            g_source_remove(self->reconnect_timer_id_);
+            self->reconnect_timer_id_ = 0;
+        }
+        self->reconnect_attempts_ = 0;
+        self->attempt_reconnect();
+    }
+}
+
+void DBusClient::on_name_vanished(GDBusConnection* /*connection*/,
+                                   const gchar* /*name*/,
+                                   gpointer user_data) {
+    auto* self = static_cast<DBusClient*>(user_data);
+
+    ConnectionState current_state;
+    {
+        std::lock_guard lock(self->state_mutex_);
+        current_state = self->connection_state_;
+    }
+
+    // Only trigger reconnection if we were connected
+    if (current_state == ConnectionState::CONNECTED) {
+        // Clear the proxy since the service is gone
+        if (self->proxy_) {
+            g_object_unref(self->proxy_);
+            self->proxy_ = nullptr;
+        }
+
+        self->set_state(ConnectionState::DISCONNECTED, "Helper service stopped");
+        self->schedule_reconnect();
+    }
+}
+
 void DBusClient::cleanup() {
+    // Stop reconnection attempts
+    reset_reconnect_state();
+
+    // Stop name watching
+    stop_name_watching();
+
     if (signal_subscription_id_ != 0 && connection_) {
         g_dbus_connection_signal_unsubscribe(connection_, signal_subscription_id_);
         signal_subscription_id_ = 0;
@@ -35,19 +293,27 @@ void DBusClient::cleanup() {
         g_object_unref(connection_);
         connection_ = nullptr;
     }
+
+    set_state(ConnectionState::DISCONNECTED, "");
 }
 
 auto DBusClient::connect() -> bool {
+    set_state(ConnectionState::CONNECTING, "");
+
     GError* error = nullptr;
 
     // Connect to system bus
     connection_ = g_bus_get_sync(G_BUS_TYPE_SYSTEM, nullptr, &error);
     if (!connection_) {
-        std::cerr << "Failed to connect to system bus: "
-                  << (error ? error->message : "unknown") << std::endl;
+        std::string msg = error ? error->message : "unknown";
+        std::cerr << "Failed to connect to system bus: " << msg << std::endl;
         g_clear_error(&error);
+        set_state(ConnectionState::DISCONNECTED, msg);
         return false;
     }
+
+    // Start watching for the helper service name
+    start_name_watching();
 
     // Create proxy for the helper service
     proxy_ = g_dbus_proxy_new_sync(
@@ -62,16 +328,20 @@ auto DBusClient::connect() -> bool {
     );
 
     if (!proxy_) {
-        std::cerr << "Failed to create D-Bus proxy: "
-                  << (error ? error->message : "unknown") << std::endl;
+        std::string msg = error ? error->message : "unknown";
+        std::cerr << "Failed to create D-Bus proxy: " << msg << std::endl;
         g_clear_error(&error);
-        cleanup();
+        // Don't fully cleanup - keep connection and name watcher for reconnection
+        set_state(ConnectionState::DISCONNECTED, msg);
+        // Schedule automatic reconnection attempt
+        schedule_reconnect();
         return false;
     }
 
     // Set up signal handler for WipeProgress
     setup_signal_handler();
 
+    set_state(ConnectionState::CONNECTED, "");
     return true;
 }
 

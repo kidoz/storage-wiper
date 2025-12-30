@@ -110,6 +110,9 @@ void MainWindowContent::bind_disks() {
         });
     });
     subscriptions_.push_back(id);
+
+    // Initialize with current value (subscribe doesn't call callback with existing value)
+    update_disk_list(view_model_->disks.get());
 }
 
 void MainWindowContent::bind_algorithms() {
@@ -122,6 +125,9 @@ void MainWindowContent::bind_algorithms() {
         });
     });
     subscriptions_.push_back(id);
+
+    // Initialize with current value (subscribe doesn't call callback with existing value)
+    update_algorithm_list(view_model_->algorithms.get());
 }
 
 void MainWindowContent::bind_progress() {
@@ -147,6 +153,11 @@ void MainWindowContent::bind_can_wipe() {
         });
     });
     subscriptions_.push_back(id);
+
+    // Initialize with current value (subscribe doesn't call callback with existing value)
+    if (wipe_button_) {
+        wipe_button_->set_sensitive(view_model_->can_wipe.get());
+    }
 }
 
 void MainWindowContent::update_disk_list(const std::vector<DiskInfo>& disks) {

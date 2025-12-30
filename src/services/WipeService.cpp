@@ -107,18 +107,25 @@ auto WipeService::wipe_disk(const std::string& disk_path,
     }
 
     // Run wipe operation in separate thread
-    const bool is_secure_erase = (algorithm == WipeAlgorithm::ATA_SECURE_ERASE);
+    const bool requires_device_access = algorithm_ptr->requires_device_access();
 
     std::lock_guard lock(thread_mutex_);
-    wipe_thread_ = std::thread([disk_path, callback, state = state_, algorithm_ptr, is_secure_erase]() {
+    wipe_thread_ = std::thread([disk_path, callback, state = state_, algorithm_ptr, requires_device_access]() {
         bool result = false;
 
         try {
-            // ATA Secure Erase doesn't need a file descriptor
-            if (is_secure_erase) {
-                // For ATA Secure Erase, we pass 0 as fd and 0 as size
-                // The algorithm implementation will handle it differently
-                result = algorithm_ptr->execute(0, 0, callback, state->cancel_requested);
+            // Some algorithms (like ATA Secure Erase) need device-level access
+            if (requires_device_access) {
+                // Get device size first
+                util::FileDescriptor probe_fd(open(disk_path.c_str(), O_RDONLY));
+                uint64_t size = 0;
+                if (probe_fd) {
+                    ioctl(probe_fd.get(), BLKGETSIZE64, &size);
+                }
+                // probe_fd closed automatically
+
+                // Use execute_on_device which handles the device internally
+                result = algorithm_ptr->execute_on_device(disk_path, size, callback, state->cancel_requested);
             } else {
                 util::FileDescriptor fd(open(disk_path.c_str(), O_WRONLY | O_SYNC));
                 if (!fd) {
@@ -126,6 +133,7 @@ auto WipeService::wipe_disk(const std::string& disk_path,
                         WipeProgress progress{};
                         progress.has_error = true;
                         progress.error_message = "Failed to open device: " + std::string(strerror(errno));
+                        progress.is_complete = true;
                         callback(progress);
                     }
                     state->operation_in_progress.store(false);
@@ -138,6 +146,7 @@ auto WipeService::wipe_disk(const std::string& disk_path,
                         WipeProgress progress{};
                         progress.has_error = true;
                         progress.error_message = "Failed to get device size";
+                        progress.is_complete = true;
                         callback(progress);
                     }
                     state->operation_in_progress.store(false);

@@ -80,6 +80,16 @@ public:
      */
     mvvm::Observable<MessageInfo> current_message{{}};
 
+    /**
+     * @brief Whether connected to the D-Bus helper service
+     */
+    mvvm::Observable<bool> is_connected{false};
+
+    /**
+     * @brief Connection error message (empty if connected)
+     */
+    mvvm::Observable<std::string> connection_error{""};
+
     // ========== Commands ==========
 
     /**
@@ -126,6 +136,13 @@ public:
      */
     void confirm_wipe();
 
+    /**
+     * @brief Update connection state (called by Application when D-Bus state changes)
+     * @param connected Whether connected to the helper service
+     * @param error_message Error message if not connected
+     */
+    void set_connection_state(bool connected, const std::string& error_message = "");
+
 private:
     std::shared_ptr<IDiskService> disk_service_;
     std::shared_ptr<IWipeService> wipe_service_;
@@ -133,6 +150,7 @@ private:
     // Subscription IDs for cleanup
     size_t selected_disk_subscription_id_ = 0;
     size_t wipe_in_progress_subscription_id_ = 0;
+    size_t connection_subscription_id_ = 0;
 
     void load_disks();
     void load_algorithms();
