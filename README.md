@@ -3,7 +3,7 @@
 A modern, secure disk wiping application built with GTK4 and libadwaita for Linux systems. Features multiple DoD-compliant wiping algorithms and a clean, intuitive interface.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)
+![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)
 ![GTK4](https://img.shields.io/badge/GTK-4.0+-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)
 
@@ -36,7 +36,8 @@ A modern, secure disk wiping application built with GTK4 and libadwaita for Linu
   - Model-View-ViewModel (MVVM) pattern
   - Dependency injection
   - Interface-based design
-  - Modern C++20 codebase
+  - Modern C++23 codebase
+  - D-Bus privilege separation
 
 ## Screenshots
 
@@ -51,12 +52,13 @@ A modern, secure disk wiping application built with GTK4 and libadwaita for Linu
 - gtkmm-4.0 (≥ 4.6)
 - libadwaita-1 (≥ 1.0)
 - Linux kernel with `/sys/block` support
-- Root privileges (for disk access)
+- D-Bus system bus
+- polkit (for privilege escalation)
 
 ### Build Dependencies
 - Meson (≥ 0.59.0)
 - Ninja build system
-- g++ or clang++ with C++20 support
+- g++ or clang++ with C++23 support
 - pkg-config
 - GTK4 development files
 - gtkmm-4.0 development files
@@ -112,18 +114,17 @@ meson compile -C builddir
 ⚠️ **WARNING**: This tool permanently destroys data. Use with extreme caution!
 
 ```bash
-# Run with just (recommended - preserves DBUS session)
+# Run with just (recommended)
 just run
 
-# Or run directly with root privileges
-sudo ./builddir/storage_wiper
+# Or run the application directly (D-Bus helper handles privileged operations)
+./builddir/storage_wiper
 
-# Run via pkexec (production-like, shows auth dialog)
+# Run via pkexec (alternative authentication method)
 just run-pkexec
-
-# Run without root (view-only mode - can see disks but not wipe)
-just run-noroot
 ```
+
+**Note**: The application uses D-Bus with privilege separation. The GUI runs unprivileged, while the `storage-wiper-helper` daemon handles disk operations with appropriate permissions via polkit.
 
 **Workflow:**
 1. Select your target disk from the list
@@ -142,6 +143,10 @@ just watch        # Auto-rebuild on file changes (requires entr)
 just lint         # Run clang-tidy
 just cppcheck     # Run cppcheck
 just format       # Format code with clang-format
+
+# Run tests (requires enabling tests first)
+meson setup build -Denable_tests=true
+meson test -C build
 ```
 
 ### Command-Line Options
@@ -168,12 +173,13 @@ sudo vgremove vg_name
 sudo pvremove /dev/sda1
 
 # 2. Wipe the physical disk
-sudo ./storage_wiper
+./storage_wiper
 ```
 
 ## Security Considerations
 
-- ✅ Root privileges required for disk access
+- ✅ D-Bus privilege separation (GUI runs unprivileged)
+- ✅ Polkit-based privilege escalation
 - ✅ Device path whitelist validation
 - ✅ Mount status checking
 - ✅ Destructive action confirmations
@@ -218,17 +224,19 @@ meson setup builddir
 
 ### Architecture
 
-Storage Wiper follows the **MVVM (Model-View-ViewModel)** pattern:
+Storage Wiper follows the **MVVM (Model-View-ViewModel)** pattern with a privileged D-Bus helper:
 
-- **View Layer**: GTK4/Adwaita UI (`MainWindow`)
-- **ViewModel Layer**: Business logic and observable properties (`MainViewModel`)
-- **Model Layer**: Services (`DiskService`, `WipeService`) and Algorithms
+- **View Layer**: GTK4/Adwaita UI (`MainWindow`, `DiskRow`, `AlgorithmRow`)
+- **ViewModel Layer**: Business logic with observable properties (`MainViewModel`)
+- **Model Layer**: Services (`DiskService`, `WipeService`, `DBusClient`) and Algorithms
+
+**D-Bus Architecture**: The GUI runs unprivileged while a separate `storage-wiper-helper` daemon handles privileged disk operations via D-Bus. This provides better security through privilege separation.
 
 Key design patterns:
 - Dependency Injection (custom DI container)
-- Observable Pattern (automatic UI updates)
-- Command Pattern (UI actions via `RelayCommand`)
-- Strategy Pattern (pluggable algorithms)
+- Observable Pattern (automatic UI updates via `Observable<T>`)
+- Command Pattern (UI actions via `Command`)
+- Strategy Pattern (pluggable algorithms via `IWipeAlgorithm`)
 - Factory Pattern (algorithm creation)
 - RAII (resource management)
 
@@ -241,23 +249,33 @@ storage-wiper/
 ├── src/                  # All source and header files
 │   ├── Application.hpp/cpp
 │   ├── main.cpp
-│   ├── di/               # Dependency injection
-│   ├── mvvm/             # Observable, Command infrastructure
-│   ├── interfaces/       # Abstract interfaces
-│   ├── views/            # GTK4/Adwaita UI
-│   ├── viewmodels/       # Business logic
-│   ├── services/         # Core services
-│   ├── util/             # Utility classes
-│   └── algorithms/       # Wiping algorithms
+│   ├── algorithms/       # Wiping algorithms (IWipeAlgorithm implementations)
+│   ├── core/             # Observable, Command infrastructure
+│   ├── di/               # Dependency injection container
+│   ├── helper/           # Privileged D-Bus helper daemon
+│   ├── models/           # Data structures (DiskInfo, WipeTypes, ViewTypes)
+│   ├── services/         # Core services (DiskService, WipeService, DBusClient)
+│   ├── util/             # Utility classes (FileDescriptor, Result)
+│   ├── view_models/      # Business logic (MainViewModel)
+│   └── views/            # GTK4/Adwaita UI widgets
+├── tests/                # Unit tests (Google Test/Mock)
+│   ├── mocks/            # Mock implementations
+│   ├── fixtures/         # Test fixtures
+│   └── unit/             # Unit test files
 ├── data/                 # Desktop integration files
 ├── packaging/            # Distribution packages (Arch Linux)
 ├── justfile              # Development commands
 └── meson.build           # Build configuration
 ```
 
+### Two Executables
+
+1. **storage_wiper** - Main GUI application (runs unprivileged)
+2. **storage-wiper-helper** - Privileged D-Bus helper for disk access (installed to libdir)
+
 ### Code Quality
 
-The project uses modern C++20 features:
+The project uses modern C++23 features:
 - `std::format` for string formatting
 - `std::ranges` for algorithms
 - `std::string_view` for efficiency
@@ -271,7 +289,7 @@ Static analysis available via:
 
 ## Project Status
 
-**Current Version**: 1.0.0 (In Development)
+**Current Version**: 1.1.0
 
 ### Completed Features
 - ✅ Core disk detection and enumeration
@@ -288,6 +306,9 @@ Static analysis available via:
 - ✅ Exception-safe progress callbacks
 - ✅ Desktop integration (polkit, .desktop file, icon)
 - ✅ Arch Linux packaging
+- ✅ Unit tests with Google Test/Mock
+- ✅ D-Bus privilege separation architecture
+- ✅ D-Bus reconnection logic
 
 ### Planned Features
 - [ ] Multi-disk parallel wiping
@@ -300,11 +321,11 @@ Static analysis available via:
 - [ ] SMART data display
 
 ### Known Limitations
-- Requires root privileges for disk access
 - GUI only (no CLI yet)
 - Whole disk wiping only (no partition support)
 - No verification mode
 - ATA Secure Erase requires hardware support and may not work on all drives
+- D-Bus helper requires proper polkit configuration for privilege escalation
 
 ## Contributing
 
