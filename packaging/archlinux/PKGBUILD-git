@@ -27,7 +27,7 @@ sha256sums=('SKIP')
 pkgver() {
   cd "$_pkgname"
   # Format: {base_version}.r{commits}.{short_hash}
-  local base_ver="1.0.0"
+  local base_ver="1.1.0"
   local commits=$(git rev-list --count HEAD 2>/dev/null || echo 0)
   local hash=$(git rev-parse --short=7 HEAD 2>/dev/null || echo unknown)
   printf "%s.r%s.%s" "$base_ver" "$commits" "$hash"

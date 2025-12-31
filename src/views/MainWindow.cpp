@@ -197,7 +197,7 @@ void MainWindow::show_about_dialog() {
     auto* about = ADW_ABOUT_DIALOG(adw_about_dialog_new());
 
     adw_about_dialog_set_application_name(about, "Storage Wiper");
-    adw_about_dialog_set_version(about, "1.0.0");
+    adw_about_dialog_set_version(about, "1.1.0");
     adw_about_dialog_set_developer_name(about, "Storage Wiper Contributors");
     adw_about_dialog_set_comments(about,
         "Secure disk wiping tool with multiple DoD-compliant algorithms.\n\n"
