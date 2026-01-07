@@ -1,5 +1,6 @@
 #include "algorithms/RandomFillAlgorithm.hpp"
 #include "models/WipeTypes.hpp"
+#include "util/WriteHelpers.hpp"
 #include <vector>
 #include <random>
 #include <unistd.h>
@@ -26,7 +27,7 @@ bool RandomFillAlgorithm::execute(int fd, uint64_t size, ProgressCallback callba
         }
 
         size_t to_write = std::min(static_cast<uint64_t>(BUFFER_SIZE), size - written);
-        ssize_t result = write(fd, buffer.data(), to_write);
+        ssize_t result = util::write_with_retry(fd, buffer.data(), to_write);
 
         if (result <= 0) {
             return false;

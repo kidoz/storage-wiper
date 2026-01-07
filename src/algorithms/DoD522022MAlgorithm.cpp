@@ -1,5 +1,6 @@
 #include "algorithms/DoD522022MAlgorithm.hpp"
 #include "models/WipeTypes.hpp"
+#include "util/WriteHelpers.hpp"
 #include <algorithm>
 #include <format>
 #include <random>
@@ -43,7 +44,7 @@ bool DoD522022MAlgorithm::execute(int fd, uint64_t size, ProgressCallback callba
         }
 
         size_t to_write = std::min(static_cast<uint64_t>(BUFFER_SIZE), size - written);
-        ssize_t result = write(fd, random_buffer.data(), to_write);
+        ssize_t result = util::write_with_retry(fd, random_buffer.data(), to_write);
 
         if (result <= 0) {
             return false;
@@ -74,7 +75,7 @@ bool DoD522022MAlgorithm::write_pattern(int fd, uint64_t size, const uint8_t* pa
 
     while (written < size && !cancel_flag.load()) {
         size_t to_write = std::min(pattern_size, size - written);
-        ssize_t result = write(fd, pattern, to_write);
+        ssize_t result = util::write_with_retry(fd, pattern, to_write);
 
         if (result <= 0) {
             return false;

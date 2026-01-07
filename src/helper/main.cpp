@@ -17,8 +17,11 @@
 #include <polkit/polkit.h>
 
 #include <atomic>
+#include <algorithm>
+#include <array>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -87,6 +90,34 @@ const char* introspection_xml = R"XML(
   </interface>
 </node>
 )XML";
+
+auto is_supported_algorithm(WipeAlgorithm algorithm) -> bool {
+    constexpr std::array supported_algorithms = {
+        WipeAlgorithm::ZERO_FILL,
+        WipeAlgorithm::RANDOM_FILL,
+        WipeAlgorithm::DOD_5220_22_M,
+        WipeAlgorithm::SCHNEIER,
+        WipeAlgorithm::VSITR,
+        WipeAlgorithm::GOST_R_50739_95,
+        WipeAlgorithm::GUTMANN
+    };
+
+    return std::find(supported_algorithms.begin(),
+                     supported_algorithms.end(),
+                     algorithm) != supported_algorithms.end();
+}
+
+auto find_disk_info(const std::string& device_path) -> std::optional<DiskInfo> {
+    auto disks = g_disk_service->get_available_disks();
+    auto it = std::find_if(disks.begin(), disks.end(),
+                           [&device_path](const DiskInfo& disk) {
+                               return disk.path == device_path;
+                           });
+    if (it == disks.end()) {
+        return std::nullopt;
+    }
+    return *it;
+}
 
 /**
  * Check polkit authorization for the calling process
@@ -329,29 +360,54 @@ void handle_start_wipe(GDBusMethodInvocation* invocation,
         return;
     }
 
+    const std::string device{device_path ? device_path : ""};
+
+    auto disk_info = find_disk_info(device);
+    if (!disk_info) {
+        g_dbus_method_invocation_return_value(invocation,
+            g_variant_new("(bs)", FALSE, "Device not found"));
+        return;
+    }
+
+    if (disk_info->is_mounted) {
+        g_dbus_method_invocation_return_value(invocation,
+            g_variant_new("(bs)", FALSE, "Device is mounted. Unmount before wiping."));
+        return;
+    }
+
     // Validate algorithm
     auto algorithm = static_cast<WipeAlgorithm>(algorithm_id);
+    if (!is_supported_algorithm(algorithm)) {
+        g_dbus_method_invocation_return_value(invocation,
+            g_variant_new("(bs)", FALSE, "Unsupported wipe algorithm"));
+        return;
+    }
+
+    g_current_wipe_device = device;
+
+    auto progress_callback = [](const WipeProgress& progress) {
+        // Schedule signal emission on main thread
+        auto* progress_copy = new WipeProgress(progress);
+        g_idle_add([](gpointer data) -> gboolean {
+            auto* progress = static_cast<WipeProgress*>(data);
+            emit_wipe_progress(*progress);
+            if (progress->is_complete) {
+                g_wipe_in_progress.store(false);
+            }
+            delete progress;
+            return G_SOURCE_REMOVE;
+        }, progress_copy);
+    };
+
+    bool started = g_wipe_service->wipe_disk(device, algorithm, progress_callback);
+    if (!started) {
+        g_current_wipe_device.clear();
+        g_dbus_method_invocation_return_value(invocation,
+            g_variant_new("(bs)", FALSE, "Failed to start wipe operation"));
+        return;
+    }
 
     g_wipe_in_progress.store(true);
-    g_current_wipe_device = device_path;
-
-    // Start wipe in background thread
-    std::thread wipe_thread([device_path = std::string(device_path), algorithm]() {
-        auto progress_callback = [](const WipeProgress& progress) {
-            // Schedule signal emission on main thread
-            auto* progress_copy = new WipeProgress(progress);
-            g_idle_add([](gpointer data) -> gboolean {
-                auto* progress = static_cast<WipeProgress*>(data);
-                emit_wipe_progress(*progress);
-                delete progress;
-                return G_SOURCE_REMOVE;
-            }, progress_copy);
-        };
-
-        g_wipe_service->wipe_disk(device_path, algorithm, progress_callback);
-        g_wipe_in_progress.store(false);
-    });
-    wipe_thread.detach();
 
     g_dbus_method_invocation_return_value(invocation,
         g_variant_new("(bs)", TRUE, ""));

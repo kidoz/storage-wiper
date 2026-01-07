@@ -26,7 +26,8 @@
  * Exposes observable properties and commands that the View binds to.
  * Handles all business logic and coordinates with services.
  */
-class MainViewModel : public mvvm::ObservableObject {
+class MainViewModel : public mvvm::ObservableObject,
+                      public std::enable_shared_from_this<MainViewModel> {
 public:
     MainViewModel(std::shared_ptr<IDiskService> disk_service,
                   std::shared_ptr<IWipeService> wipe_service);

@@ -4,6 +4,7 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <utility>
 
 MainViewModel::MainViewModel(std::shared_ptr<IDiskService> disk_service,
                              std::shared_ptr<IWipeService> wipe_service)
@@ -279,14 +280,18 @@ void MainViewModel::unmount_and_wipe(const std::string& path) {
 void MainViewModel::handle_wipe_progress(const WipeProgress& progress) {
     // Schedule UI update on main thread
     auto progress_copy = std::make_unique<WipeProgress>(progress);
-    auto* self = this;
+    auto weak_self = weak_from_this();
     auto* progress_ptr = progress_copy.release();
 
     g_idle_add([](gpointer data) -> gboolean {
-        auto* args = static_cast<std::pair<MainViewModel*, WipeProgress*>*>(data);
-        auto* vm = args->first;
+        auto* args = static_cast<std::pair<std::weak_ptr<MainViewModel>, WipeProgress*>*>(data);
+        auto vm = args->first.lock();
         auto progress = std::unique_ptr<WipeProgress>(args->second);
         delete args;
+
+        if (!vm) {
+            return G_SOURCE_REMOVE;
+        }
 
         vm->wipe_progress.set(*progress);
 
@@ -302,7 +307,7 @@ void MainViewModel::handle_wipe_progress(const WipeProgress& progress) {
         }
 
         return G_SOURCE_REMOVE;
-    }, new std::pair<MainViewModel*, WipeProgress*>(self, progress_ptr));
+    }, new std::pair<std::weak_ptr<MainViewModel>, WipeProgress*>(weak_self, progress_ptr));
 }
 
 void MainViewModel::handle_wipe_completion(bool success, const std::string& error_message) {
