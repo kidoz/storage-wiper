@@ -10,15 +10,18 @@
 
 #include "services/WipeService.hpp"
 #include "fixtures/TestFixtures.hpp"
+#include "mocks/MockDiskService.hpp"
 
 class WipeServiceTest : public ::testing::Test {
 protected:
     std::unique_ptr<WipeService> wipe_service;
+    std::shared_ptr<MockDiskService> disk_service;
     std::vector<WipeProgress> captured_progress;
     std::mutex progress_mutex;
 
     void SetUp() override {
-        wipe_service = std::make_unique<WipeService>();
+        disk_service = MockDiskService::CreateNiceMock();
+        wipe_service = std::make_unique<WipeService>(disk_service);
         captured_progress.clear();
     }
 
@@ -75,7 +78,7 @@ TEST_F(WipeServiceTest, CancelOperation_ReturnsFalseWhenNotRunning) {
 
 // Test: destructor doesn't hang without operations
 TEST_F(WipeServiceTest, Destructor_CompletesQuickly) {
-    auto service = std::make_unique<WipeService>();
+    auto service = std::make_unique<WipeService>(disk_service);
 
     auto start = std::chrono::steady_clock::now();
     service.reset();

@@ -11,6 +11,7 @@
  */
 
 #include "services/DiskService.hpp"
+#include "services/DevicePolicy.hpp"
 #include "services/WipeService.hpp"
 
 #include <gio/gio.h>
@@ -21,7 +22,6 @@
 #include <array>
 #include <iostream>
 #include <memory>
-#include <optional>
 #include <string>
 #include <thread>
 
@@ -39,7 +39,7 @@ constexpr auto POLKIT_ACTION_WIPE_DISK = "su.kidoz.storage_wiper.wipe-disk";
 // Global state
 GDBusConnection* g_connection = nullptr;
 GMainLoop* g_main_loop = nullptr;
-std::unique_ptr<DiskService> g_disk_service;
+std::shared_ptr<DiskService> g_disk_service;
 std::unique_ptr<WipeService> g_wipe_service;
 std::string g_current_wipe_device;
 std::atomic<bool> g_wipe_in_progress{false};
@@ -105,18 +105,6 @@ auto is_supported_algorithm(WipeAlgorithm algorithm) -> bool {
     return std::find(supported_algorithms.begin(),
                      supported_algorithms.end(),
                      algorithm) != supported_algorithms.end();
-}
-
-auto find_disk_info(const std::string& device_path) -> std::optional<DiskInfo> {
-    auto disks = g_disk_service->get_available_disks();
-    auto it = std::find_if(disks.begin(), disks.end(),
-                           [&device_path](const DiskInfo& disk) {
-                               return disk.path == device_path;
-                           });
-    if (it == disks.end()) {
-        return std::nullopt;
-    }
-    return *it;
 }
 
 /**
@@ -352,34 +340,19 @@ void handle_start_wipe(GDBusMethodInvocation* invocation,
         return;
     }
 
-    // Validate device path
-    auto valid = g_disk_service->validate_device_path(device_path ? device_path : "");
-    if (!valid) {
-        g_dbus_method_invocation_return_value(invocation,
-            g_variant_new("(bs)", FALSE, valid.error().message.c_str()));
-        return;
-    }
-
     const std::string device{device_path ? device_path : ""};
-
-    auto disk_info = find_disk_info(device);
-    if (!disk_info) {
-        g_dbus_method_invocation_return_value(invocation,
-            g_variant_new("(bs)", FALSE, "Device not found"));
-        return;
-    }
-
-    if (disk_info->is_mounted) {
-        g_dbus_method_invocation_return_value(invocation,
-            g_variant_new("(bs)", FALSE, "Device is mounted. Unmount before wiping."));
-        return;
-    }
 
     // Validate algorithm
     auto algorithm = static_cast<WipeAlgorithm>(algorithm_id);
     if (!is_supported_algorithm(algorithm)) {
         g_dbus_method_invocation_return_value(invocation,
             g_variant_new("(bs)", FALSE, "Unsupported wipe algorithm"));
+        return;
+    }
+
+    if (auto eligible = device_policy::validate_wipe_target(*g_disk_service, device); !eligible) {
+        g_dbus_method_invocation_return_value(invocation,
+            g_variant_new("(bs)", FALSE, eligible.error().message.c_str()));
         return;
     }
 
@@ -543,8 +516,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     std::cout << "Storage Wiper Helper starting..." << std::endl;
 
     // Initialize services
-    g_disk_service = std::make_unique<DiskService>();
-    g_wipe_service = std::make_unique<WipeService>();
+    g_disk_service = std::make_shared<DiskService>();
+    g_wipe_service = std::make_unique<WipeService>(g_disk_service);
 
     // Create main loop
     g_main_loop = g_main_loop_new(nullptr, FALSE);

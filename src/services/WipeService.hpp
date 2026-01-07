@@ -1,6 +1,7 @@
 #pragma once
 
 #include "services/IWipeService.hpp"
+#include "services/IDiskService.hpp"
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -13,7 +14,7 @@ class IWipeAlgorithm;
 
 class WipeService : public IWipeService {
 public:
-    WipeService();
+    explicit WipeService(std::shared_ptr<IDiskService> disk_service);
     ~WipeService() override;
 
     auto wipe_disk(const std::string& disk_path,
@@ -34,6 +35,7 @@ private:
         std::atomic<bool> operation_in_progress{false};
     };
 
+    std::shared_ptr<IDiskService> disk_service_;
     std::shared_ptr<ThreadState> state_;
     std::thread wipe_thread_;
     mutable std::mutex thread_mutex_;  // Protects wipe_thread_ access

@@ -1,4 +1,5 @@
 #include "services/WipeService.hpp"
+#include "services/DevicePolicy.hpp"
 #include "util/FileDescriptor.hpp"
 
 // Algorithm implementations
@@ -25,7 +26,8 @@
 // Linux-specific headers
 #include <linux/fs.h>
 
-WipeService::WipeService() {
+WipeService::WipeService(std::shared_ptr<IDiskService> disk_service)
+    : disk_service_(std::move(disk_service)) {
     state_ = std::make_shared<ThreadState>();
     initialize_algorithms();
 }
@@ -81,6 +83,28 @@ auto WipeService::wipe_disk(const std::string& disk_path,
 
     if (state_->operation_in_progress.load()) {
         return false; // Operation already in progress
+    }
+
+    if (!disk_service_) {
+        if (callback) {
+            WipeProgress progress{};
+            progress.has_error = true;
+            progress.error_message = "Disk service not configured";
+            progress.is_complete = true;
+            callback(progress);
+        }
+        return false;
+    }
+
+    if (auto eligible = device_policy::validate_wipe_target(*disk_service_, disk_path); !eligible) {
+        if (callback) {
+            WipeProgress progress{};
+            progress.has_error = true;
+            progress.error_message = eligible.error().message;
+            progress.is_complete = true;
+            callback(progress);
+        }
+        return false;
     }
 
     // Join previous thread if it exists (with lock)

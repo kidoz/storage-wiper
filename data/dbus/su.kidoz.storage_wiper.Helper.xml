@@ -48,6 +48,18 @@
     </method>
 
     <!--
+      UnmountDevice:
+      Safely unmount the device before wiping.
+
+      Authorization: su.kidoz.storage_wiper.wipe-disk
+    -->
+    <method name="UnmountDevice">
+      <arg name="path" type="s" direction="in"/>
+      <arg name="success" type="b" direction="out"/>
+      <arg name="error_message" type="s" direction="out"/>
+    </method>
+
+    <!--
       GetAlgorithms:
       Returns list of available wipe algorithms.
 
