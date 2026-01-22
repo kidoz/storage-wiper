@@ -7,6 +7,7 @@ pkgdesc='Secure disk wiping tool with GTK4/libadwaita interface and DoD-complian
 arch=('x86_64')
 url='https://github.com/kidoz/storage-wiper'
 license=('MIT')
+install=storage-wiper.install
 depends=(
   'gtk4'
   'gtkmm-4.0'

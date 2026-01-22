@@ -3,6 +3,7 @@ pkgbase = storage-wiper
 	pkgver = 1.3.0
 	pkgrel = 1
 	url = https://github.com/kidoz/storage-wiper
+	install = storage-wiper.install
 	arch = x86_64
 	license = MIT
 	makedepends = meson

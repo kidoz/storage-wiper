@@ -1,0 +1,54 @@
+# Arch Linux package install hooks for storage-wiper
+
+post_install() {
+    echo ":: Reloading D-Bus configuration..."
+    systemctl reload dbus.service 2>/dev/null || true
+
+    echo ""
+    echo "Storage Wiper has been installed."
+    echo ""
+    echo "The privileged helper will start automatically when needed via D-Bus activation."
+    echo "To enable the systemd service for persistent operation:"
+    echo "  sudo systemctl enable --now storage-wiper-helper.service"
+    echo ""
+}
+
+post_upgrade() {
+    echo ":: Reloading D-Bus configuration..."
+    systemctl reload dbus.service 2>/dev/null || true
+
+    # Check if the helper service is running and restart it
+    if systemctl is-active --quiet storage-wiper-helper.service; then
+        echo ":: Restarting storage-wiper-helper service..."
+        systemctl restart storage-wiper-helper.service
+    else
+        # Helper might be running via D-Bus activation without systemd service enabled
+        # Try to stop any running instance so D-Bus will activate the new version
+        echo ":: Stopping any running helper instances..."
+        systemctl stop storage-wiper-helper.service 2>/dev/null || true
+
+        # Kill any orphaned helper processes (started by old D-Bus activation)
+        pkill -f 'storage-wiper-helper' 2>/dev/null || true
+    fi
+
+    echo ""
+    echo "Storage Wiper has been upgraded to version $1"
+    echo "The helper daemon has been restarted to load the new version."
+    echo ""
+}
+
+post_remove() {
+    echo ":: Stopping storage-wiper-helper service..."
+    systemctl stop storage-wiper-helper.service 2>/dev/null || true
+    systemctl disable storage-wiper-helper.service 2>/dev/null || true
+
+    # Kill any remaining helper processes
+    pkill -f 'storage-wiper-helper' 2>/dev/null || true
+
+    echo ":: Reloading D-Bus configuration..."
+    systemctl reload dbus.service 2>/dev/null || true
+
+    echo ""
+    echo "Storage Wiper has been removed."
+    echo ""
+}
