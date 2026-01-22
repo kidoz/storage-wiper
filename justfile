@@ -197,3 +197,31 @@ tree:
 loc:
     @echo "=== Lines of Code ==="
     @find src -name '*.cpp' -o -name '*.hpp' | xargs wc -l | tail -1
+
+# === CLI Commands ===
+
+# Build CLI tool
+build-cli: build
+    @echo "CLI tool built at {{build_dir}}/storage-wiper-cli"
+
+# Run CLI - list disks
+cli-list: build-cli
+    ./{{build_dir}}/storage-wiper-cli --list
+
+# Run CLI - list disks as JSON
+cli-list-json: build-cli
+    ./{{build_dir}}/storage-wiper-cli --list --json
+
+# Run CLI with help
+cli-help: build-cli
+    ./{{build_dir}}/storage-wiper-cli --help
+
+# === Log Commands ===
+
+# View helper logs
+logs-helper:
+    sudo tail -f /var/log/storage-wiper/*.log 2>/dev/null || echo "No helper logs found (run 'sudo mkdir -p /var/log/storage-wiper' to create directory)"
+
+# View GUI logs
+logs-gui:
+    tail -f ~/.local/share/storage-wiper/logs/*.log 2>/dev/null || echo "No GUI logs found"

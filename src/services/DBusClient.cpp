@@ -355,10 +355,16 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/, const gchar
     guint64 total_bytes = 0;
     guint64 speed_bytes_per_sec = 0;
     gint64 estimated_seconds_remaining = -1;
+    gboolean verification_enabled = FALSE;
+    gboolean verification_in_progress = FALSE;
+    gboolean verification_passed = FALSE;
+    gdouble verification_percentage = 0.0;
 
-    g_variant_get(parameters, "(&sdii&sbb&stttx)", &device_path, &percentage, &current_pass,
+    g_variant_get(parameters, "(&sdii&sbb&stttxbbbd)", &device_path, &percentage, &current_pass,
                   &total_passes, &status, &is_complete, &has_error, &error_message, &bytes_written,
-                  &total_bytes, &speed_bytes_per_sec, &estimated_seconds_remaining);
+                  &total_bytes, &speed_bytes_per_sec, &estimated_seconds_remaining,
+                  &verification_enabled, &verification_in_progress, &verification_passed,
+                  &verification_percentage);
 
     WipeProgress progress{.bytes_written = bytes_written,
                           .total_bytes = total_bytes,
@@ -370,7 +376,12 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/, const gchar
                           .has_error = has_error != FALSE,
                           .error_message = error_message ? error_message : "",
                           .speed_bytes_per_sec = speed_bytes_per_sec,
-                          .estimated_seconds_remaining = estimated_seconds_remaining};
+                          .estimated_seconds_remaining = estimated_seconds_remaining,
+                          .verification_enabled = verification_enabled != FALSE,
+                          .verification_in_progress = verification_in_progress != FALSE,
+                          .verification_passed = verification_passed != FALSE,
+                          .verification_percentage = verification_percentage,
+                          .verification_mismatches = 0};
 
     // Call the callback
     std::lock_guard lock(self->callback_mutex_);
@@ -411,9 +422,15 @@ auto DBusClient::get_available_disks() -> std::vector<DiskInfo> {
     const gchar* filesystem = nullptr;
     gboolean is_mounted = FALSE;
     const gchar* mount_point = nullptr;
+    guint32 smart_status = 0;
 
-    while (g_variant_iter_next(&iter, "(&s&s&sxbb&sb&s)", &path, &model, &serial, &size_bytes,
-                               &is_removable, &is_ssd, &filesystem, &is_mounted, &mount_point)) {
+    while (g_variant_iter_next(&iter, "(&s&s&sxbb&sb&su)", &path, &model, &serial, &size_bytes,
+                               &is_removable, &is_ssd, &filesystem, &is_mounted, &mount_point,
+                               &smart_status)) {
+        SmartData smart;
+        smart.status = static_cast<SmartData::HealthStatus>(smart_status);
+        smart.available = (smart_status != 0);  // 0 = UNKNOWN means not available
+
         disks.push_back(DiskInfo{.path = path ? path : "",
                                  .model = model ? model : "",
                                  .serial = serial ? serial : "",
@@ -422,7 +439,9 @@ auto DBusClient::get_available_disks() -> std::vector<DiskInfo> {
                                  .is_ssd = is_ssd != FALSE,
                                  .filesystem = filesystem ? filesystem : "",
                                  .is_mounted = is_mounted != FALSE,
-                                 .mount_point = mount_point ? mount_point : ""});
+                                 .mount_point = mount_point ? mount_point : "",
+                                 .is_lvm_pv = false,  // Not transmitted via D-Bus currently
+                                 .smart = smart});
     }
 
     g_variant_unref(array);
@@ -555,6 +574,11 @@ void DBusClient::load_algorithms() {
 
 auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm,
                            ProgressCallback callback) -> bool {
+    return wipe_disk(disk_path, algorithm, std::move(callback), false);
+}
+
+auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm,
+                           ProgressCallback callback, bool verify) -> bool {
     if (!proxy_)
         return false;
 
@@ -567,7 +591,8 @@ auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm
     GError* error = nullptr;
     GVariant* result = g_dbus_proxy_call_sync(
         proxy_, "StartWipe",
-        g_variant_new("(su)", disk_path.c_str(), static_cast<guint32>(algorithm)),
+        g_variant_new("(sub)", disk_path.c_str(), static_cast<guint32>(algorithm),
+                      verify ? TRUE : FALSE),
         G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
@@ -649,4 +674,45 @@ auto DBusClient::cancel_current_operation() -> bool {
     g_variant_unref(result);
 
     return cancelled != FALSE;
+}
+
+auto DBusClient::get_smart_data(const std::string& path) -> SmartData {
+    SmartData smart;
+
+    if (!proxy_)
+        return smart;
+
+    GError* error = nullptr;
+    GVariant* result =
+        g_dbus_proxy_call_sync(proxy_, "GetDiskSMART", g_variant_new("(s)", path.c_str()),
+                               G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
+
+    if (!result) {
+        g_clear_error(&error);
+        return smart;
+    }
+
+    gboolean available = FALSE;
+    gboolean healthy = FALSE;
+    gint64 power_on_hours = -1;
+    gint32 reallocated_sectors = -1;
+    gint32 pending_sectors = -1;
+    gint32 temperature_celsius = -1;
+    gint32 uncorrectable_errors = -1;
+    guint32 status = 0;
+
+    g_variant_get(result, "(bbxiiiiu)", &available, &healthy, &power_on_hours, &reallocated_sectors,
+                  &pending_sectors, &temperature_celsius, &uncorrectable_errors, &status);
+    g_variant_unref(result);
+
+    smart.available = available != FALSE;
+    smart.healthy = healthy != FALSE;
+    smart.power_on_hours = power_on_hours;
+    smart.reallocated_sectors = reallocated_sectors;
+    smart.pending_sectors = pending_sectors;
+    smart.temperature_celsius = temperature_celsius;
+    smart.uncorrectable_errors = uncorrectable_errors;
+    smart.status = static_cast<SmartData::HealthStatus>(status);
+
+    return smart;
 }

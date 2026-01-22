@@ -1,5 +1,6 @@
 #include "algorithms/RandomFillAlgorithm.hpp"
 
+#include "algorithms/VerificationHelper.hpp"
 #include "models/WipeTypes.hpp"
 #include "util/WriteHelpers.hpp"
 
@@ -52,4 +53,10 @@ bool RandomFillAlgorithm::execute(int fd, uint64_t size, ProgressCallback callba
     }
 
     return !cancel_flag.load();
+}
+
+bool RandomFillAlgorithm::verify(int fd, uint64_t size, ProgressCallback callback,
+                                  const std::atomic<bool>& cancel_flag) {
+    // For random data, we can only verify statistically that it looks random
+    return verification::verify_random(fd, size, std::move(callback), cancel_flag);
 }

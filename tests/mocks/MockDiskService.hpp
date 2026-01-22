@@ -50,6 +50,7 @@ public:
                         .filesystem = mounted ? "ext4" : "",
                         .is_mounted = mounted,
                         .mount_point = mounted ? "/mnt/test" : "",
-                        .is_lvm_pv = false};
+                        .is_lvm_pv = false,
+                        .smart = {}};
     }
 };

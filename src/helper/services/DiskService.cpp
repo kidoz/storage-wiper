@@ -1,5 +1,6 @@
 #include "helper/services/DiskService.hpp"
 
+#include "helper/services/SmartService.hpp"
 #include "util/FileDescriptor.hpp"
 
 // Standard library
@@ -45,6 +46,15 @@ auto is_partition_suffix(std::string_view suffix) noexcept -> bool {
     return std::isdigit(first) || suffix.front() == 'p';
 }
 }  // namespace
+
+DiskService::DiskService() : smart_service_(std::make_unique<SmartService>()) {}
+
+auto DiskService::get_smart_data(const std::string& device_path) -> SmartData {
+    if (!smart_service_) {
+        return {};
+    }
+    return smart_service_->get_smart_data(device_path);
+}
 
 auto DiskService::get_available_disks() -> std::vector<DiskInfo> {
     const fs::path block_dir{"/sys/block"};
@@ -234,7 +244,8 @@ auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
                          .filesystem = {},
                          .is_mounted = false,
                          .mount_point = {},
-                         .is_lvm_pv = false};
+                         .is_lvm_pv = false,
+                         .smart = {}};
 
     const auto device_name = fs::path{device_path}.filename().string();
     const auto sys_path = std::format("/sys/block/{}", device_name);
@@ -381,6 +392,11 @@ auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
                 }
             }
         }
+    }
+
+    // Get SMART data for the device
+    if (smart_service_) {
+        info.smart = smart_service_->get_smart_data(device_path);
     }
 
     return info;

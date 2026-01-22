@@ -1,5 +1,6 @@
 #include "algorithms/ZeroFillAlgorithm.hpp"
 
+#include "algorithms/VerificationHelper.hpp"
 #include "models/WipeTypes.hpp"
 #include "util/WriteHelpers.hpp"
 
@@ -42,4 +43,9 @@ bool ZeroFillAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback
     }
 
     return !cancel_flag.load();
+}
+
+bool ZeroFillAlgorithm::verify(int fd, uint64_t size, ProgressCallback callback,
+                                const std::atomic<bool>& cancel_flag) {
+    return verification::verify_zeros(fd, size, std::move(callback), cancel_flag);
 }

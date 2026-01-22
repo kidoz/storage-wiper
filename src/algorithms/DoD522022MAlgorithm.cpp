@@ -1,5 +1,6 @@
 #include "algorithms/DoD522022MAlgorithm.hpp"
 
+#include "algorithms/VerificationHelper.hpp"
 #include "models/WipeTypes.hpp"
 #include "util/WriteHelpers.hpp"
 
@@ -102,4 +103,10 @@ bool DoD522022MAlgorithm::write_pattern(int fd, uint64_t size, const uint8_t* pa
     }
 
     return !cancel_flag.load();
+}
+
+bool DoD522022MAlgorithm::verify(int fd, uint64_t size, ProgressCallback callback,
+                                  const std::atomic<bool>& cancel_flag) {
+    // Final pass of DoD 5220.22-M is random data, so verify entropy
+    return verification::verify_random(fd, size, std::move(callback), cancel_flag);
 }

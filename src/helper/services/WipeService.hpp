@@ -21,6 +21,10 @@ public:
     auto wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm, ProgressCallback callback)
         -> bool override;
 
+    auto wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm, ProgressCallback callback,
+                   bool verify) -> bool override;
+
+    [[nodiscard]] auto supports_verification(WipeAlgorithm algo) -> bool override;
     [[nodiscard]] auto get_algorithm_name(WipeAlgorithm algo) -> std::string override;
     [[nodiscard]] auto get_algorithm_description(WipeAlgorithm algo) -> std::string override;
     [[nodiscard]] auto get_pass_count(WipeAlgorithm algo) -> int override;

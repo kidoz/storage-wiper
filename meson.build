@@ -1,7 +1,7 @@
 project(
   'storage_wiper',
   'cpp',
-  version: '1.2.0',
+  version: '1.3.0',
   license: 'MIT',
   default_options: [
     'cpp_std=c++23',
@@ -77,6 +77,12 @@ shared_sources = files(
   'src/algorithms/GutmannAlgorithm.cpp',
   'src/algorithms/GOSTAlgorithm.cpp',
   'src/algorithms/ATASecureEraseAlgorithm.cpp',
+  'src/algorithms/VerificationHelper.cpp',
+)
+
+# Utility sources (shared)
+util_sources = files(
+  'src/util/Logger.cpp',
 )
 
 # Source files for privileged helper
@@ -84,6 +90,15 @@ helper_sources = files(
   'src/helper/main.cpp',
   'src/helper/services/DiskService.cpp',
   'src/helper/services/WipeService.cpp',
+  'src/helper/services/SmartService.cpp',
+)
+
+# CLI sources
+cli_sources = files(
+  'src/cli/main.cpp',
+  'src/cli/CliApplication.cpp',
+  'src/cli/ProgressDisplay.cpp',
+  'src/services/DBusClient.cpp',
 )
 
 # Header files (for IDE support)
@@ -124,6 +139,14 @@ headers = files(
   # Utilities
   'src/util/FileDescriptor.hpp',
   'src/util/Result.hpp',
+  'src/util/Logger.hpp',
+  # Helper services
+  'src/helper/services/SmartService.hpp',
+  # Algorithms
+  'src/algorithms/VerificationHelper.hpp',
+  # CLI
+  'src/cli/CliApplication.hpp',
+  'src/cli/ProgressDisplay.hpp',
 )
 
 # Include directories
@@ -134,6 +157,7 @@ executable(
   'storage_wiper',
   sources,
   shared_sources,
+  util_sources,
   resources,
   include_directories: inc,
   dependencies: [gtk4_dep, gtkmm_dep, adwaita_dep, gio_dep],
@@ -146,10 +170,22 @@ executable(
   'storage-wiper-helper',
   helper_sources,
   shared_sources,
+  util_sources,
   include_directories: inc,
   dependencies: [gio_dep, polkit_dep],
   install: true,
   install_dir: get_option('libdir') / 'storage-wiper',
+  cpp_args: []
+)
+
+# CLI application
+executable(
+  'storage-wiper-cli',
+  cli_sources,
+  util_sources,
+  include_directories: inc,
+  dependencies: [gio_dep],
+  install: true,
   cpp_args: []
 )
 
@@ -269,6 +305,8 @@ if get_option('enable_tests')
     'src/viewmodels/MainViewModel.cpp',
     'src/helper/services/DiskService.cpp',
     'src/helper/services/WipeService.cpp',
+    'src/helper/services/SmartService.cpp',
+    'src/util/Logger.cpp',
   )
 
   # Build test executable

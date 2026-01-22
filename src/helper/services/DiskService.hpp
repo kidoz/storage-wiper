@@ -1,10 +1,13 @@
 #pragma once
 
+#include "helper/services/SmartService.hpp"
 #include "services/IDiskService.hpp"
+
+#include <memory>
 
 class DiskService : public IDiskService {
 public:
-    DiskService() = default;
+    DiskService();
     ~DiskService() override = default;
 
     // Non-copyable, moveable
@@ -21,7 +24,16 @@ public:
     [[nodiscard]] auto validate_device_path(const std::string& path)
         -> std::expected<void, util::Error> override;
 
+    /**
+     * @brief Get SMART data for a specific device
+     * @param device_path Device path
+     * @return SMART data (available=false if not supported)
+     */
+    [[nodiscard]] auto get_smart_data(const std::string& device_path) -> SmartData;
+
 private:
     [[nodiscard]] auto parse_disk_info(const std::string& device_path) -> DiskInfo;
     [[nodiscard]] auto check_if_ssd(const std::string& device_path) -> bool;
+
+    std::unique_ptr<SmartService> smart_service_;
 };

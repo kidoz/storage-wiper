@@ -100,4 +100,33 @@ public:
      * @return true if SSD compatible, false otherwise
      */
     virtual bool is_ssd_compatible() const = 0;
+
+    /**
+     * @brief Check if this algorithm supports post-wipe verification
+     * @return true if verify() can be called after execute()
+     */
+    virtual bool supports_verification() const { return false; }
+
+    /**
+     * @brief Verify the wipe operation by reading back and checking patterns
+     * @param fd File descriptor of the device to verify
+     * @param size Size of the device in bytes
+     * @param callback Progress callback function
+     * @param cancel_flag Reference to cancellation flag
+     * @return true if verification passed (all data matches expected pattern)
+     *
+     * The expected pattern depends on the algorithm's final pass:
+     * - ZeroFill: expects all zeros
+     * - RandomFill: statistical check for entropy
+     * - Multi-pass algorithms: verify final pattern
+     */
+    virtual bool verify(int fd, uint64_t size, ProgressCallback callback,
+                       const std::atomic<bool>& cancel_flag) {
+        // Default implementation: verification not supported
+        (void)fd;
+        (void)size;
+        (void)callback;
+        (void)cancel_flag;
+        return false;
+    }
 };
