@@ -143,10 +143,15 @@ just watch        # Auto-rebuild on file changes (requires entr)
 just lint         # Run clang-tidy
 just cppcheck     # Run cppcheck
 just format       # Format code with clang-format
+just format-check # Check formatting (CI-friendly)
 
-# Run tests (requires enabling tests first)
-meson setup build -Denable_tests=true
-meson test -C build
+# Testing
+just test         # Run all unit tests
+just test-verbose # Run tests with detailed output
+just test-filter "Pattern"  # Run specific tests
+
+# Memory analysis
+just valgrind     # Check for memory leaks
 ```
 
 ### Command-Line Options
@@ -290,7 +295,7 @@ Static analysis available via:
 
 ## Project Status
 
-**Current Version**: 1.1.0
+**Current Version**: 1.2.0
 
 ### Completed Features
 - ✅ Core disk detection and enumeration
@@ -298,18 +303,22 @@ Static analysis available via:
 - ✅ 8 wiping algorithms implemented
 - ✅ GTK4/Adwaita UI
 - ✅ MVVM architecture with observable data binding
-- ✅ Progress reporting
+- ✅ Progress reporting with ETA and speed display
+- ✅ Desktop notifications on completion
 - ✅ Mount status checking
 - ✅ LVM physical volume support
 - ✅ Thread-safe cancellation
 - ✅ Static analysis integration (clang-tidy, cppcheck)
+- ✅ Code formatting with clang-format
 - ✅ RAII-based resource management
 - ✅ Exception-safe progress callbacks
-- ✅ Desktop integration (polkit, .desktop file, icon)
+- ✅ Desktop integration (polkit, .desktop file, icon, AppStream metainfo)
 - ✅ Arch Linux packaging
-- ✅ Unit tests with Google Test/Mock
+- ✅ Comprehensive unit tests (~139 tests with Google Test/Mock)
+- ✅ Memory leak checking with valgrind
 - ✅ D-Bus privilege separation architecture
 - ✅ D-Bus reconnection logic
+- ✅ Systemd service file for D-Bus helper
 
 ### Planned Features
 - [ ] Multi-disk parallel wiping
