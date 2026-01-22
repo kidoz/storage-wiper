@@ -4,23 +4,26 @@
  */
 
 #include "algorithms/ATASecureEraseAlgorithm.hpp"
+
 #include "models/WipeTypes.hpp"
 
 #include <fcntl.h>
-#include <unistd.h>
-#include <sys/ioctl.h>
 #include <linux/hdreg.h>
-#include <scsi/sg.h>
-#include <cstring>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
 #include <cerrno>
 #include <chrono>
+#include <cstring>
 #include <thread>
+
+#include <scsi/sg.h>
 
 // ATA pass-through command structure for SG_IO
 struct ata_passthrough_cmd {
-    uint8_t opcode;           // 0x85 for ATA PASS-THROUGH (16)
-    uint8_t protocol;         // Protocol field
-    uint8_t flags;            // t_length, t_dir, t_type, byt_block
+    uint8_t opcode;    // 0x85 for ATA PASS-THROUGH (16)
+    uint8_t protocol;  // Protocol field
+    uint8_t flags;     // t_length, t_dir, t_type, byt_block
     uint8_t features_high;
     uint8_t features_low;
     uint8_t sector_count_high;
@@ -36,21 +39,20 @@ struct ata_passthrough_cmd {
     uint8_t control;
 };
 
-bool ATASecureEraseAlgorithm::execute([[maybe_unused]] int fd,
-                                       [[maybe_unused]] uint64_t size,
-                                       ProgressCallback callback,
-                                       [[maybe_unused]] const std::atomic<bool>& cancel_flag) {
+bool ATASecureEraseAlgorithm::execute([[maybe_unused]] int fd, [[maybe_unused]] uint64_t size,
+                                      ProgressCallback callback,
+                                      [[maybe_unused]] const std::atomic<bool>& cancel_flag) {
     // This method should not be called for ATA Secure Erase
     // Use execute_on_device instead
-    report_progress(callback, 0, "Error: Use execute_on_device for ATA Secure Erase",
-                   true, true, "ATA Secure Erase requires device path, not file descriptor");
+    report_progress(callback, 0, "Error: Use execute_on_device for ATA Secure Erase", true, true,
+                    "ATA Secure Erase requires device path, not file descriptor");
     return false;
 }
 
 bool ATASecureEraseAlgorithm::execute_on_device(const std::string& device_path,
-                                                 [[maybe_unused]] uint64_t size,
-                                                 ProgressCallback callback,
-                                                 const std::atomic<bool>& cancel_flag) {
+                                                [[maybe_unused]] uint64_t size,
+                                                ProgressCallback callback,
+                                                const std::atomic<bool>& cancel_flag) {
     report_progress(callback, 0, "Checking ATA Security support...");
 
     // Open device
@@ -67,36 +69,36 @@ bool ATASecureEraseAlgorithm::execute_on_device(const std::string& device_path,
     if (!security_info.supported) {
         close(fd);
         report_progress(callback, 0, "Error", true, true,
-                       "Device does not support ATA Security feature. "
-                       "This may be a USB device, NVMe drive, or older hardware. "
-                       "Consider using Zero Fill or Random Data instead.");
+                        "Device does not support ATA Security feature. "
+                        "This may be a USB device, NVMe drive, or older hardware. "
+                        "Consider using Zero Fill or Random Data instead.");
         return false;
     }
 
     if (security_info.frozen) {
         close(fd);
         report_progress(callback, 0, "Error", true, true,
-                       "Device security is frozen. To unfreeze:\n"
-                       "1. Suspend the system (sleep)\n"
-                       "2. Wake it up\n"
-                       "3. Run secure erase immediately\n\n"
-                       "Alternatively, a cold boot without BIOS freeze may work.");
+                        "Device security is frozen. To unfreeze:\n"
+                        "1. Suspend the system (sleep)\n"
+                        "2. Wake it up\n"
+                        "3. Run secure erase immediately\n\n"
+                        "Alternatively, a cold boot without BIOS freeze may work.");
         return false;
     }
 
     if (security_info.locked) {
         close(fd);
         report_progress(callback, 0, "Error", true, true,
-                       "Device is locked with a security password. "
-                       "You must unlock it first with the correct password.");
+                        "Device is locked with a security password. "
+                        "You must unlock it first with the correct password.");
         return false;
     }
 
     if (security_info.count_expired) {
         close(fd);
         report_progress(callback, 0, "Error", true, true,
-                       "Security attempt count expired. "
-                       "The device has been locked due to too many failed attempts.");
+                        "Security attempt count expired. "
+                        "The device has been locked due to too many failed attempts.");
         return false;
     }
 
@@ -119,7 +121,7 @@ bool ATASecureEraseAlgorithm::execute_on_device(const std::string& device_path,
     if (estimated_minutes > 0) {
         if (estimated_minutes >= 60) {
             time_msg = " (estimated: " + std::to_string(estimated_minutes / 60) + "h " +
-                      std::to_string(estimated_minutes % 60) + "m)";
+                       std::to_string(estimated_minutes % 60) + "m)";
         } else {
             time_msg = " (estimated: " + std::to_string(estimated_minutes) + " minutes)";
         }
@@ -131,8 +133,8 @@ bool ATASecureEraseAlgorithm::execute_on_device(const std::string& device_path,
     if (!set_security_password(fd, TEMP_PASSWORD, false)) {
         close(fd);
         report_progress(callback, 5, "Error", true, true,
-                       "Failed to set security password. The device may not accept "
-                       "password commands or may require specific conditions.");
+                        "Failed to set security password. The device may not accept "
+                        "password commands or may require specific conditions.");
         return false;
     }
 
@@ -152,8 +154,8 @@ bool ATASecureEraseAlgorithm::execute_on_device(const std::string& device_path,
         disable_security_password(fd, TEMP_PASSWORD, false);
         close(fd);
         report_progress(callback, 10, "Error", true, true,
-                       "Failed to prepare for security erase. "
-                       "The device rejected the SECURITY ERASE PREPARE command.");
+                        "Failed to prepare for security erase. "
+                        "The device rejected the SECURITY ERASE PREPARE command.");
         return false;
     }
 
@@ -177,11 +179,11 @@ bool ATASecureEraseAlgorithm::execute_on_device(const std::string& device_path,
         disable_security_password(fd, TEMP_PASSWORD, false);
         close(fd);
         report_progress(callback, 15, "Error", true, true,
-                       "Secure erase command failed. The device may have:\n"
-                       "- Timed out (erase takes too long)\n"
-                       "- Rejected the command\n"
-                       "- Encountered a hardware error\n\n"
-                       "Check dmesg for more information.");
+                        "Secure erase command failed. The device may have:\n"
+                        "- Timed out (erase takes too long)\n"
+                        "- Rejected the command\n"
+                        "- Encountered a hardware error\n\n"
+                        "Check dmesg for more information.");
         return false;
     }
 
@@ -272,9 +274,8 @@ bool ATASecureEraseAlgorithm::is_device_frozen(const std::string& device_path) {
     return info.frozen;
 }
 
-bool ATASecureEraseAlgorithm::send_ata_command(int fd, uint8_t command,
-                                                const void* data, size_t data_size,
-                                                bool data_out) {
+bool ATASecureEraseAlgorithm::send_ata_command(int fd, uint8_t command, const void* data,
+                                               size_t data_size, bool data_out) {
     // Use HDIO_DRIVE_CMD for simple commands
     uint8_t cmd_buf[4 + 512];
     std::memset(cmd_buf, 0, sizeof(cmd_buf));
@@ -374,8 +375,8 @@ bool ATASecureEraseAlgorithm::security_erase_prepare(int fd) {
     return ioctl(fd, HDIO_DRIVE_CMD, args) == 0;
 }
 
-bool ATASecureEraseAlgorithm::security_erase_unit(int fd, const char* password,
-                                                   bool enhanced, bool master) {
+bool ATASecureEraseAlgorithm::security_erase_unit(int fd, const char* password, bool enhanced,
+                                                  bool master) {
     uint8_t buffer[512];
     std::memset(buffer, 0, sizeof(buffer));
 
@@ -383,8 +384,10 @@ bool ATASecureEraseAlgorithm::security_erase_unit(int fd, const char* password,
     // Bit 0: 0=user password, 1=master password
     // Bit 1: 0=normal erase, 1=enhanced erase
     uint16_t control = 0;
-    if (master) control |= 0x0001;
-    if (enhanced) control |= 0x0002;
+    if (master)
+        control |= 0x0001;
+    if (enhanced)
+        control |= 0x0002;
 
     buffer[0] = control & 0xFF;
     buffer[1] = (control >> 8) & 0xFF;
@@ -407,9 +410,10 @@ bool ATASecureEraseAlgorithm::security_erase_unit(int fd, const char* password,
 }
 
 void ATASecureEraseAlgorithm::report_progress(ProgressCallback& callback, double percentage,
-                                               const std::string& status, bool complete,
-                                               bool error, const std::string& error_msg) {
-    if (!callback) return;
+                                              const std::string& status, bool complete, bool error,
+                                              const std::string& error_msg) {
+    if (!callback)
+        return;
 
     WipeProgress progress{};
     progress.bytes_written = 0;

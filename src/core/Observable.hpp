@@ -96,7 +96,7 @@ protected:
      * @param property_name Name of the property for notification
      * @return true if the value changed, false otherwise
      */
-    template<typename T>
+    template <typename T>
     auto set_property(T& field, const T& value, const std::string& property_name) -> bool {
         if (field == value) {
             return false;
@@ -127,13 +127,12 @@ private:
  * name.set("New Name");  // Triggers callback
  * ```
  */
-template<typename T>
+template <typename T>
 class Observable {
 public:
     using ValueChangedCallback = std::function<void(const T&)>;
 
-    explicit Observable(T initial_value = T{})
-        : value_(std::move(initial_value)) {}
+    explicit Observable(T initial_value = T{}) : value_(std::move(initial_value)) {}
 
     /**
      * @brief Get the current value
@@ -210,4 +209,4 @@ private:
     mutable std::mutex mutex_;
 };
 
-} // namespace mvvm
+}  // namespace mvvm

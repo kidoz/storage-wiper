@@ -7,11 +7,12 @@
 
 #include "models/WipeTypes.hpp"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <atomic>
 #include <cstdint>
 #include <string>
-#include <fcntl.h>
-#include <unistd.h>
 
 /**
  * @class IWipeAlgorithm
@@ -30,7 +31,7 @@ public:
      * @return true if successful, false otherwise
      */
     virtual bool execute(int fd, uint64_t size, ProgressCallback callback,
-                        const std::atomic<bool>& cancel_flag) = 0;
+                         const std::atomic<bool>& cancel_flag) = 0;
 
     /**
      * @brief Execute the wipe algorithm on a device by path

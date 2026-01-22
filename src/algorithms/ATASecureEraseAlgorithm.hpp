@@ -6,20 +6,21 @@
 #pragma once
 
 #include "IWipeAlgorithm.hpp"
-#include <string>
+
 #include <cstdint>
+#include <string>
 
 /**
  * @enum ATASecurityState
  * @brief ATA Security feature state
  */
 enum class ATASecurityState {
-    NOT_SUPPORTED,      ///< Security feature not supported
-    DISABLED,           ///< Security not enabled
-    ENABLED_UNLOCKED,   ///< Security enabled, device unlocked
-    ENABLED_LOCKED,     ///< Security enabled, device locked
-    FROZEN,             ///< Security frozen (cannot enable/disable)
-    EXPIRED             ///< Security count expired
+    NOT_SUPPORTED,     ///< Security feature not supported
+    DISABLED,          ///< Security not enabled
+    ENABLED_UNLOCKED,  ///< Security enabled, device unlocked
+    ENABLED_LOCKED,    ///< Security enabled, device locked
+    FROZEN,            ///< Security frozen (cannot enable/disable)
+    EXPIRED            ///< Security count expired
 };
 
 /**
@@ -33,8 +34,8 @@ struct ATASecurityInfo {
     bool frozen = false;
     bool count_expired = false;
     bool enhanced_erase_supported = false;
-    uint16_t erase_time_normal = 0;      ///< Normal erase time in 2-minute units
-    uint16_t erase_time_enhanced = 0;    ///< Enhanced erase time in 2-minute units
+    uint16_t erase_time_normal = 0;    ///< Normal erase time in 2-minute units
+    uint16_t erase_time_enhanced = 0;  ///< Enhanced erase time in 2-minute units
     uint8_t master_password_revision = 0;
     ATASecurityState state = ATASecurityState::NOT_SUPPORTED;
 };
@@ -61,36 +62,29 @@ public:
      * @brief Not used - ATA Secure Erase requires device-level access
      */
     bool execute(int fd, uint64_t size, ProgressCallback callback,
-                const std::atomic<bool>& cancel_flag) override;
+                 const std::atomic<bool>& cancel_flag) override;
 
     /**
      * @brief Execute ATA Secure Erase on the specified device
      */
-    bool execute_on_device(const std::string& device_path, uint64_t size,
-                          ProgressCallback callback,
-                          const std::atomic<bool>& cancel_flag) override;
+    bool execute_on_device(const std::string& device_path, uint64_t size, ProgressCallback callback,
+                           const std::atomic<bool>& cancel_flag) override;
 
     /**
      * @brief ATA Secure Erase requires device-level access
      */
     bool requires_device_access() const override { return true; }
 
-    std::string get_name() const override {
-        return "ATA Secure Erase";
-    }
+    std::string get_name() const override { return "ATA Secure Erase"; }
 
     std::string get_description() const override {
         return "Hardware-based secure erase using ATA Security commands. "
                "Most effective for SSDs - erases all blocks including wear-leveled areas.";
     }
 
-    int get_pass_count() const override {
-        return 1;
-    }
+    int get_pass_count() const override { return 1; }
 
-    bool is_ssd_compatible() const override {
-        return true;
-    }
+    bool is_ssd_compatible() const override { return true; }
 
     /**
      * @brief Check if a device supports ATA Secure Erase
@@ -136,8 +130,8 @@ private:
     /**
      * @brief Send ATA command via ioctl
      */
-    bool send_ata_command(int fd, uint8_t command, const void* data = nullptr,
-                         size_t data_size = 0, bool data_out = false);
+    bool send_ata_command(int fd, uint8_t command, const void* data = nullptr, size_t data_size = 0,
+                          bool data_out = false);
 
     /**
      * @brief Read IDENTIFY DEVICE data
@@ -163,12 +157,12 @@ private:
      * @brief Execute security erase unit command
      */
     bool security_erase_unit(int fd, const char* password, bool enhanced = false,
-                            bool master = false);
+                             bool master = false);
 
     /**
      * @brief Report progress to callback
      */
-    void report_progress(ProgressCallback& callback, double percentage,
-                        const std::string& status, bool complete = false,
-                        bool error = false, const std::string& error_msg = "");
+    void report_progress(ProgressCallback& callback, double percentage, const std::string& status,
+                         bool complete = false, bool error = false,
+                         const std::string& error_msg = "");
 };

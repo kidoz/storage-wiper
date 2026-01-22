@@ -3,8 +3,8 @@
  * @brief Google Test main entry point for storage-wiper tests
  */
 
-#include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <gtest/gtest.h>
 
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);

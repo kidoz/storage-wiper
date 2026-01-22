@@ -1,11 +1,14 @@
 #include "algorithms/SchneierAlgorithm.hpp"
+
 #include "models/WipeTypes.hpp"
 #include "util/WriteHelpers.hpp"
+
+#include <unistd.h>
+
 #include <algorithm>
 #include <random>
 #include <string>
 #include <vector>
-#include <unistd.h>
 
 bool SchneierAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
                                 const std::atomic<bool>& cancel_flag) {
@@ -22,14 +25,16 @@ bool SchneierAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback
     if (!write_pattern(fd, size, buffer.data(), buffer.size(), callback, 1, 7, cancel_flag)) {
         return false;
     }
-    if (lseek(fd, 0, SEEK_SET) == -1) return false;
+    if (lseek(fd, 0, SEEK_SET) == -1)
+        return false;
 
     // Pass 2: 0x00
     std::fill(buffer.begin(), buffer.end(), 0x00);
     if (!write_pattern(fd, size, buffer.data(), buffer.size(), callback, 2, 7, cancel_flag)) {
         return false;
     }
-    if (lseek(fd, 0, SEEK_SET) == -1) return false;
+    if (lseek(fd, 0, SEEK_SET) == -1)
+        return false;
 
     // Passes 3-7: Random data
     std::random_device random_device;
@@ -60,7 +65,8 @@ bool SchneierAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback
                 progress.total_bytes = size;
                 progress.current_pass = pass;
                 progress.total_passes = 7;
-                progress.percentage = (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
+                progress.percentage =
+                    (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
                 progress.status = "Writing pattern (Pass " + std::to_string(pass) + "/7)";
                 callback(progress);
             }
@@ -71,7 +77,8 @@ bool SchneierAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback
         }
 
         if (pass < 7) {
-            if (lseek(fd, 0, SEEK_SET) == -1) return false;
+            if (lseek(fd, 0, SEEK_SET) == -1)
+                return false;
         }
     }
 
@@ -79,9 +86,8 @@ bool SchneierAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback
 }
 
 bool SchneierAlgorithm::write_pattern(int fd, uint64_t size, const uint8_t* pattern,
-                                     size_t pattern_size, ProgressCallback callback,
-                                     int pass, int total_passes,
-                                     const std::atomic<bool>& cancel_flag) {
+                                      size_t pattern_size, ProgressCallback callback, int pass,
+                                      int total_passes, const std::atomic<bool>& cancel_flag) {
     uint64_t written = 0;
 
     while (written < size && !cancel_flag.load()) {
@@ -100,9 +106,10 @@ bool SchneierAlgorithm::write_pattern(int fd, uint64_t size, const uint8_t* patt
             progress.total_bytes = size;
             progress.current_pass = pass;
             progress.total_passes = total_passes;
-            progress.percentage = (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
-            progress.status = "Writing pattern (Pass " + std::to_string(pass) +
-                            "/" + std::to_string(total_passes) + ")";
+            progress.percentage =
+                (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
+            progress.status = "Writing pattern (Pass " + std::to_string(pass) + "/" +
+                              std::to_string(total_passes) + ")";
             callback(progress);
         }
     }

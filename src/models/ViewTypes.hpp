@@ -6,6 +6,7 @@
 #pragma once
 
 #include "models/WipeTypes.hpp"
+
 #include <functional>
 #include <string>
 
@@ -28,7 +29,11 @@ struct AlgorithmInfo {
  * @brief Information for displaying messages to the user
  */
 struct MessageInfo {
-    enum class Type { INFO, ERROR, CONFIRMATION };
+    enum class Type {
+        INFO,
+        ERROR,
+        CONFIRMATION
+    };
     Type type = Type::INFO;
     std::string title;
     std::string message;
@@ -36,8 +41,6 @@ struct MessageInfo {
 
     // Note: Comparing callbacks is not possible, so we compare by content only
     auto operator==(const MessageInfo& other) const -> bool {
-        return type == other.type &&
-               title == other.title &&
-               message == other.message;
+        return type == other.type && title == other.title && message == other.message;
     }
 };

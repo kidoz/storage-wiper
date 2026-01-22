@@ -1,7 +1,8 @@
 #pragma once
 
-#include <cerrno>
 #include <unistd.h>
+
+#include <cerrno>
 
 namespace util {
 
@@ -15,4 +16,4 @@ inline auto write_with_retry(int fd, const void* buffer, size_t size) -> ssize_t
     }
 }
 
-} // namespace util
+}  // namespace util

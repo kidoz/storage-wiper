@@ -9,6 +9,7 @@
 #pragma once
 
 #include <unistd.h>
+
 #include <utility>
 
 namespace util {
@@ -58,28 +59,22 @@ public:
      * @brief Get the raw file descriptor
      * @return Raw file descriptor value
      */
-    [[nodiscard]] constexpr auto get() const noexcept -> int {
-        return fd_;
-    }
+    [[nodiscard]] constexpr auto get() const noexcept -> int { return fd_; }
 
     /**
      * @brief Check if file descriptor is valid
      * @return true if fd >= 0, false otherwise
      */
-    [[nodiscard]] constexpr auto is_valid() const noexcept -> bool {
-        return fd_ >= 0;
-    }
+    [[nodiscard]] constexpr auto is_valid() const noexcept -> bool { return fd_ >= 0; }
 
     /**
      * @brief Boolean conversion operator
      * @return true if file descriptor is valid
      */
-    explicit operator bool() const noexcept {
-        return is_valid();
-    }
+    explicit operator bool() const noexcept { return is_valid(); }
 
 private:
     int fd_;  ///< Raw file descriptor
 };
 
-} // namespace util
+}  // namespace util

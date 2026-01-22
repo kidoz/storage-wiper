@@ -1,9 +1,12 @@
 #include "algorithms/ZeroFillAlgorithm.hpp"
+
 #include "models/WipeTypes.hpp"
 #include "util/WriteHelpers.hpp"
-#include <vector>
+
 #include <unistd.h>
+
 #include <algorithm>
+#include <vector>
 
 bool ZeroFillAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
                                 const std::atomic<bool>& cancel_flag) {
@@ -31,7 +34,8 @@ bool ZeroFillAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback
             progress.total_bytes = size;
             progress.current_pass = 1;
             progress.total_passes = 1;
-            progress.percentage = (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
+            progress.percentage =
+                (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
             progress.status = "Writing zeros...";
             callback(progress);
         }

@@ -3,14 +3,16 @@
  * @brief Unit tests for WipeService
  */
 
-#include <gtest/gtest.h>
-#include <gmock/gmock.h>
-#include <future>
-#include <thread>
-
 #include "helper/services/WipeService.hpp"
+
 #include "fixtures/TestFixtures.hpp"
 #include "mocks/MockDiskService.hpp"
+
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
+#include <future>
+#include <thread>
 
 class WipeServiceTest : public ::testing::Test {
 protected:
@@ -123,14 +125,14 @@ TEST_F(WipeServiceTest, GetPassCount_AllAlgorithms) {
     };
 
     std::vector<TestCase> test_cases = {
-        {WipeAlgorithm::ZERO_FILL, 1},
-        {WipeAlgorithm::RANDOM_FILL, 1},
-        {WipeAlgorithm::DOD_5220_22_M, 3},
-        {WipeAlgorithm::SCHNEIER, 7},
-        {WipeAlgorithm::VSITR, 7},
-        {WipeAlgorithm::GOST_R_50739_95, 2},
-        {WipeAlgorithm::GUTMANN, 35},
-        {WipeAlgorithm::ATA_SECURE_ERASE, 1},
+        {       WipeAlgorithm::ZERO_FILL,  1},
+        {     WipeAlgorithm::RANDOM_FILL,  1},
+        {   WipeAlgorithm::DOD_5220_22_M,  3},
+        {        WipeAlgorithm::SCHNEIER,  7},
+        {           WipeAlgorithm::VSITR,  7},
+        { WipeAlgorithm::GOST_R_50739_95,  2},
+        {         WipeAlgorithm::GUTMANN, 35},
+        {WipeAlgorithm::ATA_SECURE_ERASE,  1},
     };
 
     for (const auto& tc : test_cases) {
@@ -148,7 +150,6 @@ TEST_F(WipeServiceTest, AlgorithmNames_AreUnique) {
         auto name = wipe_service->get_algorithm_name(algo);
 
         EXPECT_FALSE(name.empty()) << "Algorithm " << i << " has empty name";
-        EXPECT_TRUE(names.insert(name).second)
-            << "Duplicate algorithm name: " << name;
+        EXPECT_TRUE(names.insert(name).second) << "Duplicate algorithm name: " << name;
     }
 }

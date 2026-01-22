@@ -74,7 +74,13 @@ cppcheck:
 
 # Format code (requires clang-format)
 format:
-    find src -name '*.cpp' -o -name '*.hpp' | xargs clang-format -i
+    find src tests -name '*.cpp' -o -name '*.hpp' | xargs clang-format -i
+
+# Check formatting without modifying files
+format-check:
+    @find src tests -name '*.cpp' -o -name '*.hpp' | xargs clang-format --dry-run -Werror 2>&1 \
+        && echo "All files formatted correctly" \
+        || (echo "Run 'just format' to fix formatting"; exit 1)
 
 # === Test Commands ===
 
@@ -105,6 +111,40 @@ test-list:
     @meson configure {{build_dir}} -Denable_tests=true >/dev/null
     meson compile -C {{build_dir}}
     ./{{build_dir}}/storage_wiper_tests --gtest_list_tests
+
+# === Memory Analysis Commands ===
+
+# Run tests with valgrind to detect memory leaks
+valgrind:
+    @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}} -Denable_tests=true -Dbuildtype=debug; fi
+    @meson configure {{build_dir}} -Denable_tests=true -Dbuildtype=debug >/dev/null
+    meson compile -C {{build_dir}}
+    valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
+        --error-exitcode=1 ./{{build_dir}}/storage_wiper_tests
+
+# Run tests with valgrind (summary only)
+valgrind-quick:
+    @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}} -Denable_tests=true -Dbuildtype=debug; fi
+    @meson configure {{build_dir}} -Denable_tests=true -Dbuildtype=debug >/dev/null
+    meson compile -C {{build_dir}}
+    valgrind --leak-check=summary ./{{build_dir}}/storage_wiper_tests
+
+# Run tests with valgrind and save report to file
+valgrind-report:
+    @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}} -Denable_tests=true -Dbuildtype=debug; fi
+    @meson configure {{build_dir}} -Denable_tests=true -Dbuildtype=debug >/dev/null
+    meson compile -C {{build_dir}}
+    valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
+        --log-file=valgrind-report.txt ./{{build_dir}}/storage_wiper_tests
+    @echo "Report saved to valgrind-report.txt"
+
+# Run specific test with valgrind (e.g., just valgrind-filter "ZeroFill")
+valgrind-filter pattern:
+    @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}} -Denable_tests=true -Dbuildtype=debug; fi
+    @meson configure {{build_dir}} -Denable_tests=true -Dbuildtype=debug >/dev/null
+    meson compile -C {{build_dir}}
+    valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
+        ./{{build_dir}}/storage_wiper_tests --gtest_filter="*{{pattern}}*"
 
 # === Installation Commands ===
 

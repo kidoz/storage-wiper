@@ -64,21 +64,20 @@ public:
      * container.register_type<IDiskService, DiskService>(Lifetime::SINGLETON);
      * ```
      */
-    template<typename Interface, typename Implementation>
+    template <typename Interface, typename Implementation>
     void register_type(Lifetime lifetime = Lifetime::SINGLETON) {
         static_assert(std::is_base_of_v<Interface, Implementation>,
-            "Implementation must derive from Interface");
+                      "Implementation must derive from Interface");
 
         auto factory = []() -> std::shared_ptr<Interface> {
             return std::make_shared<Implementation>();
         };
 
         std::lock_guard lock(mutex_);
-        registrations_[std::type_index(typeid(Interface))] = Registration{
-            .factory = [factory]() -> std::any { return factory(); },
-            .lifetime = lifetime,
-            .instance = std::any{}
-        };
+        registrations_[std::type_index(typeid(Interface))] =
+            Registration{.factory = [factory]() -> std::any { return factory(); },
+                         .lifetime = lifetime,
+                         .instance = std::any{}};
     }
 
     /**
@@ -95,15 +94,14 @@ public:
      * );
      * ```
      */
-    template<typename Interface>
+    template <typename Interface>
     void register_factory(std::function<std::shared_ptr<Interface>()> factory,
                           Lifetime lifetime = Lifetime::SINGLETON) {
         std::lock_guard lock(mutex_);
-        registrations_[std::type_index(typeid(Interface))] = Registration{
-            .factory = [factory]() -> std::any { return factory(); },
-            .lifetime = lifetime,
-            .instance = std::any{}
-        };
+        registrations_[std::type_index(typeid(Interface))] =
+            Registration{.factory = [factory]() -> std::any { return factory(); },
+                         .lifetime = lifetime,
+                         .instance = std::any{}};
     }
 
     /**
@@ -117,14 +115,11 @@ public:
      * container.register_instance<IDiskService>(service);
      * ```
      */
-    template<typename Interface>
+    template <typename Interface>
     void register_instance(std::shared_ptr<Interface> instance) {
         std::lock_guard lock(mutex_);
-        registrations_[std::type_index(typeid(Interface))] = Registration{
-            .factory = nullptr,
-            .lifetime = Lifetime::SINGLETON,
-            .instance = instance
-        };
+        registrations_[std::type_index(typeid(Interface))] =
+            Registration{.factory = nullptr, .lifetime = Lifetime::SINGLETON, .instance = instance};
     }
 
     /**
@@ -138,7 +133,7 @@ public:
      * auto service = container.resolve<IDiskService>();
      * ```
      */
-    template<typename Interface>
+    template <typename Interface>
     [[nodiscard]] auto resolve() -> std::shared_ptr<Interface> {
         std::lock_guard lock(mutex_);
 
@@ -146,22 +141,21 @@ public:
         auto it = registrations_.find(type_id);
 
         if (it == registrations_.end()) {
-            throw std::runtime_error(
-                std::string("Type not registered: ") + typeid(Interface).name());
+            throw std::runtime_error(std::string("Type not registered: ") +
+                                     typeid(Interface).name());
         }
 
         auto& registration = it->second;
 
         // Return existing singleton instance if available
-        if (registration.lifetime == Lifetime::SINGLETON &&
-            registration.instance.has_value()) {
+        if (registration.lifetime == Lifetime::SINGLETON && registration.instance.has_value()) {
             return std::any_cast<std::shared_ptr<Interface>>(registration.instance);
         }
 
         // Create new instance
         if (!registration.factory) {
-            throw std::runtime_error(
-                std::string("No factory registered for type: ") + typeid(Interface).name());
+            throw std::runtime_error(std::string("No factory registered for type: ") +
+                                     typeid(Interface).name());
         }
 
         auto instance = std::any_cast<std::shared_ptr<Interface>>(registration.factory());
@@ -179,7 +173,7 @@ public:
      * @tparam Interface The interface type to check
      * @return true if the type is registered
      */
-    template<typename Interface>
+    template <typename Interface>
     [[nodiscard]] auto is_registered() const -> bool {
         std::lock_guard lock(mutex_);
         return registrations_.contains(std::type_index(typeid(Interface)));
@@ -257,7 +251,7 @@ public:
      * @tparam Interface The interface type to resolve
      * @return Shared pointer to the resolved service
      */
-    template<typename Interface>
+    template <typename Interface>
     [[nodiscard]] static auto resolve() -> std::shared_ptr<Interface> {
         return instance().resolve<Interface>();
     }
@@ -265,9 +259,7 @@ public:
     /**
      * @brief Reset the global container (primarily for testing)
      */
-    static void reset() {
-        instance().clear();
-    }
+    static void reset() { instance().clear(); }
 };
 
-} // namespace di
+}  // namespace di

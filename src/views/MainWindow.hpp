@@ -13,8 +13,10 @@
 
 #include "viewmodels/MainViewModel.hpp"
 #include "views/MainWindowContent.hpp"
+
 #include <adwaita.h>
 #include <gtkmm.h>
+
 #include <memory>
 
 /**

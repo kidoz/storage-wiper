@@ -1,13 +1,58 @@
 #include "views/MainWindowContent.hpp"
-#include "views/DiskRow.hpp"
-#include "views/AlgorithmRow.hpp"
 
+#include "views/AlgorithmRow.hpp"
+#include "views/DiskRow.hpp"
+
+#include <cstdint>
 #include <format>
 #include <sstream>
 
-MainWindowContent::MainWindowContent()
-    : Gtk::Box(Gtk::Orientation::VERTICAL, 0)
-{
+namespace {
+
+/**
+ * @brief Format bytes per second as human-readable speed
+ */
+auto format_speed(uint64_t bytes_per_sec) -> std::string {
+    constexpr uint64_t KB = 1'024;
+    constexpr uint64_t MB = KB * 1'024;
+    constexpr uint64_t GB = MB * 1'024;
+
+    if (bytes_per_sec >= GB) {
+        return std::format("{:.1f} GB/s",
+                           static_cast<double>(bytes_per_sec) / static_cast<double>(GB));
+    } else if (bytes_per_sec >= MB) {
+        return std::format("{:.1f} MB/s",
+                           static_cast<double>(bytes_per_sec) / static_cast<double>(MB));
+    } else if (bytes_per_sec >= KB) {
+        return std::format("{:.1f} KB/s",
+                           static_cast<double>(bytes_per_sec) / static_cast<double>(KB));
+    } else {
+        return std::format("{} B/s", bytes_per_sec);
+    }
+}
+
+/**
+ * @brief Format seconds as human-readable time (HH:MM:SS or MM:SS)
+ */
+auto format_time(int64_t seconds) -> std::string {
+    if (seconds < 0) {
+        return "calculating...";
+    }
+
+    int64_t hours = seconds / 3'600;
+    int64_t minutes = (seconds % 3'600) / 60;
+    int64_t secs = seconds % 60;
+
+    if (hours > 0) {
+        return std::format("{}:{:02d}:{:02d}", hours, minutes, secs);
+    } else {
+        return std::format("{}:{:02d}", minutes, secs);
+    }
+}
+
+}  // namespace
+
+MainWindowContent::MainWindowContent() : Gtk::Box(Gtk::Orientation::VERTICAL, 0) {
     setup_from_builder();
     setup_dispatcher();
     connect_signals();
@@ -21,8 +66,7 @@ MainWindowContent::~MainWindowContent() {
 
 void MainWindowContent::setup_from_builder() {
     // Load UI from GResource
-    auto builder = Gtk::Builder::create_from_resource(
-        "/org/storage/wiper/ui/main-window.ui");
+    auto builder = Gtk::Builder::create_from_resource("/org/storage/wiper/ui/main-window.ui");
 
     // Get the main content box from the builder
     auto* main_content = builder->get_widget<Gtk::Box>("main_content");
@@ -44,8 +88,8 @@ void MainWindowContent::setup_from_builder() {
     wipe_button_ = builder->get_widget<Gtk::Button>("wipe_button");
     cancel_button_ = builder->get_widget<Gtk::Button>("cancel_button");
 
-    if (!disk_list_ || !options_box_ || !progress_bar_ ||
-        !progress_label_ || !wipe_button_ || !cancel_button_) {
+    if (!disk_list_ || !options_box_ || !progress_bar_ || !progress_label_ || !wipe_button_ ||
+        !cancel_button_) {
         throw std::runtime_error("Failed to load main-window.ui: required widgets not found");
     }
 }
@@ -101,13 +145,13 @@ void MainWindowContent::process_pending_tasks() {
 }
 
 void MainWindowContent::bind_disks() {
-    if (!view_model_) return;
+    if (!view_model_)
+        return;
 
     auto id = view_model_->disks.subscribe([this](const std::vector<DiskInfo>& disks) {
         auto disks_copy = disks;
-        post_ui_update([this, disks_copy = std::move(disks_copy)]() {
-            update_disk_list(disks_copy);
-        });
+        post_ui_update(
+            [this, disks_copy = std::move(disks_copy)]() { update_disk_list(disks_copy); });
     });
     subscriptions_.push_back(id);
 
@@ -116,14 +160,16 @@ void MainWindowContent::bind_disks() {
 }
 
 void MainWindowContent::bind_algorithms() {
-    if (!view_model_) return;
+    if (!view_model_)
+        return;
 
-    auto id = view_model_->algorithms.subscribe([this](const std::vector<AlgorithmInfo>& algorithms) {
-        auto algos_copy = algorithms;
-        post_ui_update([this, algos_copy = std::move(algos_copy)]() {
-            update_algorithm_list(algos_copy);
+    auto id =
+        view_model_->algorithms.subscribe([this](const std::vector<AlgorithmInfo>& algorithms) {
+            auto algos_copy = algorithms;
+            post_ui_update([this, algos_copy = std::move(algos_copy)]() {
+                update_algorithm_list(algos_copy);
+            });
         });
-    });
     subscriptions_.push_back(id);
 
     // Initialize with current value (subscribe doesn't call callback with existing value)
@@ -131,19 +177,19 @@ void MainWindowContent::bind_algorithms() {
 }
 
 void MainWindowContent::bind_progress() {
-    if (!view_model_) return;
+    if (!view_model_)
+        return;
 
     auto id = view_model_->wipe_progress.subscribe([this](const WipeProgress& progress) {
         auto progress_copy = progress;
-        post_ui_update([this, progress_copy]() {
-            update_progress(progress_copy);
-        });
+        post_ui_update([this, progress_copy]() { update_progress(progress_copy); });
     });
     subscriptions_.push_back(id);
 }
 
 void MainWindowContent::bind_can_wipe() {
-    if (!view_model_) return;
+    if (!view_model_)
+        return;
 
     auto id = view_model_->can_wipe.subscribe([this](bool can) {
         post_ui_update([this, can]() {
@@ -161,7 +207,8 @@ void MainWindowContent::bind_can_wipe() {
 }
 
 void MainWindowContent::update_disk_list(const std::vector<DiskInfo>& disks) {
-    if (!disk_list_) return;
+    if (!disk_list_)
+        return;
 
     // Save the selected path before clearing (clearing triggers row-selected with nullptr)
     std::string selected_path;
@@ -185,9 +232,10 @@ void MainWindowContent::update_disk_list(const std::vector<DiskInfo>& disks) {
 
     // Restore selection if a disk was previously selected
     if (!selected_path.empty()) {
-        for (int i = 0; ; ++i) {
+        for (int i = 0;; ++i) {
             auto* row = disk_list_->get_row_at_index(i);
-            if (!row) break;
+            if (!row)
+                break;
 
             auto* disk_row = dynamic_cast<DiskRow*>(row);
             if (disk_row && disk_row->get_disk_path() == selected_path) {
@@ -207,7 +255,8 @@ void MainWindowContent::update_disk_list(const std::vector<DiskInfo>& disks) {
 }
 
 void MainWindowContent::update_algorithm_list(const std::vector<AlgorithmInfo>& algorithms) {
-    if (!options_box_) return;
+    if (!options_box_)
+        return;
 
     // Clear existing rows
     algorithm_rows_.clear();
@@ -250,6 +299,17 @@ void MainWindowContent::update_progress(const WipeProgress& progress) {
             status << " (Pass " << progress.current_pass << "/" << progress.total_passes << ")";
         }
         status << " - " << static_cast<int>(progress.percentage) << "%";
+
+        // Add speed display
+        if (progress.speed_bytes_per_sec > 0) {
+            status << " @ " << format_speed(progress.speed_bytes_per_sec);
+        }
+
+        // Add ETA display
+        if (progress.estimated_seconds_remaining >= 0) {
+            status << " - ETA: " << format_time(progress.estimated_seconds_remaining);
+        }
+
         progress_label_->set_text(status.str());
     }
 
@@ -272,10 +332,12 @@ void MainWindowContent::update_progress_visibility(bool visible) {
 }
 
 void MainWindowContent::on_disk_selected(Gtk::ListBoxRow* row) {
-    if (!view_model_) return;
+    if (!view_model_)
+        return;
 
     // Ignore selection changes during list updates (e.g., when clearing rows)
-    if (updating_disk_list_) return;
+    if (updating_disk_list_)
+        return;
 
     if (row) {
         auto* disk_row = dynamic_cast<DiskRow*>(row);

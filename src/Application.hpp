@@ -9,7 +9,9 @@
 #pragma once
 
 #include "di/Container.hpp"
+
 #include <adwaita.h>
+
 #include <memory>
 
 // Forward declarations

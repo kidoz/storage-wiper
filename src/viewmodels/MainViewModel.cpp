@@ -1,26 +1,21 @@
 #include "viewmodels/MainViewModel.hpp"
 
 #include <glib.h>
+
+#include <algorithm>
 #include <iostream>
 #include <sstream>
-#include <algorithm>
 #include <utility>
 
 MainViewModel::MainViewModel(std::shared_ptr<IDiskService> disk_service,
                              std::shared_ptr<IWipeService> wipe_service)
-    : disk_service_(std::move(disk_service))
-    , wipe_service_(std::move(wipe_service)) {
-
+    : disk_service_(std::move(disk_service)), wipe_service_(std::move(wipe_service)) {
     // Initialize commands
     refresh_command = std::make_shared<mvvm::RelayCommand>(
-        [this]() { load_disks(); },
-        [this]() { return !is_wipe_in_progress.get(); }
-    );
+        [this]() { load_disks(); }, [this]() { return !is_wipe_in_progress.get(); });
 
-    wipe_command = std::make_shared<mvvm::RelayCommand>(
-        [this]() { start_wipe(); },
-        [this]() { return can_wipe.get(); }
-    );
+    wipe_command = std::make_shared<mvvm::RelayCommand>([this]() { start_wipe(); },
+                                                        [this]() { return can_wipe.get(); });
 
     cancel_command = std::make_shared<mvvm::RelayCommand>(
         [this]() {
@@ -29,24 +24,21 @@ MainViewModel::MainViewModel(std::shared_ptr<IDiskService> disk_service,
                              "Wipe operation is being cancelled...");
             }
         },
-        [this]() { return is_wipe_in_progress.get(); }
-    );
+        [this]() { return is_wipe_in_progress.get(); });
 
     // Subscribe to property changes that affect can_wipe
-    selected_disk_subscription_id_ = selected_disk_path.subscribe(
-        [this](const std::string&) { update_can_wipe(); });
-    wipe_in_progress_subscription_id_ = is_wipe_in_progress.subscribe(
-        [this](bool) {
-            update_can_wipe();
-            refresh_command->raise_can_execute_changed();
-            wipe_command->raise_can_execute_changed();
-            cancel_command->raise_can_execute_changed();
-        });
-    connection_subscription_id_ = is_connected.subscribe(
-        [this](bool) {
-            update_can_wipe();
-            refresh_command->raise_can_execute_changed();
-        });
+    selected_disk_subscription_id_ =
+        selected_disk_path.subscribe([this](const std::string&) { update_can_wipe(); });
+    wipe_in_progress_subscription_id_ = is_wipe_in_progress.subscribe([this](bool) {
+        update_can_wipe();
+        refresh_command->raise_can_execute_changed();
+        wipe_command->raise_can_execute_changed();
+        cancel_command->raise_can_execute_changed();
+    });
+    connection_subscription_id_ = is_connected.subscribe([this](bool) {
+        update_can_wipe();
+        refresh_command->raise_can_execute_changed();
+    });
 }
 
 MainViewModel::~MainViewModel() {
@@ -117,23 +109,17 @@ void MainViewModel::load_algorithms() {
 
     // Get algorithm info from WipeService
     constexpr std::array all_algorithms = {
-        WipeAlgorithm::ZERO_FILL,
-        WipeAlgorithm::RANDOM_FILL,
-        WipeAlgorithm::DOD_5220_22_M,
-        WipeAlgorithm::SCHNEIER,
-        WipeAlgorithm::VSITR,
-        WipeAlgorithm::GOST_R_50739_95,
-        WipeAlgorithm::GUTMANN
-    };
+        WipeAlgorithm::ZERO_FILL, WipeAlgorithm::RANDOM_FILL, WipeAlgorithm::DOD_5220_22_M,
+        WipeAlgorithm::SCHNEIER,  WipeAlgorithm::VSITR,       WipeAlgorithm::GOST_R_50739_95,
+        WipeAlgorithm::GUTMANN};
 
     for (auto algo : all_algorithms) {
-        algo_list.push_back(AlgorithmInfo{
-            .algorithm = algo,
-            .name = wipe_service_->get_algorithm_name(algo),
-            .description = wipe_service_->get_algorithm_description(algo),
-            .pass_count = wipe_service_->get_pass_count(algo),
-            .is_ssd_compatible = wipe_service_->is_ssd_compatible(algo)
-        });
+        algo_list.push_back(
+            AlgorithmInfo{.algorithm = algo,
+                          .name = wipe_service_->get_algorithm_name(algo),
+                          .description = wipe_service_->get_algorithm_description(algo),
+                          .pass_count = wipe_service_->get_pass_count(algo),
+                          .is_ssd_compatible = wipe_service_->is_ssd_compatible(algo)});
     }
 
     algorithms.set(algo_list);
@@ -144,10 +130,7 @@ void MainViewModel::update_can_wipe() {
     const auto valid = disk_service_->validate_device_path(path);
     // Allow wipe for mounted disks - we'll prompt to unmount in start_wipe()
     // Also require connection to the helper service
-    bool can = is_connected.get() &&
-               !path.empty() &&
-               !is_wipe_in_progress.get() &&
-               valid;
+    bool can = is_connected.get() && !path.empty() && !is_wipe_in_progress.get() && valid;
 
     can_wipe.set(can);
     wipe_command->raise_can_execute_changed();
@@ -157,8 +140,7 @@ void MainViewModel::start_wipe() {
     const auto& path = selected_disk_path.get();
 
     if (path.empty()) {
-        show_message(MessageInfo::Type::ERROR, "No Disk Selected",
-                     "Please select a disk to wipe.");
+        show_message(MessageInfo::Type::ERROR, "No Disk Selected", "Please select a disk to wipe.");
         return;
     }
 
@@ -167,8 +149,7 @@ void MainViewModel::start_wipe() {
         if (!valid_path.error().message.empty()) {
             message += "\n\nError: " + valid_path.error().message;
         }
-        show_message(MessageInfo::Type::ERROR, "Invalid Device",
-                     message);
+        show_message(MessageInfo::Type::ERROR, "Invalid Device", message);
         return;
     }
 
@@ -192,7 +173,8 @@ void MainViewModel::start_wipe() {
         }
         mounted_message << ".\n\n";
         mounted_message << "Do you want to unmount the disk and proceed with wiping?\n\n";
-        mounted_message << "Algorithm: " << wipe_service_->get_algorithm_name(selected_algorithm.get()) << "\n";
+        mounted_message << "Algorithm: "
+                        << wipe_service_->get_algorithm_name(selected_algorithm.get()) << "\n";
         mounted_message << "WARNING: This will permanently destroy ALL data!";
 
         show_message(MessageInfo::Type::CONFIRMATION, "Unmount and Wipe?", mounted_message.str(),
@@ -208,7 +190,8 @@ void MainViewModel::start_wipe() {
     std::ostringstream message;
     message << "Are you sure you want to wipe '" << path << "'?\n\n";
     message << "Algorithm: " << wipe_service_->get_algorithm_name(selected_algorithm.get()) << "\n";
-    message << "Description: " << wipe_service_->get_algorithm_description(selected_algorithm.get()) << "\n\n";
+    message << "Description: " << wipe_service_->get_algorithm_description(selected_algorithm.get())
+            << "\n\n";
     message << "WARNING: This will permanently destroy ALL data on the disk!\n";
     message << "This action cannot be undone!";
 
@@ -228,11 +211,8 @@ void MainViewModel::confirm_wipe() {
         handle_wipe_progress(progress);
     };
 
-    bool started = wipe_service_->wipe_disk(
-        selected_disk_path.get(),
-        selected_algorithm.get(),
-        progress_callback
-    );
+    bool started = wipe_service_->wipe_disk(selected_disk_path.get(), selected_algorithm.get(),
+                                            progress_callback);
 
     if (!started) {
         is_wipe_in_progress.set(false);
@@ -265,7 +245,8 @@ void MainViewModel::unmount_and_wipe(const std::string& path) {
     message << "Disk unmounted successfully!\n\n";
     message << "Are you sure you want to wipe '" << path << "'?\n\n";
     message << "Algorithm: " << wipe_service_->get_algorithm_name(selected_algorithm.get()) << "\n";
-    message << "Description: " << wipe_service_->get_algorithm_description(selected_algorithm.get()) << "\n\n";
+    message << "Description: " << wipe_service_->get_algorithm_description(selected_algorithm.get())
+            << "\n\n";
     message << "WARNING: This will permanently destroy ALL data on the disk!\n";
     message << "This action cannot be undone!";
 
@@ -283,43 +264,58 @@ void MainViewModel::handle_wipe_progress(const WipeProgress& progress) {
     auto weak_self = weak_from_this();
     auto* progress_ptr = progress_copy.release();
 
-    g_idle_add([](gpointer data) -> gboolean {
-        auto* args = static_cast<std::pair<std::weak_ptr<MainViewModel>, WipeProgress*>*>(data);
-        auto vm = args->first.lock();
-        auto progress = std::unique_ptr<WipeProgress>(args->second);
-        delete args;
+    g_idle_add(
+        [](gpointer data) -> gboolean {
+            auto* args = static_cast<std::pair<std::weak_ptr<MainViewModel>, WipeProgress*>*>(data);
+            auto vm = args->first.lock();
+            auto progress = std::unique_ptr<WipeProgress>(args->second);
+            delete args;
 
-        if (!vm) {
-            return G_SOURCE_REMOVE;
-        }
-
-        vm->wipe_progress.set(*progress);
-
-        if (progress->is_complete) {
-            vm->is_wipe_in_progress.set(false);
-            vm->update_can_wipe();
-
-            if (progress->has_error) {
-                vm->handle_wipe_completion(false, progress->error_message);
-            } else {
-                vm->handle_wipe_completion(true);
+            if (!vm) {
+                return G_SOURCE_REMOVE;
             }
-        }
 
-        return G_SOURCE_REMOVE;
-    }, new std::pair<std::weak_ptr<MainViewModel>, WipeProgress*>(weak_self, progress_ptr));
+            vm->wipe_progress.set(*progress);
+
+            if (progress->is_complete) {
+                vm->is_wipe_in_progress.set(false);
+                vm->update_can_wipe();
+
+                if (progress->has_error) {
+                    vm->handle_wipe_completion(false, progress->error_message);
+                } else {
+                    vm->handle_wipe_completion(true);
+                }
+            }
+
+            return G_SOURCE_REMOVE;
+        },
+        new std::pair<std::weak_ptr<MainViewModel>, WipeProgress*>(weak_self, progress_ptr));
 }
 
 void MainViewModel::handle_wipe_completion(bool success, const std::string& error_message) {
     if (success) {
         show_message(MessageInfo::Type::INFO, "Wipe Complete",
                      "Disk wipe operation completed successfully!");
+
+        // Send desktop notification for successful completion
+        if (notification_callback_) {
+            notification_callback_("Wipe Complete", "Disk wipe operation completed successfully!",
+                                   false);
+        }
     } else {
         std::string message = "Wipe operation failed.";
         if (!error_message.empty()) {
             message += "\n\nError: " + error_message;
         }
         show_message(MessageInfo::Type::ERROR, "Wipe Failed", message);
+
+        // Send desktop notification for failure
+        if (notification_callback_) {
+            notification_callback_("Wipe Failed",
+                                   error_message.empty() ? "Wipe operation failed" : error_message,
+                                   true);
+        }
     }
 
     // Refresh disk list in case mount status changed
@@ -328,12 +324,10 @@ void MainViewModel::handle_wipe_completion(bool success, const std::string& erro
 
 void MainViewModel::show_message(MessageInfo::Type type, const std::string& title,
                                  const std::string& message, std::function<void(bool)> callback) {
-    current_message.set(MessageInfo{
-        .type = type,
-        .title = title,
-        .message = message,
-        .confirmation_callback = std::move(callback)
-    });
+    current_message.set(MessageInfo{.type = type,
+                                    .title = title,
+                                    .message = message,
+                                    .confirmation_callback = std::move(callback)});
 }
 
 auto MainViewModel::find_disk_info(const std::string& path) const -> std::optional<DiskInfo> {
@@ -354,4 +348,8 @@ void MainViewModel::set_connection_state(bool connected, const std::string& erro
         // Refresh disk list when we reconnect
         load_disks();
     }
+}
+
+void MainViewModel::set_notification_callback(NotificationCallback callback) {
+    notification_callback_ = std::move(callback);
 }

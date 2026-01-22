@@ -5,18 +5,23 @@
 
 #pragma once
 
-#include <gtest/gtest.h>
-#include <gmock/gmock.h>
-#include <memory>
-#include <atomic>
-#include <vector>
-#include <future>
-#include <chrono>
-
 #include "di/Container.hpp"
 #include "mocks/MockDiskService.hpp"
-#include "mocks/MockWipeService.hpp"
 #include "mocks/MockWipeAlgorithm.hpp"
+#include "mocks/MockWipeService.hpp"
+
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
+#include <unistd.h>
+
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <future>
+#include <memory>
+#include <string>
+#include <vector>
 
 /**
  * @brief Base fixture providing DI container setup/teardown
@@ -25,9 +30,7 @@ class ContainerTestFixture : public ::testing::Test {
 protected:
     di::Container container;
 
-    void SetUp() override {
-        di::ServiceLocator::reset();
-    }
+    void SetUp() override { di::ServiceLocator::reset(); }
 
     void TearDown() override {
         container.clear();
@@ -68,8 +71,7 @@ protected:
             .WillByDefault(testing::Return("Test Algorithm"));
         ON_CALL(*mock_wipe_service, get_algorithm_description(testing::_))
             .WillByDefault(testing::Return("Test description"));
-        ON_CALL(*mock_wipe_service, get_pass_count(testing::_))
-            .WillByDefault(testing::Return(1));
+        ON_CALL(*mock_wipe_service, get_pass_count(testing::_)).WillByDefault(testing::Return(1));
         ON_CALL(*mock_wipe_service, is_ssd_compatible(testing::_))
             .WillByDefault(testing::Return(true));
     }
@@ -105,16 +107,16 @@ protected:
  */
 class ThreadingTestHelper {
 public:
-    template<typename Callable>
+    template <typename Callable>
     static bool WaitFor(Callable&& callable,
-                        std::chrono::milliseconds timeout = std::chrono::milliseconds{5000}) {
+                        std::chrono::milliseconds timeout = std::chrono::milliseconds{5'000}) {
         auto future = std::async(std::launch::async, std::forward<Callable>(callable));
         return future.wait_for(timeout) == std::future_status::ready;
     }
 
-    template<typename Predicate>
+    template <typename Predicate>
     static bool WaitUntil(Predicate&& predicate,
-                          std::chrono::milliseconds timeout = std::chrono::milliseconds{5000},
+                          std::chrono::milliseconds timeout = std::chrono::milliseconds{5'000},
                           std::chrono::milliseconds poll_interval = std::chrono::milliseconds{10}) {
         auto start = std::chrono::steady_clock::now();
         while (std::chrono::steady_clock::now() - start < timeout) {
@@ -125,6 +127,47 @@ public:
         }
         return false;
     }
+};
+
+/**
+ * @brief RAII helper for temporary test files (for algorithms requiring seek)
+ */
+class TempTestFile {
+public:
+    TempTestFile() {
+        char templ[] = "/tmp/storage_wiper_test_XXXXXX";
+        fd_ = mkstemp(templ);
+        if (fd_ >= 0) {
+            path_ = templ;
+        }
+    }
+
+    ~TempTestFile() {
+        if (fd_ >= 0) {
+            close(fd_);
+        }
+        if (!path_.empty()) {
+            unlink(path_.c_str());
+        }
+    }
+
+    // Non-copyable
+    TempTestFile(const TempTestFile&) = delete;
+    TempTestFile& operator=(const TempTestFile&) = delete;
+
+    int fd() const { return fd_; }
+    const std::string& path() const { return path_; }
+    bool valid() const { return fd_ >= 0; }
+
+    // Truncate/extend to specific size
+    bool resize(size_t size) { return ftruncate(fd_, static_cast<off_t>(size)) == 0; }
+
+    // Seek to beginning
+    bool seek_start() { return lseek(fd_, 0, SEEK_SET) == 0; }
+
+private:
+    int fd_ = -1;
+    std::string path_;
 };
 
 /**
@@ -140,23 +183,22 @@ public:
 
     // Verify pattern written at offset
     bool VerifyPattern(size_t offset, uint8_t pattern, size_t length) const {
-        if (offset + length > buffer_.size()) return false;
+        if (offset + length > buffer_.size())
+            return false;
         for (size_t i = 0; i < length; ++i) {
-            if (buffer_[offset + i] != pattern) return false;
+            if (buffer_[offset + i] != pattern)
+                return false;
         }
         return true;
     }
 
     // Check if buffer contains only zeros
     bool IsAllZeros() const {
-        return std::all_of(buffer_.begin(), buffer_.end(),
-                          [](uint8_t b) { return b == 0; });
+        return std::all_of(buffer_.begin(), buffer_.end(), [](uint8_t b) { return b == 0; });
     }
 
     // Fill with pattern for testing reads
-    void Fill(uint8_t pattern) {
-        std::fill(buffer_.begin(), buffer_.end(), pattern);
-    }
+    void Fill(uint8_t pattern) { std::fill(buffer_.begin(), buffer_.end(), pattern); }
 
 private:
     std::vector<uint8_t> buffer_;

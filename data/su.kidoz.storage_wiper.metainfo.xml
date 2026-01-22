@@ -33,6 +33,17 @@
 
   <launchable type="desktop-id">su.kidoz.storage_wiper.desktop</launchable>
 
+  <screenshots>
+    <screenshot type="default">
+      <caption>Main window showing available disks and wipe algorithms</caption>
+      <image>https://raw.githubusercontent.com/kidoz/storage-wiper/main/data/screenshots/main-window.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Wipe operation in progress with real-time status</caption>
+      <image>https://raw.githubusercontent.com/kidoz/storage-wiper/main/data/screenshots/wipe-progress.png</image>
+    </screenshot>
+  </screenshots>
+
   <url type="homepage">https://github.com/kidoz/storage-wiper</url>
   <url type="bugtracker">https://github.com/kidoz/storage-wiper/issues</url>
   <url type="vcs-browser">https://github.com/kidoz/storage-wiper</url>
@@ -81,6 +92,19 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="1.2.0" date="2025-01-22">
+      <description>
+        <p>Desktop integration and UX improvements:</p>
+        <ul>
+          <li>AppStream metainfo for software centers</li>
+          <li>Systemd service file with security hardening</li>
+          <li>Estimated time remaining (ETA) display during wipe</li>
+          <li>Desktop notifications on wipe completion</li>
+          <li>Write speed display in progress view</li>
+          <li>Expanded test coverage for all algorithms</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.1.0" date="2025-01-20">
       <description>
         <p>Improvements in this release:</p>

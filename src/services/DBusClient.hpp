@@ -8,29 +8,30 @@
 
 #pragma once
 
-#include "services/IDiskService.hpp"
-#include "services/IWipeService.hpp"
 #include "models/DiskInfo.hpp"
 #include "models/WipeTypes.hpp"
+#include "services/IDiskService.hpp"
+#include "services/IWipeService.hpp"
 
 #include <gio/gio.h>
+
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <string>
 #include <vector>
-#include <random>
 
 /**
  * @enum ConnectionState
  * @brief Connection state for D-Bus client
  */
 enum class ConnectionState {
-    DISCONNECTED,      ///< No connection, not trying to connect
-    CONNECTING,        ///< Currently attempting to connect
-    CONNECTED,         ///< Successfully connected
-    RECONNECTING,      ///< Lost connection, attempting to reconnect
-    FAILED             ///< Permanent failure (max retries exceeded)
+    DISCONNECTED,  ///< No connection, not trying to connect
+    CONNECTING,    ///< Currently attempting to connect
+    CONNECTED,     ///< Successfully connected
+    RECONNECTING,  ///< Lost connection, attempting to reconnect
+    FAILED         ///< Permanent failure (max retries exceeded)
 };
 
 /**
@@ -101,9 +102,8 @@ public:
         -> std::expected<void, util::Error> override;
 
     // IWipeService interface
-    auto wipe_disk(const std::string& disk_path,
-                   WipeAlgorithm algorithm,
-                   ProgressCallback callback) -> bool override;
+    auto wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm, ProgressCallback callback)
+        -> bool override;
     [[nodiscard]] auto get_algorithm_name(WipeAlgorithm algo) -> std::string override;
     [[nodiscard]] auto get_algorithm_description(WipeAlgorithm algo) -> std::string override;
     [[nodiscard]] auto get_pass_count(WipeAlgorithm algo) -> int override;
@@ -134,7 +134,7 @@ private:
     // Reconnection configuration
     static constexpr int MAX_RECONNECT_ATTEMPTS = 5;
     static constexpr int INITIAL_RETRY_DELAY_MS = 500;
-    static constexpr int MAX_RETRY_DELAY_MS = 30000;
+    static constexpr int MAX_RETRY_DELAY_MS = 30'000;
     int reconnect_attempts_ = 0;
     guint reconnect_timer_id_ = 0;
 
@@ -167,22 +167,16 @@ private:
     void stop_name_watching();
 
     // Static callbacks
-    static void on_signal_received(GDBusConnection* connection,
-                                   const gchar* sender_name,
-                                   const gchar* object_path,
-                                   const gchar* interface_name,
-                                   const gchar* signal_name,
-                                   GVariant* parameters,
+    static void on_signal_received(GDBusConnection* connection, const gchar* sender_name,
+                                   const gchar* object_path, const gchar* interface_name,
+                                   const gchar* signal_name, GVariant* parameters,
                                    gpointer user_data);
 
     static gboolean on_reconnect_timer(gpointer user_data);
 
-    static void on_name_appeared(GDBusConnection* connection,
-                                 const gchar* name,
-                                 const gchar* name_owner,
-                                 gpointer user_data);
+    static void on_name_appeared(GDBusConnection* connection, const gchar* name,
+                                 const gchar* name_owner, gpointer user_data);
 
-    static void on_name_vanished(GDBusConnection* connection,
-                                 const gchar* name,
+    static void on_name_vanished(GDBusConnection* connection, const gchar* name,
                                  gpointer user_data);
 };

@@ -20,9 +20,8 @@ class IWipeService {
 public:
     virtual ~IWipeService() = default;
 
-    virtual auto wipe_disk(const std::string& disk_path,
-                          WipeAlgorithm algorithm,
-                          ProgressCallback callback) -> bool = 0;
+    virtual auto wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm,
+                           ProgressCallback callback) -> bool = 0;
 
     [[nodiscard]] virtual auto get_algorithm_name(WipeAlgorithm algo) -> std::string = 0;
     [[nodiscard]] virtual auto get_algorithm_description(WipeAlgorithm algo) -> std::string = 0;

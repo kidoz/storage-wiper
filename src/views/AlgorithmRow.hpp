@@ -8,6 +8,7 @@
 #pragma once
 
 #include "viewmodels/MainViewModel.hpp"  // For AlgorithmInfo
+
 #include <gtkmm.h>
 
 /**

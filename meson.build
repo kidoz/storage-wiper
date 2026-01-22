@@ -1,7 +1,7 @@
 project(
   'storage_wiper',
   'cpp',
-  version: '1.1.0',
+  version: '1.2.0',
   license: 'MIT',
   default_options: [
     'cpp_std=c++23',
@@ -34,6 +34,15 @@ gtkmm_dep = dependency('gtkmm-4.0', version: '>=4.6', required: true)
 adwaita_dep = dependency('libadwaita-1', version: '>=1.0', required: true)
 polkit_dep = dependency('polkit-gobject-1', required: true)
 gio_dep = dependency('gio-2.0', required: true)
+
+# Generate config header with version info
+config_data = configuration_data()
+config_data.set_quoted('PROJECT_VERSION', meson.project_version())
+config_data.set_quoted('PROJECT_NAME', meson.project_name())
+configure_file(
+  output: 'config.h',
+  configuration: config_data
+)
 
 # GNOME module for GResource compilation
 gnome = import('gnome')
@@ -241,7 +250,14 @@ if get_option('enable_tests')
     'tests/unit/di/ContainerTest.cpp',
     'tests/unit/algorithms/ZeroFillAlgorithmTest.cpp',
     'tests/unit/algorithms/RandomFillAlgorithmTest.cpp',
+    'tests/unit/algorithms/DoD522022MAlgorithmTest.cpp',
+    'tests/unit/algorithms/SchneierAlgorithmTest.cpp',
+    'tests/unit/algorithms/VSITRAlgorithmTest.cpp',
+    'tests/unit/algorithms/GOSTAlgorithmTest.cpp',
+    'tests/unit/algorithms/GutmannAlgorithmTest.cpp',
+    'tests/unit/algorithms/ATASecureEraseAlgorithmTest.cpp',
     'tests/unit/services/WipeServiceTest.cpp',
+    'tests/unit/services/DiskServiceTest.cpp',
     'tests/unit/viewmodels/MainViewModelTest.cpp',
   )
 

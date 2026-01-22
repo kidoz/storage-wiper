@@ -2,53 +2,52 @@
 
 #include <format>
 
+#include "config.h"
+
 namespace {
-    // Countdown timer state for confirmation dialog
-    struct CountdownData {
-        AdwAlertDialog* dialog = nullptr;
-        int seconds_remaining = 0;
-        guint timer_id = 0;
-    };
+// Countdown timer state for confirmation dialog
+struct CountdownData {
+    AdwAlertDialog* dialog = nullptr;
+    int seconds_remaining = 0;
+    guint timer_id = 0;
+};
 
-    constexpr int CONFIRMATION_COUNTDOWN_SECONDS = 15;
+constexpr int CONFIRMATION_COUNTDOWN_SECONDS = 15;
 
-    auto on_countdown_tick(gpointer user_data) -> gboolean {
-        auto* data = static_cast<CountdownData*>(user_data);
-        if (!data || !data->dialog) {
-            return G_SOURCE_REMOVE;
-        }
-
-        data->seconds_remaining--;
-
-        if (data->seconds_remaining > 0) {
-            auto button_text = std::format("Confirm ({})", data->seconds_remaining);
-            adw_alert_dialog_set_response_label(data->dialog, "confirm", button_text.c_str());
-            return G_SOURCE_CONTINUE;
-        }
-
-        // Countdown finished - enable the button
-        adw_alert_dialog_set_response_label(data->dialog, "confirm", "Confirm");
-        adw_alert_dialog_set_response_enabled(data->dialog, "confirm", TRUE);
-        data->timer_id = 0;
+auto on_countdown_tick(gpointer user_data) -> gboolean {
+    auto* data = static_cast<CountdownData*>(user_data);
+    if (!data || !data->dialog) {
         return G_SOURCE_REMOVE;
     }
 
-    void cleanup_countdown_data(gpointer data) {
-        auto* countdown = static_cast<CountdownData*>(data);
-        if (countdown) {
-            if (countdown->timer_id > 0) {
-                g_source_remove(countdown->timer_id);
-            }
-            delete countdown;
-        }
+    data->seconds_remaining--;
+
+    if (data->seconds_remaining > 0) {
+        auto button_text = std::format("Confirm ({})", data->seconds_remaining);
+        adw_alert_dialog_set_response_label(data->dialog, "confirm", button_text.c_str());
+        return G_SOURCE_CONTINUE;
     }
-} // anonymous namespace
+
+    // Countdown finished - enable the button
+    adw_alert_dialog_set_response_label(data->dialog, "confirm", "Confirm");
+    adw_alert_dialog_set_response_enabled(data->dialog, "confirm", TRUE);
+    data->timer_id = 0;
+    return G_SOURCE_REMOVE;
+}
+
+void cleanup_countdown_data(gpointer data) {
+    auto* countdown = static_cast<CountdownData*>(data);
+    if (countdown) {
+        if (countdown->timer_id > 0) {
+            g_source_remove(countdown->timer_id);
+        }
+        delete countdown;
+    }
+}
+}  // anonymous namespace
 
 MainWindow::MainWindow(AdwApplicationWindow* window)
-    : window_(window)
-    , content_(std::make_unique<MainWindowContent>())
-{
-}
+    : window_(window), content_(std::make_unique<MainWindowContent>()) {}
 
 MainWindow::~MainWindow() {
     // Unsubscribe from message observable
@@ -88,8 +87,9 @@ void MainWindow::show() {
 
 void MainWindow::create_header_bar() {
     header_bar_ = adw_header_bar_new();
-    adw_header_bar_set_title_widget(ADW_HEADER_BAR(header_bar_),
-                                    adw_window_title_new("Storage Wiper", "Secure Disk Wiping Tool"));
+    adw_header_bar_set_title_widget(
+        ADW_HEADER_BAR(header_bar_),
+        adw_window_title_new("Storage Wiper", "Secure Disk Wiping Tool"));
 
     // Refresh button
     auto* refresh_button = gtk_button_new_from_icon_name("view-refresh-symbolic");
@@ -105,25 +105,31 @@ void MainWindow::create_header_bar() {
 }
 
 void MainWindow::bind_messages() {
-    if (!view_model_) return;
+    if (!view_model_)
+        return;
 
-    message_subscription_id_ = view_model_->current_message.subscribe([this](const MessageInfo& message) {
-        if (message.title.empty()) return;  // Skip empty messages
+    message_subscription_id_ =
+        view_model_->current_message.subscribe([this](const MessageInfo& message) {
+            if (message.title.empty())
+                return;  // Skip empty messages
 
-        // Use g_idle_add to ensure we're on the main thread
-        auto* msg_copy = new MessageInfo(message);
-        g_idle_add([](gpointer data) -> gboolean {
-            auto* args = static_cast<std::pair<MainWindow*, MessageInfo*>*>(data);
-            args->first->show_message(*args->second);
-            delete args->second;
-            delete args;
-            return G_SOURCE_REMOVE;
-        }, new std::pair<MainWindow*, MessageInfo*>(this, msg_copy));
-    });
+            // Use g_idle_add to ensure we're on the main thread
+            auto* msg_copy = new MessageInfo(message);
+            g_idle_add(
+                [](gpointer data) -> gboolean {
+                    auto* args = static_cast<std::pair<MainWindow*, MessageInfo*>*>(data);
+                    args->first->show_message(*args->second);
+                    delete args->second;
+                    delete args;
+                    return G_SOURCE_REMOVE;
+                },
+                new std::pair<MainWindow*, MessageInfo*>(this, msg_copy));
+        });
 }
 
 void MainWindow::show_message(const MessageInfo& message) {
-    if (!window_ || !GTK_IS_WIDGET(window_)) return;
+    if (!window_ || !GTK_IS_WIDGET(window_))
+        return;
 
     if (message.type == MessageInfo::Type::CONFIRMATION) {
         show_confirmation_dialog(message);
@@ -147,11 +153,9 @@ void MainWindow::show_confirmation_dialog(const MessageInfo& message) {
     adw_alert_dialog_set_response_enabled(ADW_ALERT_DIALOG(dialog), "confirm", FALSE);
 
     // Set up countdown timer
-    auto* countdown = new CountdownData{
-        .dialog = ADW_ALERT_DIALOG(dialog),
-        .seconds_remaining = CONFIRMATION_COUNTDOWN_SECONDS,
-        .timer_id = 0
-    };
+    auto* countdown = new CountdownData{.dialog = ADW_ALERT_DIALOG(dialog),
+                                        .seconds_remaining = CONFIRMATION_COUNTDOWN_SECONDS,
+                                        .timer_id = 0};
     countdown->timer_id = g_timeout_add_seconds(1, on_countdown_tick, countdown);
 
     // Store countdown data for cleanup when dialog is destroyed
@@ -159,15 +163,19 @@ void MainWindow::show_confirmation_dialog(const MessageInfo& message) {
 
     if (message.confirmation_callback) {
         auto* callback_ptr = new std::function<void(bool)>(message.confirmation_callback);
-        g_object_set_data_full(G_OBJECT(dialog), "callback", callback_ptr,
-                               +[](gpointer data) { delete static_cast<std::function<void(bool)>*>(data); });
+        g_object_set_data_full(
+            G_OBJECT(dialog), "callback", callback_ptr,
+            +[](gpointer data) { delete static_cast<std::function<void(bool)>*>(data); });
 
-        g_signal_connect(dialog, "response", G_CALLBACK(+[](AdwAlertDialog* dlg, const char* resp, gpointer) {
-            auto* cb = static_cast<std::function<void(bool)>*>(g_object_get_data(G_OBJECT(dlg), "callback"));
-            if (cb) {
-                (*cb)(g_strcmp0(resp, "confirm") == 0);
-            }
-        }), nullptr);
+        g_signal_connect(dialog, "response",
+                         G_CALLBACK(+[](AdwAlertDialog* dlg, const char* resp, gpointer) {
+                             auto* cb = static_cast<std::function<void(bool)>*>(
+                                 g_object_get_data(G_OBJECT(dlg), "callback"));
+                             if (cb) {
+                                 (*cb)(g_strcmp0(resp, "confirm") == 0);
+                             }
+                         }),
+                         nullptr);
     }
 
     adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(window_));
@@ -197,40 +205,32 @@ void MainWindow::show_about_dialog() {
     auto* about = ADW_ABOUT_DIALOG(adw_about_dialog_new());
 
     adw_about_dialog_set_application_name(about, "Storage Wiper");
-    adw_about_dialog_set_version(about, "1.1.0");
+    adw_about_dialog_set_version(about, PROJECT_VERSION);
     adw_about_dialog_set_developer_name(about, "Storage Wiper Contributors");
-    adw_about_dialog_set_comments(about,
-        "Secure disk wiping tool with multiple DoD-compliant algorithms.\n\n"
-        "Supports Zero Fill, Random Fill, DoD 5220.22-M, Schneier, "
-        "VSITR, Gutmann, GOST R 50739-95, and ATA Secure Erase methods.");
+    adw_about_dialog_set_comments(
+        about, "Secure disk wiping tool with multiple DoD-compliant algorithms.\n\n"
+               "Supports Zero Fill, Random Fill, DoD 5220.22-M, Schneier, "
+               "VSITR, Gutmann, GOST R 50739-95, and ATA Secure Erase methods.");
     adw_about_dialog_set_license_type(about, GTK_LICENSE_MIT_X11);
     adw_about_dialog_set_copyright(about, "Copyright \xC2\xA9 2024 Storage Wiper Contributors");
 
     adw_about_dialog_set_issue_url(about, "https://github.com/storage-wiper/storage-wiper/issues");
     adw_about_dialog_set_website(about, "https://github.com/storage-wiper/storage-wiper");
 
-    const char* developers[] = {
-        "Storage Wiper Contributors",
-        nullptr
-    };
+    const char* developers[] = {"Storage Wiper Contributors", nullptr};
     adw_about_dialog_set_developers(about, developers);
 
     // Credits section
-    const char* built_with[] = {
-        "GTK4 - GNOME toolkit",
-        "gtkmm4 - C++ bindings for GTK4",
-        "libadwaita - Adaptive GNOME applications",
-        "C++23 - Modern C++ standard",
-        nullptr
-    };
+    const char* built_with[] = {"GTK4 - GNOME toolkit", "gtkmm4 - C++ bindings for GTK4",
+                                "libadwaita - Adaptive GNOME applications",
+                                "C++23 - Modern C++ standard", nullptr};
     adw_about_dialog_add_credit_section(about, "Built With", built_with);
 
-    adw_about_dialog_add_legal_section(about,
-        "Disclaimer",
-        nullptr,
-        GTK_LICENSE_CUSTOM,
+    adw_about_dialog_add_legal_section(
+        about, "Disclaimer", nullptr, GTK_LICENSE_CUSTOM,
         "This software is provided for legitimate data sanitization purposes. "
-        "Use responsibly and ensure you have proper authorization before wiping any storage device. "
+        "Use responsibly and ensure you have proper authorization before wiping any storage "
+        "device. "
         "The authors are not responsible for any data loss.");
 
     adw_dialog_present(ADW_DIALOG(about), GTK_WIDGET(window_));

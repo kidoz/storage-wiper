@@ -9,10 +9,12 @@
 #pragma once
 
 #include "viewmodels/MainViewModel.hpp"
+
 #include <gtkmm.h>
-#include <queue>
-#include <mutex>
+
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <vector>
 
 // Forward declarations

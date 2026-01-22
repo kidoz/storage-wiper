@@ -3,17 +3,14 @@
 #include <format>
 
 AlgorithmRow::AlgorithmRow(const AlgorithmInfo& algo, Gtk::CheckButton* group_leader)
-    : Gtk::Box(Gtk::Orientation::HORIZONTAL, 12)
-    , algo_(algo)
-{
+    : Gtk::Box(Gtk::Orientation::HORIZONTAL, 12), algo_(algo) {
     setup_from_builder(group_leader);
     populate_from_algorithm_info();
 }
 
 void AlgorithmRow::setup_from_builder(Gtk::CheckButton* group_leader) {
     // Load UI from GResource
-    auto builder = Gtk::Builder::create_from_resource(
-        "/org/storage/wiper/ui/algorithm-row.ui");
+    auto builder = Gtk::Builder::create_from_resource("/org/storage/wiper/ui/algorithm-row.ui");
 
     // Get the row content box
     auto* row_content = builder->get_widget<Gtk::Box>("row_content");
@@ -42,8 +39,7 @@ void AlgorithmRow::setup_from_builder(Gtk::CheckButton* group_leader) {
     }
 
     // Connect toggled signal
-    radio_button_->signal_toggled().connect(
-        sigc::mem_fun(*this, &AlgorithmRow::on_radio_toggled));
+    radio_button_->signal_toggled().connect(sigc::mem_fun(*this, &AlgorithmRow::on_radio_toggled));
 
     // Add bottom margin for spacing
     set_margin_bottom(4);

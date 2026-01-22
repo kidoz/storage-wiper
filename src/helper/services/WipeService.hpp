@@ -1,13 +1,14 @@
 #pragma once
 
-#include "services/IWipeService.hpp"
 #include "services/IDiskService.hpp"
+#include "services/IWipeService.hpp"
+
 #include <atomic>
 #include <chrono>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <thread>
-#include <memory>
-#include <map>
 
 // Forward declaration
 class IWipeAlgorithm;
@@ -17,9 +18,8 @@ public:
     explicit WipeService(std::shared_ptr<IDiskService> disk_service);
     ~WipeService() override;
 
-    auto wipe_disk(const std::string& disk_path,
-                   WipeAlgorithm algorithm,
-                   ProgressCallback callback) -> bool override;
+    auto wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm, ProgressCallback callback)
+        -> bool override;
 
     [[nodiscard]] auto get_algorithm_name(WipeAlgorithm algo) -> std::string override;
     [[nodiscard]] auto get_algorithm_description(WipeAlgorithm algo) -> std::string override;

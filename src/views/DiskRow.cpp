@@ -2,17 +2,14 @@
 
 #include <format>
 
-DiskRow::DiskRow(const DiskInfo& disk)
-    : disk_(disk)
-{
+DiskRow::DiskRow(const DiskInfo& disk) : disk_(disk) {
     setup_from_builder();
     populate_from_disk_info();
 }
 
 void DiskRow::setup_from_builder() {
     // Load UI from GResource
-    auto builder = Gtk::Builder::create_from_resource(
-        "/org/storage/wiper/ui/disk-row.ui");
+    auto builder = Gtk::Builder::create_from_resource("/org/storage/wiper/ui/disk-row.ui");
 
     // Get the row content box
     auto* row_content = builder->get_widget<Gtk::Box>("row_content");

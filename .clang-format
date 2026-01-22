@@ -1,0 +1,213 @@
+# Storage Wiper - Clang Format Configuration
+# Based on modern C++23 best practices
+# Run: just format
+
+---
+Language: Cpp
+Standard: Latest
+
+# Base style - customize from LLVM
+BasedOnStyle: LLVM
+
+# Column and line limits
+ColumnLimit: 100
+MaxEmptyLinesToKeep: 1
+
+# Indentation
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+IndentCaseLabels: true
+IndentCaseBlocks: false
+IndentPPDirectives: BeforeHash
+IndentRequiresClause: true
+IndentWrappedFunctionNames: false
+NamespaceIndentation: None
+LambdaBodyIndentation: Signature
+
+# Alignment
+AlignAfterOpenBracket: Align
+AlignArrayOfStructures: Right
+AlignConsecutiveAssignments:
+  Enabled: false
+AlignConsecutiveBitFields:
+  Enabled: true
+AlignConsecutiveDeclarations:
+  Enabled: false
+AlignConsecutiveMacros:
+  Enabled: true
+AlignEscapedNewlines: Left
+AlignOperands: Align
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 1
+
+# Arguments and parameters
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+BinPackArguments: true
+BinPackParameters: true
+
+# Short forms - allow on single line when appropriate
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLambdasOnASingleLine: Inline
+AllowShortLoopsOnASingleLine: false
+
+# Braces
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterClass: false
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterFunction: false
+  AfterNamespace: false
+  AfterStruct: false
+  AfterUnion: false
+  AfterExternBlock: false
+  BeforeCatch: false
+  BeforeElse: false
+  BeforeLambdaBody: false
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: false
+InsertBraces: false
+RemoveBracesLLVM: false
+
+# Break rules
+AlwaysBreakAfterReturnType: None
+AlwaysBreakBeforeMultilineStrings: false
+AlwaysBreakTemplateDeclarations: Yes
+BreakAfterAttributes: Leave
+BreakBeforeBinaryOperators: None
+BreakBeforeConceptDeclarations: Always
+BreakBeforeInlineASMColon: OnlyMultiline
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: BeforeColon
+BreakInheritanceList: BeforeColon
+BreakStringLiterals: true
+
+# Constructor initializers
+ConstructorInitializerIndentWidth: 4
+PackConstructorInitializers: BinPack
+
+# Spaces
+SpaceAfterCStyleCast: false
+SpaceAfterLogicalNot: false
+SpaceAfterTemplateKeyword: true
+SpaceAroundPointerQualifiers: Default
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCaseColon: false
+SpaceBeforeCpp11BracedList: false
+SpaceBeforeCtorInitializerColon: true
+SpaceBeforeInheritanceColon: true
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceBeforeSquareBrackets: false
+SpaceInEmptyBlock: false
+SpaceInEmptyParentheses: false
+SpacesBeforeTrailingComments: 2
+SpacesInAngles: Never
+SpacesInCStyleCastParentheses: false
+SpacesInConditionalStatement: false
+SpacesInContainerLiterals: false
+SpacesInLineCommentPrefix:
+  Minimum: 1
+  Maximum: -1
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+
+# Pointers and references
+DerivePointerAlignment: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+QualifierAlignment: Leave
+
+# Includes
+IncludeBlocks: Regroup
+IncludeCategories:
+  # Project headers (relative paths)
+  - Regex: '^".*\.hpp"'
+    Priority: 1
+    SortPriority: 1
+  # GTest/GMock
+  - Regex: '^<(gtest|gmock)/'
+    Priority: 2
+    SortPriority: 2
+  # GTK/GLib headers
+  - Regex: '^<(gtk|gdk|gio|glib|adwaita|gtkmm|gdkmm|giomm|glibmm)'
+    Priority: 3
+    SortPriority: 3
+  # Linux system headers
+  - Regex: '^<(linux|sys|fcntl|unistd|poll|signal)'
+    Priority: 4
+    SortPriority: 4
+  # C++ standard library
+  - Regex: '^<[a-z_]+>'
+    Priority: 5
+    SortPriority: 5
+  # C standard library
+  - Regex: '^<c[a-z]+>'
+    Priority: 6
+    SortPriority: 6
+SortIncludes: CaseSensitive
+SortUsingDeclarations: LexicographicNumeric
+
+# Comments
+FixNamespaceComments: true
+ReflowComments: true
+
+# Penalties (lower = more preferred)
+PenaltyBreakAssignment: 2
+PenaltyBreakBeforeFirstCallParameter: 19
+PenaltyBreakComment: 300
+PenaltyBreakFirstLessLess: 120
+PenaltyBreakOpenParenthesis: 0
+PenaltyBreakString: 1000
+PenaltyBreakTemplateDeclaration: 10
+PenaltyExcessCharacter: 1000000
+PenaltyIndentedWhitespace: 0
+PenaltyReturnTypeOnItsOwnLine: 1000
+
+# Modern C++ features
+Cpp11BracedListStyle: true
+EmptyLineAfterAccessModifier: Never
+EmptyLineBeforeAccessModifier: LogicalBlock
+RequiresClausePosition: OwnLine
+RequiresExpressionIndentation: OuterScope
+SeparateDefinitionBlocks: Leave
+
+# Lambdas
+ShortNamespaceLines: 0
+
+# Access modifiers
+AccessModifierOffset: -4
+
+# Macros
+AttributeMacros: ['__capability']
+ForEachMacros: ['RANGES_FOR', 'Q_FOREACH', 'BOOST_FOREACH']
+IfMacros: ['IF']
+StatementAttributeLikeMacros: []
+StatementMacros: []
+TypenameMacros: []
+WhitespaceSensitiveMacros: ['STRINGIZE', 'PP_STRINGIZE']
+
+# Other
+CompactNamespaces: false
+DisableFormat: false
+InsertNewlineAtEOF: true
+InsertTrailingCommas: None
+IntegerLiteralSeparator:
+  Binary: 4
+  Decimal: 3
+  Hex: 4
+KeepEmptyLinesAtTheStartOfBlocks: false
+LineEnding: LF
+RemoveSemicolon: false
+...

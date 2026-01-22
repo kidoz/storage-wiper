@@ -34,4 +34,4 @@ inline auto validate_wipe_target(IDiskService& disk_service, const std::string& 
     return {};
 }
 
-} // namespace device_policy
+}  // namespace device_policy

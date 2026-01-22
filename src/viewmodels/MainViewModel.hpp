@@ -144,9 +144,25 @@ public:
      */
     void set_connection_state(bool connected, const std::string& error_message = "");
 
+    /**
+     * @brief Callback type for desktop notifications
+     * @param title Notification title
+     * @param body Notification body text
+     * @param is_error True if this is an error notification
+     */
+    using NotificationCallback =
+        std::function<void(const std::string& title, const std::string& body, bool is_error)>;
+
+    /**
+     * @brief Set the callback for sending desktop notifications
+     * @param callback Function to call when a notification should be shown
+     */
+    void set_notification_callback(NotificationCallback callback);
+
 private:
     std::shared_ptr<IDiskService> disk_service_;
     std::shared_ptr<IWipeService> wipe_service_;
+    NotificationCallback notification_callback_;
 
     // Subscription IDs for cleanup
     size_t selected_disk_subscription_id_ = 0;

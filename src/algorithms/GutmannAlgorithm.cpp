@@ -1,11 +1,14 @@
 #include "algorithms/GutmannAlgorithm.hpp"
+
 #include "models/WipeTypes.hpp"
 #include "util/WriteHelpers.hpp"
+
+#include <unistd.h>
+
 #include <algorithm>
 #include <random>
 #include <string>
 #include <vector>
-#include <unistd.h>
 
 bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
                                const std::atomic<bool>& cancel_flag) {
@@ -60,7 +63,8 @@ bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
                 progress.total_bytes = size;
                 progress.current_pass = pass;
                 progress.total_passes = 35;
-                progress.percentage = (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
+                progress.percentage =
+                    (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
                 progress.status = "Writing pattern (Pass " + std::to_string(pass) + "/35)";
                 callback(progress);
             }
@@ -70,7 +74,8 @@ bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
             return false;
         }
 
-        if (lseek(fd, 0, SEEK_SET) == -1) return false;
+        if (lseek(fd, 0, SEEK_SET) == -1)
+            return false;
     }
 
     // Passes 5-31: Specific patterns (simplified to alternating patterns)
@@ -80,10 +85,12 @@ bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
 
     for (int pass = 5; pass <= 31; ++pass) {
         std::fill(buffer.begin(), buffer.end(), patterns[(pass - 5) % 27]);
-        if (!write_pattern(fd, size, buffer.data(), buffer.size(), callback, pass, 35, cancel_flag)) {
+        if (!write_pattern(fd, size, buffer.data(), buffer.size(), callback, pass, 35,
+                           cancel_flag)) {
             return false;
         }
-        if (lseek(fd, 0, SEEK_SET) == -1) return false;
+        if (lseek(fd, 0, SEEK_SET) == -1)
+            return false;
     }
 
     // Passes 32-35: Random data
@@ -110,7 +117,8 @@ bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
                 progress.total_bytes = size;
                 progress.current_pass = pass;
                 progress.total_passes = 35;
-                progress.percentage = (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
+                progress.percentage =
+                    (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
                 progress.status = "Writing pattern (Pass " + std::to_string(pass) + "/35)";
                 callback(progress);
             }
@@ -121,7 +129,8 @@ bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
         }
 
         if (pass < 35) {
-            if (lseek(fd, 0, SEEK_SET) == -1) return false;
+            if (lseek(fd, 0, SEEK_SET) == -1)
+                return false;
         }
     }
 
@@ -129,9 +138,8 @@ bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
 }
 
 bool GutmannAlgorithm::write_pattern(int fd, uint64_t size, const uint8_t* pattern,
-                                    size_t pattern_size, ProgressCallback callback,
-                                    int pass, int total_passes,
-                                    const std::atomic<bool>& cancel_flag) {
+                                     size_t pattern_size, ProgressCallback callback, int pass,
+                                     int total_passes, const std::atomic<bool>& cancel_flag) {
     uint64_t written = 0;
 
     while (written < size && !cancel_flag.load()) {
@@ -150,9 +158,10 @@ bool GutmannAlgorithm::write_pattern(int fd, uint64_t size, const uint8_t* patte
             progress.total_bytes = size;
             progress.current_pass = pass;
             progress.total_passes = total_passes;
-            progress.percentage = (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
-            progress.status = "Writing pattern (Pass " + std::to_string(pass) +
-                            "/" + std::to_string(total_passes) + ")";
+            progress.percentage =
+                (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
+            progress.status = "Writing pattern (Pass " + std::to_string(pass) + "/" +
+                              std::to_string(total_passes) + ")";
             callback(progress);
         }
     }

@@ -20,7 +20,7 @@
 /**
  * @class IDiskService
  * @brief Abstract interface for disk management operations
- * 
+ *
  * This interface provides methods for discovering, validating, and managing
  * storage devices in a secure manner. All implementations must ensure proper
  * validation to prevent unauthorized access to system devices.
@@ -54,12 +54,14 @@ public:
      * @param path Device path
      * @return Size in bytes, 0 on error
      */
-    [[nodiscard]] virtual auto get_disk_size(const std::string& path) -> std::expected<uint64_t, util::Error> = 0;
+    [[nodiscard]] virtual auto get_disk_size(const std::string& path)
+        -> std::expected<uint64_t, util::Error> = 0;
 
     /**
      * @brief Validate device path for security
      * @param path Device path to validate
      * @return True if path is valid and safe, false otherwise
      */
-    [[nodiscard]] virtual auto validate_device_path(const std::string& path) -> std::expected<void, util::Error> = 0;
+    [[nodiscard]] virtual auto validate_device_path(const std::string& path)
+        -> std::expected<void, util::Error> = 0;
 };

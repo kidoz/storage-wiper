@@ -14,14 +14,14 @@
  * @brief Available disk wiping algorithms
  */
 enum class WipeAlgorithm {
-    ZERO_FILL,           ///< Single pass with zeros
-    RANDOM_FILL,         ///< Single pass with random data
-    DOD_5220_22_M,       ///< DoD 5220.22-M 3-pass standard
-    GUTMANN,             ///< Gutmann 35-pass method
-    SCHNEIER,            ///< Bruce Schneier 7-pass method
-    VSITR,               ///< German VSITR 7-pass standard
-    GOST_R_50739_95,     ///< Russian GOST R 50739-95 2-pass standard
-    ATA_SECURE_ERASE     ///< Hardware secure erase for SSDs
+    ZERO_FILL,        ///< Single pass with zeros
+    RANDOM_FILL,      ///< Single pass with random data
+    DOD_5220_22_M,    ///< DoD 5220.22-M 3-pass standard
+    GUTMANN,          ///< Gutmann 35-pass method
+    SCHNEIER,         ///< Bruce Schneier 7-pass method
+    VSITR,            ///< German VSITR 7-pass standard
+    GOST_R_50739_95,  ///< Russian GOST R 50739-95 2-pass standard
+    ATA_SECURE_ERASE  ///< Hardware secure erase for SSDs
 };
 
 /**
@@ -38,6 +38,8 @@ struct WipeProgress {
     bool is_complete = false;
     bool has_error = false;
     std::string error_message;
+    uint64_t speed_bytes_per_sec = 0;          ///< Current write speed in bytes/sec
+    int64_t estimated_seconds_remaining = -1;  ///< ETA in seconds, -1 if unknown
 
     auto operator==(const WipeProgress&) const -> bool = default;
 };

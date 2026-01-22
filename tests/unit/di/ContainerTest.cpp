@@ -3,22 +3,22 @@
  * @brief Unit tests for DI Container
  */
 
-#include <gtest/gtest.h>
+#include "di/Container.hpp"
+
+#include "mocks/MockDiskService.hpp"
+#include "services/IDiskService.hpp"
+
 #include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
 #include <thread>
 #include <vector>
-
-#include "di/Container.hpp"
-#include "services/IDiskService.hpp"
-#include "mocks/MockDiskService.hpp"
 
 class ContainerTest : public ::testing::Test {
 protected:
     di::Container container;
 
-    void TearDown() override {
-        container.clear();
-    }
+    void TearDown() override { container.clear(); }
 };
 
 // Test: register_type creates correct interface mapping
@@ -128,9 +128,8 @@ TEST_F(ContainerTest, ConcurrentAccess_IsThreadSafe) {
     std::vector<std::shared_ptr<IDiskService>> results(10);
 
     for (int i = 0; i < 10; ++i) {
-        threads.emplace_back([this, &results, i]() {
-            results[i] = container.resolve<IDiskService>();
-        });
+        threads.emplace_back(
+            [this, &results, i]() { results[i] = container.resolve<IDiskService>(); });
     }
 
     for (auto& t : threads) {
@@ -147,10 +146,12 @@ TEST_F(ContainerTest, ConcurrentAccess_IsThreadSafe) {
 // Test: factory singleton caches after first call
 TEST_F(ContainerTest, FactorySingleton_CachesInstance) {
     int call_count = 0;
-    container.register_factory<IDiskService>([&call_count]() {
-        call_count++;
-        return std::make_shared<MockDiskService>();
-    }, di::Lifetime::SINGLETON);
+    container.register_factory<IDiskService>(
+        [&call_count]() {
+            call_count++;
+            return std::make_shared<MockDiskService>();
+        },
+        di::Lifetime::SINGLETON);
 
     (void)container.resolve<IDiskService>();
     (void)container.resolve<IDiskService>();
@@ -162,10 +163,12 @@ TEST_F(ContainerTest, FactorySingleton_CachesInstance) {
 // Test: factory transient creates new each time
 TEST_F(ContainerTest, FactoryTransient_CreatesEachTime) {
     int call_count = 0;
-    container.register_factory<IDiskService>([&call_count]() {
-        call_count++;
-        return std::make_shared<MockDiskService>();
-    }, di::Lifetime::TRANSIENT);
+    container.register_factory<IDiskService>(
+        [&call_count]() {
+            call_count++;
+            return std::make_shared<MockDiskService>();
+        },
+        di::Lifetime::TRANSIENT);
 
     (void)container.resolve<IDiskService>();
     (void)container.resolve<IDiskService>();
@@ -178,9 +181,8 @@ TEST_F(ContainerTest, FactoryTransient_CreatesEachTime) {
 TEST(ServiceLocatorTest, Configure_SetsUpGlobalContainer) {
     di::ServiceLocator::reset();
 
-    di::ServiceLocator::configure([](di::Container& c) {
-        c.register_type<IDiskService, MockDiskService>();
-    });
+    di::ServiceLocator::configure(
+        [](di::Container& c) { c.register_type<IDiskService, MockDiskService>(); });
 
     auto resolved = di::ServiceLocator::resolve<IDiskService>();
     EXPECT_NE(resolved, nullptr);
@@ -190,9 +192,8 @@ TEST(ServiceLocatorTest, Configure_SetsUpGlobalContainer) {
 
 // Test: ServiceLocator reset clears all
 TEST(ServiceLocatorTest, Reset_ClearsGlobalContainer) {
-    di::ServiceLocator::configure([](di::Container& c) {
-        c.register_type<IDiskService, MockDiskService>();
-    });
+    di::ServiceLocator::configure(
+        [](di::Container& c) { c.register_type<IDiskService, MockDiskService>(); });
 
     di::ServiceLocator::reset();
 

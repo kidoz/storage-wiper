@@ -75,10 +75,9 @@ public:
      * @param execute Function to execute
      * @param can_execute Function to check if execution is allowed (default: always true)
      */
-    explicit RelayCommand(ExecuteCallback execute,
-                          CanExecuteCallback can_execute = []() { return true; })
-        : execute_callback_(std::move(execute))
-        , can_execute_callback_(std::move(can_execute)) {}
+    explicit RelayCommand(
+        ExecuteCallback execute, CanExecuteCallback can_execute = []() { return true; })
+        : execute_callback_(std::move(execute)), can_execute_callback_(std::move(can_execute)) {}
 
     [[nodiscard]] auto can_execute() const -> bool override {
         return can_execute_callback_ ? can_execute_callback_() : true;
@@ -135,16 +134,15 @@ private:
  *
  * @tparam T Parameter type
  */
-template<typename T>
+template <typename T>
 class RelayCommand1 {
 public:
     using ExecuteCallback = std::function<void(const T&)>;
     using CanExecuteCallback = std::function<bool(const T&)>;
 
-    explicit RelayCommand1(ExecuteCallback execute,
-                           CanExecuteCallback can_execute = [](const T&) { return true; })
-        : execute_callback_(std::move(execute))
-        , can_execute_callback_(std::move(can_execute)) {}
+    explicit RelayCommand1(
+        ExecuteCallback execute, CanExecuteCallback can_execute = [](const T&) { return true; })
+        : execute_callback_(std::move(execute)), can_execute_callback_(std::move(can_execute)) {}
 
     [[nodiscard]] auto can_execute(const T& param) const -> bool {
         return can_execute_callback_ ? can_execute_callback_(param) : true;
@@ -161,4 +159,4 @@ private:
     CanExecuteCallback can_execute_callback_;
 };
 
-} // namespace mvvm
+}  // namespace mvvm

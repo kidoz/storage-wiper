@@ -1,30 +1,32 @@
 #include "helper/services/DiskService.hpp"
+
 #include "util/FileDescriptor.hpp"
 
 // Standard library
 #include <algorithm>
 #include <array>
-#include <vector>
-#include <cerrno>
 #include <cctype>
+#include <cerrno>
 #include <cstring>
 #include <expected>
 #include <filesystem>
-#include <fstream>
 #include <format>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 // System headers
 #include <fcntl.h>
-#include <mntent.h>
 #include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include <mntent.h>
 
 // Linux-specific headers
 #include <linux/fs.h>
@@ -33,55 +35,54 @@ namespace fs = std::filesystem;
 namespace rng = std::ranges;
 
 namespace {
-    constexpr auto BYTES_PER_SECTOR = uint64_t{512};
+constexpr auto BYTES_PER_SECTOR = uint64_t{512};
 
-    auto is_partition_suffix(std::string_view suffix) noexcept -> bool {
-        if (suffix.empty()) {
-            return false;
-        }
-        const auto first = static_cast<unsigned char>(suffix.front());
-        return std::isdigit(first) || suffix.front() == 'p';
+auto is_partition_suffix(std::string_view suffix) noexcept -> bool {
+    if (suffix.empty()) {
+        return false;
     }
+    const auto first = static_cast<unsigned char>(suffix.front());
+    return std::isdigit(first) || suffix.front() == 'p';
 }
+}  // namespace
 
 auto DiskService::get_available_disks() -> std::vector<DiskInfo> {
     const fs::path block_dir{"/sys/block"};
-    
+
     if (!fs::exists(block_dir)) {
         return {};
     }
-    
+
     // Virtual device patterns to skip
     // Note: dm- devices (LVM/device-mapper) are filtered here in /sys/block
     // but physical disks that are LVM PVs are still shown (e.g., /dev/sda)
     constexpr std::array virtual_patterns{"loop", "ram", "dm-"};
 
     auto is_virtual_device = [&virtual_patterns](std::string_view name) noexcept {
-        return rng::any_of(virtual_patterns, [name](const char* pattern) {
-            return name.contains(pattern);
-        });
+        return rng::any_of(virtual_patterns,
+                           [name](const char* pattern) { return name.contains(pattern); });
     };
-    
+
     std::vector<DiskInfo> disks;
-    
+
     for (const auto& entry : fs::directory_iterator{block_dir}) {
         const auto device_name = entry.path().filename().string();
-        
+
         if (is_virtual_device(device_name)) {
             continue;
         }
-        
+
         const auto device_path = std::format("/dev/{}", device_name);
-        
+
         if (auto valid = validate_device_path(device_path); !valid) {
             continue;
         }
-        
+
         if (auto info = parse_disk_info(device_path); info.size_bytes > 0) {
             disks.emplace_back(std::move(info));
         }
     }
-    
+
     return disks;
 }
 
@@ -93,9 +94,13 @@ auto DiskService::unmount_disk(const std::string& path) -> std::expected<void, u
     // Collect all mount points for this device and its partitions
     std::vector<std::string> mount_points;
 
-    if (auto mtab_deleter = [](FILE* f) { if (f) ::endmntent(f); };
-        std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"), mtab_deleter}) {
-
+    if (auto mtab_deleter =
+            [](FILE* f) {
+                if (f)
+                    ::endmntent(f);
+            };
+        std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"),
+                                                           mtab_deleter}) {
         while (auto* entry = ::getmntent(mtab.get())) {
             const std::string_view mount_device{entry->mnt_fsname};
 
@@ -131,18 +136,24 @@ auto DiskService::unmount_disk(const std::string& path) -> std::expected<void, u
     }
 
     // Check if anything is still mounted
-    if (auto mtab_deleter = [](FILE* f) { if (f) ::endmntent(f); };
-        std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"), mtab_deleter}) {
-
+    if (auto mtab_deleter =
+            [](FILE* f) {
+                if (f)
+                    ::endmntent(f);
+            };
+        std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"),
+                                                           mtab_deleter}) {
         while (auto* entry = ::getmntent(mtab.get())) {
             const std::string_view mount_device{entry->mnt_fsname};
 
             if (mount_device == path ||
                 (mount_device.starts_with(path) && mount_device.size() > path.size())) {
                 // Still mounted
-                const std::string error_str = last_errno ? std::strerror(last_errno) : "Device busy";
-                return std::unexpected(util::Error{
-                    std::format("Failed to unmount {}: {}", entry->mnt_dir, error_str), last_errno});
+                const std::string error_str =
+                    last_errno ? std::strerror(last_errno) : "Device busy";
+                return std::unexpected(
+                    util::Error{std::format("Failed to unmount {}: {}", entry->mnt_dir, error_str),
+                                last_errno});
             }
         }
     }
@@ -166,8 +177,8 @@ auto DiskService::get_disk_size(const std::string& path) -> std::expected<uint64
 
     const util::FileDescriptor fd{::open(path.c_str(), O_RDONLY)};
     if (!fd) {
-        return std::unexpected(util::Error{
-            std::format("Failed to open device: {}", std::strerror(errno)), errno});
+        return std::unexpected(
+            util::Error{std::format("Failed to open device: {}", std::strerror(errno)), errno});
     }
 
     uint64_t size{};
@@ -178,7 +189,8 @@ auto DiskService::get_disk_size(const std::string& path) -> std::expected<uint64
     return size;
 }
 
-auto DiskService::validate_device_path(const std::string& path) -> std::expected<void, util::Error> {
+auto DiskService::validate_device_path(const std::string& path)
+    -> std::expected<void, util::Error> {
     // Whitelist of allowed device prefixes (physical disks only)
     // Explicitly excludes /dev/mapper/* and /dev/dm-* (LVM logical volumes)
     // Physical disks that are LVM Physical Volumes (PVs) ARE allowed
@@ -191,8 +203,8 @@ auto DiskService::validate_device_path(const std::string& path) -> std::expected
 
     const std::string_view path_view{path};
 
-    const auto has_valid_prefix = rng::any_of(allowed_prefixes,
-        [path_view](std::string_view prefix) noexcept {
+    const auto has_valid_prefix =
+        rng::any_of(allowed_prefixes, [path_view](std::string_view prefix) noexcept {
             return path_view.starts_with(prefix);
         });
 
@@ -213,22 +225,20 @@ auto DiskService::validate_device_path(const std::string& path) -> std::expected
 }
 
 auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
-    auto info = DiskInfo{
-        .path = device_path,
-        .model = {},
-        .serial = {},
-        .size_bytes = 0,
-        .is_removable = false,
-        .is_ssd = false,
-        .filesystem = {},
-        .is_mounted = false,
-        .mount_point = {},
-        .is_lvm_pv = false
-    };
-    
+    auto info = DiskInfo{.path = device_path,
+                         .model = {},
+                         .serial = {},
+                         .size_bytes = 0,
+                         .is_removable = false,
+                         .is_ssd = false,
+                         .filesystem = {},
+                         .is_mounted = false,
+                         .mount_point = {},
+                         .is_lvm_pv = false};
+
     const auto device_name = fs::path{device_path}.filename().string();
     const auto sys_path = std::format("/sys/block/{}", device_name);
-    
+
     // Helper lambdas for reading different types from sysfs
     auto read_uint64 = [](const fs::path& path) -> std::optional<uint64_t> {
         if (std::ifstream file{path}; file.is_open()) {
@@ -239,7 +249,7 @@ auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
         }
         return std::nullopt;
     };
-    
+
     auto read_int = [](const fs::path& path) -> std::optional<int> {
         if (std::ifstream file{path}; file.is_open()) {
             int value{};
@@ -249,7 +259,7 @@ auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
         }
         return std::nullopt;
     };
-    
+
     // Get disk size in sectors and convert to bytes
     // Add overflow check to prevent arithmetic overflow on extremely large disks
     if (const auto sectors = read_uint64(sys_path + "/size")) {
@@ -258,18 +268,19 @@ auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
             info.size_bytes = *sectors * BYTES_PER_SECTOR;
         }
     }
-    
+
     // Get model name with automatic whitespace trimming
     if (std::ifstream model_file{sys_path + "/device/model"}) {
         std::getline(model_file, info.model);
-        info.model = std::string{std::string_view{info.model}.substr(0, info.model.find_last_not_of(" \n\r\t") + 1)};
+        info.model = std::string{
+            std::string_view{info.model}.substr(0, info.model.find_last_not_of(" \n\r\t") + 1)};
     }
-    
+
     // Check if removable
     if (const auto removable = read_int(sys_path + "/removable")) {
         info.is_removable = (*removable == 1);
     }
-    
+
     info.is_ssd = check_if_ssd(device_path);
 
     // Collect device-mapper (dm-*) holders for this device and its partitions
@@ -302,9 +313,13 @@ auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
     info.is_lvm_pv = !dm_holders.empty();
 
     // Check mount status using RAII wrapper
-    if (auto mtab_deleter = [](FILE* f) { if (f) ::endmntent(f); };
-        std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"), mtab_deleter}) {
-
+    if (auto mtab_deleter =
+            [](FILE* f) {
+                if (f)
+                    ::endmntent(f);
+            };
+        std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"),
+                                                           mtab_deleter}) {
         while (auto* entry = ::getmntent(mtab.get())) {
             const std::string_view mount_device{entry->mnt_fsname};
 
@@ -332,16 +347,21 @@ auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
                     }
                 }
             }
-            if (info.is_mounted) break;
+            if (info.is_mounted)
+                break;
         }
     }
 
     // If we have dm holders but couldn't match mount by dm-* path,
     // try matching by resolving /dev/mapper/* symlinks
     if (!info.is_mounted && !dm_holders.empty()) {
-        if (auto mtab_deleter = [](FILE* f) { if (f) ::endmntent(f); };
-            std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"), mtab_deleter}) {
-
+        if (auto mtab_deleter =
+                [](FILE* f) {
+                    if (f)
+                        ::endmntent(f);
+                };
+            std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"),
+                                                               mtab_deleter}) {
             while (auto* entry = ::getmntent(mtab.get())) {
                 const std::string_view mount_device{entry->mnt_fsname};
 

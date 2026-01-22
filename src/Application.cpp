@@ -1,17 +1,17 @@
 #include "Application.hpp"
+
 #include "services/DBusClient.hpp"
 #include "services/IDiskService.hpp"
 #include "services/IWipeService.hpp"
 #include "viewmodels/MainViewModel.hpp"
 #include "views/MainWindow.hpp"
+
 #include <gtkmm.h>
 #include <gtkmm/init.h>
+
 #include <iostream>
 
-StorageWiperApp::StorageWiperApp()
-    : app_(nullptr)
-    , main_window_(nullptr) {
-
+StorageWiperApp::StorageWiperApp() : app_(nullptr), main_window_(nullptr) {
     app_ = gtk_application_new("su.kidoz.storage_wiper", G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect(app_, "activate", G_CALLBACK(on_activate), this);
     g_signal_connect(app_, "startup", G_CALLBACK(on_startup), this);
@@ -96,28 +96,50 @@ void StorageWiperApp::setup_main_window() {
     // Set up connection state callback
     // Use weak_ptr to avoid preventing ViewModel destruction
     std::weak_ptr<MainViewModel> weak_vm = view_model_;
-    dbus_client_->set_connection_state_callback(
-        [weak_vm](ConnectionState state, const std::string& error) {
-            // Schedule on main thread
-            auto* data = new std::pair<std::weak_ptr<MainViewModel>,
-                                       std::pair<ConnectionState, std::string>>(
+    dbus_client_->set_connection_state_callback([weak_vm](ConnectionState state,
+                                                          const std::string& error) {
+        // Schedule on main thread
+        auto* data =
+            new std::pair<std::weak_ptr<MainViewModel>, std::pair<ConnectionState, std::string>>(
                 weak_vm, {state, error});
 
-            g_idle_add([](gpointer user_data) -> gboolean {
-                auto* args = static_cast<std::pair<std::weak_ptr<MainViewModel>,
-                                                   std::pair<ConnectionState, std::string>>*>(user_data);
+        g_idle_add(
+            [](gpointer user_data) -> gboolean {
+                auto* args =
+                    static_cast<std::pair<std::weak_ptr<MainViewModel>,
+                                          std::pair<ConnectionState, std::string>>*>(user_data);
                 if (auto vm = args->first.lock()) {
                     bool connected = (args->second.first == ConnectionState::CONNECTED);
                     vm->set_connection_state(connected, args->second.second);
                 }
                 delete args;
                 return G_SOURCE_REMOVE;
-            }, data);
-        });
+            },
+            data);
+    });
 
     // Set initial connection state
     bool initial_connected = (dbus_client_->get_connection_state() == ConnectionState::CONNECTED);
     view_model_->set_connection_state(initial_connected, "");
+
+    // Set up notification callback
+    GApplication* g_app = G_APPLICATION(app_);
+    view_model_->set_notification_callback(
+        [g_app](const std::string& title, const std::string& body, bool is_error) {
+            GNotification* notification = g_notification_new(title.c_str());
+            g_notification_set_body(notification, body.c_str());
+
+            // Set icon based on success/error
+            if (is_error) {
+                g_notification_set_icon(notification, g_themed_icon_new("dialog-error-symbolic"));
+            } else {
+                g_notification_set_icon(notification, g_themed_icon_new("emblem-ok-symbolic"));
+            }
+
+            // Send the notification
+            g_application_send_notification(g_app, "wipe-complete", notification);
+            g_object_unref(notification);
+        });
 
     // Create View
     view_ = std::make_unique<MainWindow>(main_window_);

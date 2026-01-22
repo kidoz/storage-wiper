@@ -3,16 +3,17 @@
  * @brief Unit tests for MainViewModel
  */
 
-#include <gtest/gtest.h>
-#include <gmock/gmock.h>
-
 #include "viewmodels/MainViewModel.hpp"
+
 #include "fixtures/TestFixtures.hpp"
 
-using ::testing::Return;
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
 using ::testing::_;
 using ::testing::Invoke;
 using ::testing::NiceMock;
+using ::testing::Return;
 
 class MainViewModelTest : public ViewModelTestFixture {
 protected:
@@ -20,10 +21,7 @@ protected:
 
     void SetUp() override {
         ViewModelTestFixture::SetUp();
-        view_model = std::make_unique<MainViewModel>(
-            mock_disk_service,
-            mock_wipe_service
-        );
+        view_model = std::make_unique<MainViewModel>(mock_disk_service, mock_wipe_service);
     }
 
     void TearDown() override {
@@ -32,9 +30,7 @@ protected:
     }
 
     // Helper to simulate connected state (required for disk loading)
-    void SimulateConnected() {
-        view_model->set_connection_state(true, "");
-    }
+    void SimulateConnected() { view_model->set_connection_state(true, ""); }
 };
 
 // Test: initialization creates valid view model
@@ -44,14 +40,11 @@ TEST_F(MainViewModelTest, Constructor_CreatesValidViewModel) {
 
 // Test: initialize loads disks when connected
 TEST_F(MainViewModelTest, Initialize_LoadsDisks) {
-    std::vector<DiskInfo> test_disks = {
-        MockDiskService::CreateTestDisk("/dev/sda"),
-        MockDiskService::CreateTestDisk("/dev/sdb")
-    };
+    std::vector<DiskInfo> test_disks = {MockDiskService::CreateTestDisk("/dev/sda"),
+                                        MockDiskService::CreateTestDisk("/dev/sdb")};
 
     // set_connection_state(true) will call load_disks()
-    EXPECT_CALL(*mock_disk_service, get_available_disks())
-        .WillOnce(Return(test_disks));
+    EXPECT_CALL(*mock_disk_service, get_available_disks()).WillOnce(Return(test_disks));
 
     view_model->initialize();  // Won't load disks since not connected
     SimulateConnected();       // This triggers load_disks()
@@ -122,13 +115,9 @@ TEST_F(MainViewModelTest, Observable_TriggersSubscribers) {
 TEST_F(MainViewModelTest, Observable_MultipleSubscribers) {
     int notification_count = 0;
 
-    view_model->selected_disk_path.subscribe([&](const std::string&) {
-        notification_count++;
-    });
+    view_model->selected_disk_path.subscribe([&](const std::string&) { notification_count++; });
 
-    view_model->selected_disk_path.subscribe([&](const std::string&) {
-        notification_count++;
-    });
+    view_model->selected_disk_path.subscribe([&](const std::string&) { notification_count++; });
 
     view_model->select_disk("/dev/sda");
 

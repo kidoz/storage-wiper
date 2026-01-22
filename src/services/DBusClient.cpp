@@ -8,11 +8,11 @@
 #include <iostream>
 
 namespace {
-    constexpr auto DBUS_NAME = "su.kidoz.storage_wiper.Helper";
-    constexpr auto DBUS_PATH = "/su/kidoz/storage_wiper/Helper";
-    constexpr auto DBUS_INTERFACE = "su.kidoz.storage_wiper.Helper";
-    constexpr auto DBUS_TIMEOUT_MS = 30000;  // 30 second timeout for polkit dialogs
-}
+constexpr auto DBUS_NAME = "su.kidoz.storage_wiper.Helper";
+constexpr auto DBUS_PATH = "/su/kidoz/storage_wiper/Helper";
+constexpr auto DBUS_INTERFACE = "su.kidoz.storage_wiper.Helper";
+constexpr auto DBUS_TIMEOUT_MS = 30'000;  // 30 second timeout for polkit dialogs
+}  // namespace
 
 DBusClient::DBusClient() = default;
 
@@ -47,22 +47,14 @@ auto DBusClient::request_reconnect() -> bool {
 }
 
 auto DBusClient::is_service_available() const -> bool {
-    if (!connection_) return false;
+    if (!connection_)
+        return false;
 
     GError* error = nullptr;
     GVariant* result = g_dbus_connection_call_sync(
-        connection_,
-        "org.freedesktop.DBus",
-        "/org/freedesktop/DBus",
-        "org.freedesktop.DBus",
-        "NameHasOwner",
-        g_variant_new("(s)", DBUS_NAME),
-        G_VARIANT_TYPE("(b)"),
-        G_DBUS_CALL_FLAGS_NONE,
-        -1,
-        nullptr,
-        &error
-    );
+        connection_, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+        "NameHasOwner", g_variant_new("(s)", DBUS_NAME), G_VARIANT_TYPE("(b)"),
+        G_DBUS_CALL_FLAGS_NONE, -1, nullptr, &error);
 
     if (!result) {
         g_clear_error(&error);
@@ -149,16 +141,8 @@ auto DBusClient::attempt_reconnect() -> bool {
         start_name_watching();
     }
 
-    proxy_ = g_dbus_proxy_new_sync(
-        connection_,
-        G_DBUS_PROXY_FLAGS_NONE,
-        nullptr,
-        DBUS_NAME,
-        DBUS_PATH,
-        DBUS_INTERFACE,
-        nullptr,
-        &error
-    );
+    proxy_ = g_dbus_proxy_new_sync(connection_, G_DBUS_PROXY_FLAGS_NONE, nullptr, DBUS_NAME,
+                                   DBUS_PATH, DBUS_INTERFACE, nullptr, &error);
 
     if (!proxy_) {
         std::string msg = error ? error->message : "unknown error";
@@ -197,16 +181,12 @@ auto DBusClient::get_retry_delay_ms() -> int {
 }
 
 void DBusClient::start_name_watching() {
-    if (name_watcher_id_ != 0) return;
+    if (name_watcher_id_ != 0)
+        return;
 
-    name_watcher_id_ = g_bus_watch_name(
-        G_BUS_TYPE_SYSTEM,
-        DBUS_NAME,
-        G_BUS_NAME_WATCHER_FLAGS_NONE,
-        on_name_appeared,
-        on_name_vanished,
-        this,
-        nullptr  // user_data_free_func
+    name_watcher_id_ = g_bus_watch_name(G_BUS_TYPE_SYSTEM, DBUS_NAME, G_BUS_NAME_WATCHER_FLAGS_NONE,
+                                        on_name_appeared, on_name_vanished, this,
+                                        nullptr  // user_data_free_func
     );
 }
 
@@ -224,10 +204,8 @@ gboolean DBusClient::on_reconnect_timer(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
-void DBusClient::on_name_appeared(GDBusConnection* /*connection*/,
-                                   const gchar* /*name*/,
-                                   const gchar* /*name_owner*/,
-                                   gpointer user_data) {
+void DBusClient::on_name_appeared(GDBusConnection* /*connection*/, const gchar* /*name*/,
+                                  const gchar* /*name_owner*/, gpointer user_data) {
     auto* self = static_cast<DBusClient*>(user_data);
 
     ConnectionState current_state;
@@ -248,9 +226,8 @@ void DBusClient::on_name_appeared(GDBusConnection* /*connection*/,
     }
 }
 
-void DBusClient::on_name_vanished(GDBusConnection* /*connection*/,
-                                   const gchar* /*name*/,
-                                   gpointer user_data) {
+void DBusClient::on_name_vanished(GDBusConnection* /*connection*/, const gchar* /*name*/,
+                                  gpointer user_data) {
     auto* self = static_cast<DBusClient*>(user_data);
 
     ConnectionState current_state;
@@ -316,16 +293,11 @@ auto DBusClient::connect() -> bool {
     start_name_watching();
 
     // Create proxy for the helper service
-    proxy_ = g_dbus_proxy_new_sync(
-        connection_,
-        G_DBUS_PROXY_FLAGS_NONE,
-        nullptr,  // interface info
-        DBUS_NAME,
-        DBUS_PATH,
-        DBUS_INTERFACE,
-        nullptr,  // cancellable
-        &error
-    );
+    proxy_ = g_dbus_proxy_new_sync(connection_, G_DBUS_PROXY_FLAGS_NONE,
+                                   nullptr,  // interface info
+                                   DBUS_NAME, DBUS_PATH, DBUS_INTERFACE,
+                                   nullptr,  // cancellable
+                                   &error);
 
     if (!proxy_) {
         std::string msg = error ? error->message : "unknown";
@@ -350,32 +322,25 @@ auto DBusClient::is_connected() const -> bool {
 }
 
 void DBusClient::setup_signal_handler() {
-    if (!connection_) return;
+    if (!connection_)
+        return;
 
     signal_subscription_id_ = g_dbus_connection_signal_subscribe(
-        connection_,
-        DBUS_NAME,
-        DBUS_INTERFACE,
-        "WipeProgress",
-        DBUS_PATH,
+        connection_, DBUS_NAME, DBUS_INTERFACE, "WipeProgress", DBUS_PATH,
         nullptr,  // arg0
-        G_DBUS_SIGNAL_FLAGS_NONE,
-        on_signal_received,
-        this,
-        nullptr  // user_data_free_func
+        G_DBUS_SIGNAL_FLAGS_NONE, on_signal_received, this,
+        nullptr   // user_data_free_func
     );
 }
 
-void DBusClient::on_signal_received(GDBusConnection* /*connection*/,
-                                     const gchar* /*sender_name*/,
-                                     const gchar* /*object_path*/,
-                                     const gchar* /*interface_name*/,
-                                     const gchar* signal_name,
-                                     GVariant* parameters,
-                                     gpointer user_data) {
+void DBusClient::on_signal_received(GDBusConnection* /*connection*/, const gchar* /*sender_name*/,
+                                    const gchar* /*object_path*/, const gchar* /*interface_name*/,
+                                    const gchar* signal_name, GVariant* parameters,
+                                    gpointer user_data) {
     auto* self = static_cast<DBusClient*>(user_data);
 
-    if (g_strcmp0(signal_name, "WipeProgress") != 0) return;
+    if (g_strcmp0(signal_name, "WipeProgress") != 0)
+        return;
 
     // Parse progress signal
     const gchar* device_path = nullptr;
@@ -386,29 +351,26 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/,
     gboolean is_complete = FALSE;
     gboolean has_error = FALSE;
     const gchar* error_message = nullptr;
+    guint64 bytes_written = 0;
+    guint64 total_bytes = 0;
+    guint64 speed_bytes_per_sec = 0;
+    gint64 estimated_seconds_remaining = -1;
 
-    g_variant_get(parameters, "(&sdii&sbbs)",
-        &device_path,
-        &percentage,
-        &current_pass,
-        &total_passes,
-        &status,
-        &is_complete,
-        &has_error,
-        &error_message
-    );
+    g_variant_get(parameters, "(&sdii&sbb&stttx)", &device_path, &percentage, &current_pass,
+                  &total_passes, &status, &is_complete, &has_error, &error_message, &bytes_written,
+                  &total_bytes, &speed_bytes_per_sec, &estimated_seconds_remaining);
 
-    WipeProgress progress{
-        .bytes_written = 0,  // Not provided via D-Bus
-        .total_bytes = 0,
-        .current_pass = current_pass,
-        .total_passes = total_passes,
-        .percentage = percentage,
-        .status = status ? status : "",
-        .is_complete = is_complete != FALSE,
-        .has_error = has_error != FALSE,
-        .error_message = error_message ? error_message : ""
-    };
+    WipeProgress progress{.bytes_written = bytes_written,
+                          .total_bytes = total_bytes,
+                          .current_pass = current_pass,
+                          .total_passes = total_passes,
+                          .percentage = percentage,
+                          .status = status ? status : "",
+                          .is_complete = is_complete != FALSE,
+                          .has_error = has_error != FALSE,
+                          .error_message = error_message ? error_message : "",
+                          .speed_bytes_per_sec = speed_bytes_per_sec,
+                          .estimated_seconds_remaining = estimated_seconds_remaining};
 
     // Call the callback
     std::lock_guard lock(self->callback_mutex_);
@@ -418,22 +380,18 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/,
 }
 
 auto DBusClient::get_available_disks() -> std::vector<DiskInfo> {
-    if (!proxy_) return {};
+    if (!proxy_)
+        return {};
 
     GError* error = nullptr;
-    GVariant* result = g_dbus_proxy_call_sync(
-        proxy_,
-        "GetDisks",
-        nullptr,  // no parameters
-        G_DBUS_CALL_FLAGS_NONE,
-        DBUS_TIMEOUT_MS,
-        nullptr,  // cancellable
-        &error
-    );
+    GVariant* result = g_dbus_proxy_call_sync(proxy_, "GetDisks",
+                                              nullptr,  // no parameters
+                                              G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS,
+                                              nullptr,  // cancellable
+                                              &error);
 
     if (!result) {
-        std::cerr << "GetDisks failed: "
-                  << (error ? error->message : "unknown") << std::endl;
+        std::cerr << "GetDisks failed: " << (error ? error->message : "unknown") << std::endl;
         g_clear_error(&error);
         return {};
     }
@@ -454,21 +412,17 @@ auto DBusClient::get_available_disks() -> std::vector<DiskInfo> {
     gboolean is_mounted = FALSE;
     const gchar* mount_point = nullptr;
 
-    while (g_variant_iter_next(&iter, "(&s&s&sxbb&sb&s)",
-            &path, &model, &serial, &size_bytes,
-            &is_removable, &is_ssd, &filesystem,
-            &is_mounted, &mount_point)) {
-        disks.push_back(DiskInfo{
-            .path = path ? path : "",
-            .model = model ? model : "",
-            .serial = serial ? serial : "",
-            .size_bytes = static_cast<uint64_t>(size_bytes),
-            .is_removable = is_removable != FALSE,
-            .is_ssd = is_ssd != FALSE,
-            .filesystem = filesystem ? filesystem : "",
-            .is_mounted = is_mounted != FALSE,
-            .mount_point = mount_point ? mount_point : ""
-        });
+    while (g_variant_iter_next(&iter, "(&s&s&sxbb&sb&s)", &path, &model, &serial, &size_bytes,
+                               &is_removable, &is_ssd, &filesystem, &is_mounted, &mount_point)) {
+        disks.push_back(DiskInfo{.path = path ? path : "",
+                                 .model = model ? model : "",
+                                 .serial = serial ? serial : "",
+                                 .size_bytes = static_cast<uint64_t>(size_bytes),
+                                 .is_removable = is_removable != FALSE,
+                                 .is_ssd = is_ssd != FALSE,
+                                 .filesystem = filesystem ? filesystem : "",
+                                 .is_mounted = is_mounted != FALSE,
+                                 .mount_point = mount_point ? mount_point : ""});
     }
 
     g_variant_unref(array);
@@ -477,22 +431,15 @@ auto DBusClient::get_available_disks() -> std::vector<DiskInfo> {
     return disks;
 }
 
-auto DBusClient::validate_device_path(const std::string& path)
-    -> std::expected<void, util::Error> {
+auto DBusClient::validate_device_path(const std::string& path) -> std::expected<void, util::Error> {
     if (!proxy_) {
         return std::unexpected(util::Error{"Not connected to helper service"});
     }
 
     GError* error = nullptr;
-    GVariant* result = g_dbus_proxy_call_sync(
-        proxy_,
-        "ValidateDevicePath",
-        g_variant_new("(s)", path.c_str()),
-        G_DBUS_CALL_FLAGS_NONE,
-        DBUS_TIMEOUT_MS,
-        nullptr,
-        &error
-    );
+    GVariant* result =
+        g_dbus_proxy_call_sync(proxy_, "ValidateDevicePath", g_variant_new("(s)", path.c_str()),
+                               G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
         auto msg = std::string(error ? error->message : "unknown error");
@@ -513,18 +460,13 @@ auto DBusClient::validate_device_path(const std::string& path)
 }
 
 auto DBusClient::is_disk_writable(const std::string& path) -> bool {
-    if (!proxy_) return false;
+    if (!proxy_)
+        return false;
 
     GError* error = nullptr;
-    GVariant* result = g_dbus_proxy_call_sync(
-        proxy_,
-        "IsDeviceWritable",
-        g_variant_new("(s)", path.c_str()),
-        G_DBUS_CALL_FLAGS_NONE,
-        DBUS_TIMEOUT_MS,
-        nullptr,
-        &error
-    );
+    GVariant* result =
+        g_dbus_proxy_call_sync(proxy_, "IsDeviceWritable", g_variant_new("(s)", path.c_str()),
+                               G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
         g_clear_error(&error);
@@ -538,8 +480,7 @@ auto DBusClient::is_disk_writable(const std::string& path) -> bool {
     return writable != FALSE;
 }
 
-auto DBusClient::get_disk_size(const std::string& path)
-    -> std::expected<uint64_t, util::Error> {
+auto DBusClient::get_disk_size(const std::string& path) -> std::expected<uint64_t, util::Error> {
     // Get disk info and extract size
     auto disks = get_available_disks();
     for (const auto& disk : disks) {
@@ -550,22 +491,15 @@ auto DBusClient::get_disk_size(const std::string& path)
     return std::unexpected(util::Error{"Disk not found"});
 }
 
-auto DBusClient::unmount_disk(const std::string& path)
-    -> std::expected<void, util::Error> {
+auto DBusClient::unmount_disk(const std::string& path) -> std::expected<void, util::Error> {
     if (!proxy_) {
         return std::unexpected(util::Error{"Not connected to helper service"});
     }
 
     GError* error = nullptr;
-    GVariant* result = g_dbus_proxy_call_sync(
-        proxy_,
-        "UnmountDevice",
-        g_variant_new("(s)", path.c_str()),
-        G_DBUS_CALL_FLAGS_NONE,
-        DBUS_TIMEOUT_MS,
-        nullptr,
-        &error
-    );
+    GVariant* result =
+        g_dbus_proxy_call_sync(proxy_, "UnmountDevice", g_variant_new("(s)", path.c_str()),
+                               G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
         auto msg = std::string(error ? error->message : "unknown error");
@@ -586,18 +520,12 @@ auto DBusClient::unmount_disk(const std::string& path)
 }
 
 void DBusClient::load_algorithms() {
-    if (algorithms_loaded_ || !proxy_) return;
+    if (algorithms_loaded_ || !proxy_)
+        return;
 
     GError* error = nullptr;
     GVariant* result = g_dbus_proxy_call_sync(
-        proxy_,
-        "GetAlgorithms",
-        nullptr,
-        G_DBUS_CALL_FLAGS_NONE,
-        DBUS_TIMEOUT_MS,
-        nullptr,
-        &error
-    );
+        proxy_, "GetAlgorithms", nullptr, G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
         g_clear_error(&error);
@@ -614,12 +542,10 @@ void DBusClient::load_algorithms() {
     gint pass_count = 0;
 
     while (g_variant_iter_next(&iter, "(u&s&si)", &id, &name, &description, &pass_count)) {
-        algorithms_.push_back(AlgorithmInfo{
-            .id = id,
-            .name = name ? name : "",
-            .description = description ? description : "",
-            .pass_count = pass_count
-        });
+        algorithms_.push_back(AlgorithmInfo{.id = id,
+                                            .name = name ? name : "",
+                                            .description = description ? description : "",
+                                            .pass_count = pass_count});
     }
 
     g_variant_unref(array);
@@ -627,10 +553,10 @@ void DBusClient::load_algorithms() {
     algorithms_loaded_ = true;
 }
 
-auto DBusClient::wipe_disk(const std::string& disk_path,
-                           WipeAlgorithm algorithm,
+auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm,
                            ProgressCallback callback) -> bool {
-    if (!proxy_) return false;
+    if (!proxy_)
+        return false;
 
     // Store callback for signal handler
     {
@@ -640,18 +566,12 @@ auto DBusClient::wipe_disk(const std::string& disk_path,
 
     GError* error = nullptr;
     GVariant* result = g_dbus_proxy_call_sync(
-        proxy_,
-        "StartWipe",
+        proxy_, "StartWipe",
         g_variant_new("(su)", disk_path.c_str(), static_cast<guint32>(algorithm)),
-        G_DBUS_CALL_FLAGS_NONE,
-        DBUS_TIMEOUT_MS,
-        nullptr,
-        &error
-    );
+        G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
-        std::cerr << "StartWipe failed: "
-                  << (error ? error->message : "unknown") << std::endl;
+        std::cerr << "StartWipe failed: " << (error ? error->message : "unknown") << std::endl;
         g_clear_error(&error);
         return false;
     }
@@ -662,7 +582,8 @@ auto DBusClient::wipe_disk(const std::string& disk_path,
     g_variant_unref(result);
 
     if (!started) {
-        std::cerr << "Wipe not started: " << (error_message ? error_message : "unknown") << std::endl;
+        std::cerr << "Wipe not started: " << (error_message ? error_message : "unknown")
+                  << std::endl;
     }
 
     return started != FALSE;
@@ -672,7 +593,8 @@ auto DBusClient::get_algorithm_name(WipeAlgorithm algo) -> std::string {
     load_algorithms();
     auto id = static_cast<uint32_t>(algo);
     for (const auto& info : algorithms_) {
-        if (info.id == id) return info.name;
+        if (info.id == id)
+            return info.name;
     }
     return "Unknown";
 }
@@ -681,7 +603,8 @@ auto DBusClient::get_algorithm_description(WipeAlgorithm algo) -> std::string {
     load_algorithms();
     auto id = static_cast<uint32_t>(algo);
     for (const auto& info : algorithms_) {
-        if (info.id == id) return info.description;
+        if (info.id == id)
+            return info.description;
     }
     return "";
 }
@@ -690,7 +613,8 @@ auto DBusClient::get_pass_count(WipeAlgorithm algo) -> int {
     load_algorithms();
     auto id = static_cast<uint32_t>(algo);
     for (const auto& info : algorithms_) {
-        if (info.id == id) return info.pass_count;
+        if (info.id == id)
+            return info.pass_count;
     }
     return 1;
 }
@@ -708,18 +632,12 @@ auto DBusClient::is_ssd_compatible(WipeAlgorithm algo) -> bool {
 }
 
 auto DBusClient::cancel_current_operation() -> bool {
-    if (!proxy_) return false;
+    if (!proxy_)
+        return false;
 
     GError* error = nullptr;
-    GVariant* result = g_dbus_proxy_call_sync(
-        proxy_,
-        "CancelWipe",
-        nullptr,
-        G_DBUS_CALL_FLAGS_NONE,
-        DBUS_TIMEOUT_MS,
-        nullptr,
-        &error
-    );
+    GVariant* result = g_dbus_proxy_call_sync(proxy_, "CancelWipe", nullptr, G_DBUS_CALL_FLAGS_NONE,
+                                              DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
         g_clear_error(&error);

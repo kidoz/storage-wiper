@@ -20,14 +20,13 @@ struct Error {
     int code = 0;
 
     Error() = default;
-    explicit Error(std::string msg, int err_code = 0)
-        : message(std::move(msg)), code(err_code) {}
+    explicit Error(std::string msg, int err_code = 0) : message(std::move(msg)), code(err_code) {}
 };
 
 /**
  * @brief Result alias using std::expected
  */
-template<typename T>
+template <typename T>
 using Result = std::expected<T, Error>;
 
-} // namespace util
+}  // namespace util
