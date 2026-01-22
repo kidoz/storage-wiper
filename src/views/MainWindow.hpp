@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "view_models/MainViewModel.hpp"
+#include "viewmodels/MainViewModel.hpp"
 #include "views/MainWindowContent.hpp"
 #include <adwaita.h>
 #include <gtkmm.h>

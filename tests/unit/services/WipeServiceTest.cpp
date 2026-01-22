@@ -8,7 +8,7 @@
 #include <future>
 #include <thread>
 
-#include "services/WipeService.hpp"
+#include "helper/services/WipeService.hpp"
 #include "fixtures/TestFixtures.hpp"
 #include "mocks/MockDiskService.hpp"
 

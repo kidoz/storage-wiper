@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-#include "view_models/MainViewModel.hpp"
+#include "viewmodels/MainViewModel.hpp"
 #include "fixtures/TestFixtures.hpp"
 
 using ::testing::Return;

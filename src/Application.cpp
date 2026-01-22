@@ -2,7 +2,7 @@
 #include "services/DBusClient.hpp"
 #include "services/IDiskService.hpp"
 #include "services/IWipeService.hpp"
-#include "view_models/MainViewModel.hpp"
+#include "viewmodels/MainViewModel.hpp"
 #include "views/MainWindow.hpp"
 #include <gtkmm.h>
 #include <gtkmm/init.h>

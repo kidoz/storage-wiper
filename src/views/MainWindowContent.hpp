@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "view_models/MainViewModel.hpp"
+#include "viewmodels/MainViewModel.hpp"
 #include <gtkmm.h>
 #include <queue>
 #include <mutex>

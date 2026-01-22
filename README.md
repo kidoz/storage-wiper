@@ -228,7 +228,7 @@ Storage Wiper follows the **MVVM (Model-View-ViewModel)** pattern with a privile
 
 - **View Layer**: GTK4/Adwaita UI (`MainWindow`, `DiskRow`, `AlgorithmRow`)
 - **ViewModel Layer**: Business logic with observable properties (`MainViewModel`)
-- **Model Layer**: Services (`DiskService`, `WipeService`, `DBusClient`) and Algorithms
+- **Model Layer**: D-Bus client services (`DBusClient`), helper services (`DiskService`, `WipeService`), and Algorithms
 
 **D-Bus Architecture**: The GUI runs unprivileged while a separate `storage-wiper-helper` daemon handles privileged disk operations via D-Bus. This provides better security through privilege separation.
 
@@ -254,9 +254,10 @@ storage-wiper/
 │   ├── di/               # Dependency injection container
 │   ├── helper/           # Privileged D-Bus helper daemon
 │   ├── models/           # Data structures (DiskInfo, WipeTypes, ViewTypes)
-│   ├── services/         # Core services (DiskService, WipeService, DBusClient)
+│   ├── services/         # Service interfaces and D-Bus client (DBusClient)
+│   ├── helper/services/  # Privileged disk services (DiskService, WipeService)
 │   ├── util/             # Utility classes (FileDescriptor, Result)
-│   ├── view_models/      # Business logic (MainViewModel)
+│   ├── viewmodels/       # Business logic (MainViewModel)
 │   └── views/            # GTK4/Adwaita UI widgets
 ├── tests/                # Unit tests (Google Test/Mock)
 │   ├── mocks/            # Mock implementations

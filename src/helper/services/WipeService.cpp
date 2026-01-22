@@ -1,4 +1,4 @@
-#include "services/WipeService.hpp"
+#include "helper/services/WipeService.hpp"
 #include "services/DevicePolicy.hpp"
 #include "util/FileDescriptor.hpp"
 

@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "view_models/MainViewModel.hpp"  // For AlgorithmInfo
+#include "viewmodels/MainViewModel.hpp"  // For AlgorithmInfo
 #include <gtkmm.h>
 
 /**

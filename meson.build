@@ -50,7 +50,7 @@ resources = gnome.compile_resources(
 sources = files(
   'src/main.cpp',
   'src/Application.cpp',
-  'src/view_models/MainViewModel.cpp',
+  'src/viewmodels/MainViewModel.cpp',
   'src/views/MainWindow.cpp',
   'src/views/MainWindowContent.cpp',
   'src/views/DiskRow.cpp',
@@ -58,10 +58,8 @@ sources = files(
   'src/services/DBusClient.cpp',
 )
 
-# Source files shared between GUI and helper (services/algorithms)
+# Source files shared between GUI and helper (algorithms)
 shared_sources = files(
-  'src/services/DiskService.cpp',
-  'src/services/WipeService.cpp',
   'src/algorithms/ZeroFillAlgorithm.cpp',
   'src/algorithms/RandomFillAlgorithm.cpp',
   'src/algorithms/DoD522022MAlgorithm.cpp',
@@ -75,6 +73,8 @@ shared_sources = files(
 # Source files for privileged helper
 helper_sources = files(
   'src/helper/main.cpp',
+  'src/helper/services/DiskService.cpp',
+  'src/helper/services/WipeService.cpp',
 )
 
 # Header files (for IDE support)
@@ -92,11 +92,11 @@ headers = files(
   # Services
   'src/services/IDiskService.hpp',
   'src/services/IWipeService.hpp',
-  'src/services/DiskService.hpp',
-  'src/services/WipeService.hpp',
+  'src/helper/services/DiskService.hpp',
+  'src/helper/services/WipeService.hpp',
   'src/services/DBusClient.hpp',
   # ViewModels
-  'src/view_models/MainViewModel.hpp',
+  'src/viewmodels/MainViewModel.hpp',
   # Views
   'src/views/AlgorithmRow.hpp',
   'src/views/DiskRow.hpp',
@@ -152,7 +152,7 @@ install_data(
 
 # Icon installation
 install_data(
-  'data/icons/hicolor/scalable/apps/storage-wiper.svg',
+  'data/resources/icons/hicolor/scalable/apps/storage-wiper.svg',
   install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps'
 )
 
@@ -225,7 +225,7 @@ if get_option('enable_tests')
     'tests/unit/algorithms/ZeroFillAlgorithmTest.cpp',
     'tests/unit/algorithms/RandomFillAlgorithmTest.cpp',
     'tests/unit/services/WipeServiceTest.cpp',
-    'tests/unit/view_models/MainViewModelTest.cpp',
+    'tests/unit/viewmodels/MainViewModelTest.cpp',
   )
 
   # Test include directories
@@ -233,7 +233,9 @@ if get_option('enable_tests')
 
   # Additional sources needed for tests (not in shared_sources)
   test_extra_sources = files(
-    'src/view_models/MainViewModel.cpp',
+    'src/viewmodels/MainViewModel.cpp',
+    'src/helper/services/DiskService.cpp',
+    'src/helper/services/WipeService.cpp',
   )
 
   # Build test executable

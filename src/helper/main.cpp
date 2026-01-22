@@ -10,9 +10,9 @@
  * Authorization is handled via polkit.
  */
 
-#include "services/DiskService.hpp"
+#include "helper/services/DiskService.hpp"
 #include "services/DevicePolicy.hpp"
-#include "services/WipeService.hpp"
+#include "helper/services/WipeService.hpp"
 
 #include <gio/gio.h>
 #include <polkit/polkit.h>
