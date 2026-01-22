@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: MIT -->
+<component type="desktop-application">
+  <id>su.kidoz.storage_wiper</id>
+
+  <name>Storage Wiper</name>
+  <summary>Securely wipe storage devices with DoD-compliant algorithms</summary>
+
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+
+  <description>
+    <p>
+      Storage Wiper is a secure disk wiping tool with a modern GTK4/libadwaita
+      interface. It provides multiple DoD-compliant algorithms for permanent
+      data destruction on storage devices.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>8 secure wipe algorithms including DoD 5220.22-M, Gutmann, and GOST</li>
+      <li>Support for HDDs, SSDs, NVMe, and USB drives</li>
+      <li>ATA Secure Erase for SSDs with hardware support</li>
+      <li>Real-time progress tracking with pass-level details</li>
+      <li>Automatic SSD detection with algorithm recommendations</li>
+      <li>Privilege separation via D-Bus and Polkit for security</li>
+    </ul>
+    <p>
+      This is a defensive security tool for proper data sanitization when
+      decommissioning storage devices, preparing drives for resale, or ensuring
+      data privacy.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">su.kidoz.storage_wiper.desktop</launchable>
+
+  <url type="homepage">https://github.com/kidoz/storage-wiper</url>
+  <url type="bugtracker">https://github.com/kidoz/storage-wiper/issues</url>
+  <url type="vcs-browser">https://github.com/kidoz/storage-wiper</url>
+
+  <developer id="su.kidoz">
+    <name>kidoz</name>
+  </developer>
+
+  <provides>
+    <binary>storage_wiper</binary>
+  </provides>
+
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+
+  <recommends>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </recommends>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#e8f0fe</color>
+    <color type="primary" scheme_preference="dark">#1a73e8</color>
+  </branding>
+
+  <categories>
+    <category>Utility</category>
+    <category>System</category>
+    <category>Security</category>
+  </categories>
+
+  <keywords>
+    <keyword>wipe</keyword>
+    <keyword>erase</keyword>
+    <keyword>secure</keyword>
+    <keyword>disk</keyword>
+    <keyword>storage</keyword>
+    <keyword>dod</keyword>
+    <keyword>sanitize</keyword>
+    <keyword>shred</keyword>
+    <keyword>destroy</keyword>
+    <keyword>data</keyword>
+  </keywords>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="1.1.0" date="2025-01-20">
+      <description>
+        <p>Improvements in this release:</p>
+        <ul>
+          <li>Centralized wipe eligibility checks</li>
+          <li>Added validation for wipe algorithms</li>
+          <li>Common utility write_with_retry for reliable I/O</li>
+          <li>Updated project structure documentation</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.0.0" date="2025-01-15">
+      <description>
+        <p>Initial release with:</p>
+        <ul>
+          <li>8 secure wipe algorithms</li>
+          <li>GTK4/libadwaita modern interface</li>
+          <li>D-Bus privilege separation with Polkit</li>
+          <li>Support for HDDs, SSDs, NVMe, and USB devices</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+
+</component>

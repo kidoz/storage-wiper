@@ -76,6 +76,36 @@ cppcheck:
 format:
     find src -name '*.cpp' -o -name '*.hpp' | xargs clang-format -i
 
+# === Test Commands ===
+
+# Run all tests (enables tests, builds, and runs)
+test:
+    @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}} -Denable_tests=true; fi
+    @meson configure {{build_dir}} -Denable_tests=true >/dev/null
+    meson compile -C {{build_dir}}
+    meson test -C {{build_dir}}
+
+# Run tests with verbose output
+test-verbose:
+    @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}} -Denable_tests=true; fi
+    @meson configure {{build_dir}} -Denable_tests=true >/dev/null
+    meson compile -C {{build_dir}}
+    meson test -C {{build_dir}} -v
+
+# Run tests matching a pattern (e.g., just test-filter "ZeroFill")
+test-filter pattern:
+    @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}} -Denable_tests=true; fi
+    @meson configure {{build_dir}} -Denable_tests=true >/dev/null
+    meson compile -C {{build_dir}}
+    ./{{build_dir}}/storage_wiper_tests --gtest_filter="*{{pattern}}*"
+
+# List all available tests
+test-list:
+    @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}} -Denable_tests=true; fi
+    @meson configure {{build_dir}} -Denable_tests=true >/dev/null
+    meson compile -C {{build_dir}}
+    ./{{build_dir}}/storage_wiper_tests --gtest_list_tests
+
 # === Installation Commands ===
 
 # Install to system (requires root)

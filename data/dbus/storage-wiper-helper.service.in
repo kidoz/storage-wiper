@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: MIT
+# Systemd service for Storage Wiper privileged helper
+# This service provides D-Bus activation for the helper daemon
+
+[Unit]
+Description=Storage Wiper Privileged Helper
+Documentation=https://github.com/kidoz/storage-wiper
+After=dbus.service
+Requires=dbus.service
+
+[Service]
+Type=dbus
+BusName=su.kidoz.storage_wiper.Helper
+ExecStart=@LIBDIR@/storage-wiper/storage-wiper-helper
+User=root
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=false
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+LockPersonality=true
+
+# Allow access to block devices (required for disk wiping)
+DevicePolicy=closed
+DeviceAllow=block-* rw
+DeviceAllow=char-* rw
+
+# Allow read access to /sys for disk detection
+ReadOnlyPaths=/sys
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=storage-wiper-helper
+
+[Install]
+WantedBy=multi-user.target

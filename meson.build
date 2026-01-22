@@ -180,6 +180,23 @@ install_data(
   install_dir: get_option('datadir') / 'dbus-1/system.d'
 )
 
+# Systemd service file for D-Bus helper
+configure_file(
+  input: 'data/dbus/storage-wiper-helper.service.in',
+  output: 'storage-wiper-helper.service',
+  configuration: {
+    'LIBDIR': get_option('prefix') / get_option('libdir')
+  },
+  install: true,
+  install_dir: '/usr/lib/systemd/system'
+)
+
+# AppStream metainfo for software centers (GNOME Software, KDE Discover)
+install_data(
+  'data/su.kidoz.storage_wiper.metainfo.xml',
+  install_dir: get_option('datadir') / 'metainfo'
+)
+
 # Optional: clang-tidy support
 clang_tidy = find_program('clang-tidy', required: false)
 if clang_tidy.found() and get_option('enable_clang_tidy')
