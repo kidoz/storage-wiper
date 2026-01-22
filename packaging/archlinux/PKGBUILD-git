@@ -2,7 +2,7 @@
 
 pkgname=storage-wiper-git
 _pkgname=storage-wiper
-pkgver=1.3.0.r21.9ae1daf
+pkgver=1.3.0.r22.f1659e0
 pkgrel=1
 pkgdesc='Secure disk wiping tool with GTK4/libadwaita interface and DoD-compliant algorithms (git version)'
 arch=('x86_64')

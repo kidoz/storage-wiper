@@ -43,6 +43,29 @@
       </object>
     </child>
 
+    <!-- Health indicator -->
+    <child>
+      <object class="GtkBox" id="health_box">
+        <property name="orientation">horizontal</property>
+        <property name="spacing">4</property>
+        <property name="valign">center</property>
+        <property name="visible">false</property>
+        <child>
+          <object class="GtkImage" id="health_icon">
+            <property name="pixel-size">16</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel" id="health_label">
+            <property name="halign">start</property>
+            <style>
+              <class name="caption"/>
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+
     <!-- Mounted indicator -->
     <child>
       <object class="GtkLabel" id="mounted_label">

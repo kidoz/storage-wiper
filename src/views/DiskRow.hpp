@@ -56,7 +56,11 @@ private:
     Gtk::Label* name_label_ = nullptr;
     Gtk::Label* info_label_ = nullptr;
     Gtk::Label* mounted_label_ = nullptr;
+    Gtk::Box* health_box_ = nullptr;
+    Gtk::Image* health_icon_ = nullptr;
+    Gtk::Label* health_label_ = nullptr;
 
     void setup_from_builder();
     void populate_from_disk_info();
+    void setup_health_indicator();
 };
