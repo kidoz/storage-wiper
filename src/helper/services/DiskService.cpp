@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <future>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -45,7 +46,65 @@ auto is_partition_suffix(std::string_view suffix) noexcept -> bool {
     const auto first = static_cast<unsigned char>(suffix.front());
     return std::isdigit(first) || suffix.front() == 'p';
 }
+
+// Virtual device patterns to skip
+constexpr std::array VIRTUAL_PATTERNS{"loop", "ram", "dm-"};
+
+auto is_virtual_device(std::string_view name) noexcept -> bool {
+    return rng::any_of(VIRTUAL_PATTERNS,
+                       [name](const char* pattern) { return name.contains(pattern); });
+}
+
 }  // namespace
+
+// ============================================================================
+// MountCache implementation
+// ============================================================================
+
+auto MountCache::find_mount_for_device(const std::string& device_path,
+                                        const std::vector<std::string>& dm_holders) const
+    -> std::optional<MountEntry> {
+    // First, check direct mount of device or its partitions
+    for (const auto& entry : entries) {
+        if (entry.device == device_path ||
+            (entry.device.starts_with(device_path) &&
+             is_partition_suffix(std::string_view{entry.device}.substr(device_path.size())))) {
+            return entry;
+        }
+    }
+
+    // Check if any dm-* holder is mounted
+    for (const auto& dm_name : dm_holders) {
+        const auto dm_path = std::format("/dev/{}", dm_name);
+        for (const auto& entry : entries) {
+            if (entry.device == dm_path) {
+                return entry;
+            }
+        }
+    }
+
+    // Check /dev/mapper/* entries by resolving symlinks
+    if (!dm_holders.empty()) {
+        for (const auto& entry : entries) {
+            if (entry.device.starts_with("/dev/mapper/")) {
+                std::error_code ec;
+                const auto real_path = fs::read_symlink(entry.device, ec);
+                if (!ec) {
+                    const auto resolved_dm_name = real_path.filename().string();
+                    if (rng::find(dm_holders, resolved_dm_name) != dm_holders.end()) {
+                        return entry;
+                    }
+                }
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
+// ============================================================================
+// DiskService implementation
+// ============================================================================
 
 DiskService::DiskService() : smart_service_(std::make_unique<SmartService>()) {}
 
@@ -56,24 +115,34 @@ auto DiskService::get_smart_data(const std::string& device_path) -> SmartData {
     return smart_service_->get_smart_data(device_path);
 }
 
+void DiskService::invalidate_cache() {
+    std::lock_guard lock{cache_mutex_};
+    cached_disks_.clear();
+    cache_timestamp_ = {};
+}
+
 auto DiskService::get_available_disks() -> std::vector<DiskInfo> {
+    // Check cache first (with TTL)
+    {
+        std::lock_guard lock{cache_mutex_};
+        const auto now = std::chrono::steady_clock::now();
+        if (!cached_disks_.empty() && (now - cache_timestamp_) < CACHE_TTL) {
+            return cached_disks_;
+        }
+    }
+
     const fs::path block_dir{"/sys/block"};
 
     if (!fs::exists(block_dir)) {
         return {};
     }
 
-    // Virtual device patterns to skip
-    // Note: dm- devices (LVM/device-mapper) are filtered here in /sys/block
-    // but physical disks that are LVM PVs are still shown (e.g., /dev/sda)
-    constexpr std::array virtual_patterns{"loop", "ram", "dm-"};
+    // OPTIMIZATION 1: Parse /proc/mounts once for all disks
+    const auto mount_cache = parse_mount_table();
 
-    auto is_virtual_device = [&virtual_patterns](std::string_view name) noexcept {
-        return rng::any_of(virtual_patterns,
-                           [name](const char* pattern) { return name.contains(pattern); });
-    };
-
+    // OPTIMIZATION 2: First pass - collect basic disk info (fast, no SMART)
     std::vector<DiskInfo> disks;
+    std::vector<std::string> smart_eligible_paths;
 
     for (const auto& entry : fs::directory_iterator{block_dir}) {
         const auto device_name = entry.path().filename().string();
@@ -88,12 +157,115 @@ auto DiskService::get_available_disks() -> std::vector<DiskInfo> {
             continue;
         }
 
-        if (auto info = parse_disk_info(device_path); info.size_bytes > 0) {
+        if (auto info = parse_disk_info(device_path, mount_cache); info.size_bytes > 0) {
+            // Track paths that need SMART data
+            if (smart_service_ && SmartService::is_smart_supported(device_path)) {
+                smart_eligible_paths.push_back(device_path);
+            }
             disks.emplace_back(std::move(info));
         }
     }
 
+    // OPTIMIZATION 3: Parallel SMART collection using std::async
+    if (!smart_eligible_paths.empty() && smart_service_) {
+        // Launch async SMART queries
+        std::vector<std::future<std::pair<std::string, SmartData>>> smart_futures;
+        smart_futures.reserve(smart_eligible_paths.size());
+
+        for (const auto& path : smart_eligible_paths) {
+            smart_futures.push_back(std::async(std::launch::async, [this, path]() {
+                return std::make_pair(path, smart_service_->get_smart_data(path));
+            }));
+        }
+
+        // Collect results and merge into disk info
+        std::unordered_map<std::string, SmartData> smart_results;
+        for (auto& future : smart_futures) {
+            try {
+                auto [path, data] = future.get();
+                smart_results[path] = std::move(data);
+            } catch (...) {
+                // Ignore SMART failures - disk will show unknown health
+            }
+        }
+
+        // Apply SMART data to disks
+        for (auto& disk : disks) {
+            if (auto it = smart_results.find(disk.path); it != smart_results.end()) {
+                disk.smart = std::move(it->second);
+            }
+        }
+    }
+
+    // Update cache
+    {
+        std::lock_guard lock{cache_mutex_};
+        cached_disks_ = disks;
+        cache_timestamp_ = std::chrono::steady_clock::now();
+    }
+
     return disks;
+}
+
+auto DiskService::parse_mount_table() -> MountCache {
+    MountCache cache;
+
+    auto mtab_deleter = [](FILE* f) {
+        if (f)
+            ::endmntent(f);
+    };
+
+    std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"),
+                                                        mtab_deleter};
+    if (!mtab) {
+        return cache;
+    }
+
+    while (auto* entry = ::getmntent(mtab.get())) {
+        cache.entries.push_back(MountEntry{
+            .device = entry->mnt_fsname,
+            .mount_point = entry->mnt_dir,
+            .filesystem = entry->mnt_type,
+        });
+    }
+
+    return cache;
+}
+
+auto DiskService::collect_dm_holders(const std::string& sys_path,
+                                      const std::string& device_name) -> std::vector<std::string> {
+    std::vector<std::string> dm_holders;
+
+    auto collect_from_path = [&dm_holders](const fs::path& holders_path) {
+        if (!fs::exists(holders_path)) {
+            return;
+        }
+        std::error_code ec;
+        for (const auto& holder : fs::directory_iterator{holders_path, ec}) {
+            if (ec)
+                break;
+            const auto holder_name = holder.path().filename().string();
+            if (holder_name.starts_with("dm-")) {
+                dm_holders.push_back(holder_name);
+            }
+        }
+    };
+
+    // Check holders of the device itself
+    collect_from_path(sys_path + "/holders");
+
+    // Also check holders of partitions (e.g., /dev/nvme0n1p1 -> dm-0)
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator{sys_path, ec}) {
+        if (ec)
+            break;
+        const auto part_name = entry.path().filename().string();
+        if (part_name.starts_with(device_name) && part_name != device_name) {
+            collect_from_path(entry.path() / "holders");
+        }
+    }
+
+    return dm_holders;
 }
 
 auto DiskService::unmount_disk(const std::string& path) -> std::expected<void, util::Error> {
@@ -168,6 +340,9 @@ auto DiskService::unmount_disk(const std::string& path) -> std::expected<void, u
         }
     }
 
+    // Invalidate cache since mount status changed
+    invalidate_cache();
+
     return {};
 }
 
@@ -234,7 +409,8 @@ auto DiskService::validate_device_path(const std::string& path)
     return {};
 }
 
-auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
+auto DiskService::parse_disk_info(const std::string& device_path,
+                                   const MountCache& mount_cache) -> DiskInfo {
     auto info = DiskInfo{.path = device_path,
                          .model = {},
                          .serial = {},
@@ -295,109 +471,18 @@ auto DiskService::parse_disk_info(const std::string& device_path) -> DiskInfo {
     info.is_ssd = check_if_ssd(device_path);
 
     // Collect device-mapper (dm-*) holders for this device and its partitions
-    // This detects LVM, LUKS, and other dm-based setups
-    std::vector<std::string> dm_holders;
-
-    auto collect_holders = [&dm_holders](const fs::path& holders_path) {
-        if (!fs::exists(holders_path)) {
-            return;
-        }
-        for (const auto& holder : fs::directory_iterator{holders_path}) {
-            const auto holder_name = holder.path().filename().string();
-            if (holder_name.starts_with("dm-")) {
-                dm_holders.push_back(holder_name);
-            }
-        }
-    };
-
-    // Check holders of the device itself
-    collect_holders(sys_path + "/holders");
-
-    // Also check holders of partitions (e.g., /dev/nvme0n1p1 -> dm-0)
-    for (const auto& entry : fs::directory_iterator{sys_path}) {
-        const auto part_name = entry.path().filename().string();
-        if (part_name.starts_with(device_name) && part_name != device_name) {
-            collect_holders(entry.path() / "holders");
-        }
-    }
-
+    auto dm_holders = collect_dm_holders(sys_path, device_name);
     info.is_lvm_pv = !dm_holders.empty();
 
-    // Check mount status using RAII wrapper
-    if (auto mtab_deleter =
-            [](FILE* f) {
-                if (f)
-                    ::endmntent(f);
-            };
-        std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"),
-                                                           mtab_deleter}) {
-        while (auto* entry = ::getmntent(mtab.get())) {
-            const std::string_view mount_device{entry->mnt_fsname};
-
-            // Check direct mount of device or its partitions
-            if (mount_device == device_path ||
-                (mount_device.starts_with(device_path) &&
-                 is_partition_suffix(mount_device.substr(device_path.size())))) {
-                info.is_mounted = true;
-                info.mount_point = entry->mnt_dir;
-                info.filesystem = entry->mnt_type;
-                break;
-            }
-
-            // Check if any dm-* holder is mounted (LVM/LUKS)
-            for (const auto& dm_name : dm_holders) {
-                const auto dm_path = std::format("/dev/{}", dm_name);
-                if (mount_device == dm_path || mount_device.starts_with("/dev/mapper/")) {
-                    // For /dev/mapper/* entries, resolve to check if it's our dm device
-                    // by checking if the mounted device's dm name matches
-                    if (mount_device == dm_path) {
-                        info.is_mounted = true;
-                        info.mount_point = entry->mnt_dir;
-                        info.filesystem = entry->mnt_type;
-                        break;
-                    }
-                }
-            }
-            if (info.is_mounted)
-                break;
-        }
+    // OPTIMIZATION: Use pre-parsed mount cache instead of re-reading /proc/mounts
+    if (auto mount = mount_cache.find_mount_for_device(device_path, dm_holders)) {
+        info.is_mounted = true;
+        info.mount_point = mount->mount_point;
+        info.filesystem = mount->filesystem;
     }
 
-    // If we have dm holders but couldn't match mount by dm-* path,
-    // try matching by resolving /dev/mapper/* symlinks
-    if (!info.is_mounted && !dm_holders.empty()) {
-        if (auto mtab_deleter =
-                [](FILE* f) {
-                    if (f)
-                        ::endmntent(f);
-                };
-            std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"),
-                                                               mtab_deleter}) {
-            while (auto* entry = ::getmntent(mtab.get())) {
-                const std::string_view mount_device{entry->mnt_fsname};
-
-                if (mount_device.starts_with("/dev/mapper/")) {
-                    // Resolve the symlink to get the actual dm-* device
-                    std::error_code ec;
-                    const auto real_path = fs::read_symlink(std::string{mount_device}, ec);
-                    if (!ec) {
-                        const auto dm_name = real_path.filename().string();
-                        if (rng::find(dm_holders, dm_name) != dm_holders.end()) {
-                            info.is_mounted = true;
-                            info.mount_point = entry->mnt_dir;
-                            info.filesystem = entry->mnt_type;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Get SMART data for the device
-    if (smart_service_) {
-        info.smart = smart_service_->get_smart_data(device_path);
-    }
+    // NOTE: SMART data is NOT collected here anymore - it's done in parallel
+    // in get_available_disks() for better performance
 
     return info;
 }
