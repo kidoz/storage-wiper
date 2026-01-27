@@ -1,6 +1,7 @@
 #include "views/MainWindow.hpp"
 
 #include <format>
+#include <iostream>
 
 #include "config.h"
 
@@ -113,17 +114,24 @@ void MainWindow::bind_messages() {
             if (message.title.empty())
                 return;  // Skip empty messages
 
-            // Use g_idle_add to ensure we're on the main thread
-            auto* msg_copy = new MessageInfo(message);
-            g_idle_add(
-                [](gpointer data) -> gboolean {
-                    auto* args = static_cast<std::pair<MainWindow*, MessageInfo*>*>(data);
+            // Use g_idle_add_full with destroy notify to prevent memory leaks
+            // if the idle source is removed before execution
+            auto* data = new std::pair<MainWindow*, MessageInfo*>(this, new MessageInfo(message));
+
+            g_idle_add_full(
+                G_PRIORITY_DEFAULT_IDLE,
+                [](gpointer user_data) -> gboolean {
+                    auto* args = static_cast<std::pair<MainWindow*, MessageInfo*>*>(user_data);
                     args->first->show_message(*args->second);
-                    delete args->second;
-                    delete args;
                     return G_SOURCE_REMOVE;
                 },
-                new std::pair<MainWindow*, MessageInfo*>(this, msg_copy));
+                data,
+                [](gpointer user_data) {
+                    // Destroy notify - called when source is removed
+                    auto* args = static_cast<std::pair<MainWindow*, MessageInfo*>*>(user_data);
+                    delete args->second;
+                    delete args;
+                });
         });
 }
 
@@ -140,6 +148,10 @@ void MainWindow::show_message(const MessageInfo& message) {
 
 void MainWindow::show_confirmation_dialog(const MessageInfo& message) {
     auto* dialog = adw_alert_dialog_new(message.title.c_str(), message.message.c_str());
+    if (!dialog) {
+        std::cerr << "Error: Failed to create confirmation dialog" << std::endl;
+        return;
+    }
 
     adw_alert_dialog_add_response(ADW_ALERT_DIALOG(dialog), "cancel", "Cancel");
 
@@ -183,6 +195,10 @@ void MainWindow::show_confirmation_dialog(const MessageInfo& message) {
 
 void MainWindow::show_info_dialog(const MessageInfo& message) {
     auto* dialog = adw_alert_dialog_new(message.title.c_str(), message.message.c_str());
+    if (!dialog) {
+        std::cerr << "Error: Failed to create info dialog" << std::endl;
+        return;
+    }
     adw_alert_dialog_add_response(ADW_ALERT_DIALOG(dialog), "ok", "OK");
     adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(window_));
 }

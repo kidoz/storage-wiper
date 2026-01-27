@@ -34,9 +34,9 @@ enum class LogLevel {
  * @brief Configuration for log file rotation
  */
 struct LogRotationPolicy {
-    size_t max_file_size_bytes = 10 * 1024 * 1024;  ///< Max size before rotation (10MB default)
-    int max_files = 7;                               ///< Number of rotated files to keep
-    bool compress_rotated = false;                   ///< Whether to compress rotated files (future)
+    size_t max_file_size_bytes = 10 * 1'024 * 1'024;  ///< Max size before rotation (10MB default)
+    int max_files = 7;                                ///< Number of rotated files to keep
+    bool compress_rotated = false;  ///< Whether to compress rotated files (future)
 };
 
 /**
@@ -77,8 +77,7 @@ public:
      * Rotated files: {app_name}.1.log, {app_name}.2.log, etc.
      */
     auto initialize(const std::filesystem::path& log_dir, const std::string& app_name,
-                    LogLevel min_level = LogLevel::INFO,
-                    LogRotationPolicy policy = {}) -> bool;
+                    LogLevel min_level = LogLevel::INFO, LogRotationPolicy policy = {}) -> bool;
 
     /**
      * @brief Check if logger is initialized
@@ -202,9 +201,9 @@ private:
 };
 
 // Convenience macros for component-based logging
-#define LOG_DEBUG(component, msg) ::util::Logger::instance().debug(component, msg)
-#define LOG_INFO(component, msg) ::util::Logger::instance().info(component, msg)
+#define LOG_DEBUG(component, msg)   ::util::Logger::instance().debug(component, msg)
+#define LOG_INFO(component, msg)    ::util::Logger::instance().info(component, msg)
 #define LOG_WARNING(component, msg) ::util::Logger::instance().warning(component, msg)
-#define LOG_ERROR(component, msg) ::util::Logger::instance().error(component, msg)
+#define LOG_ERROR(component, msg)   ::util::Logger::instance().error(component, msg)
 
 }  // namespace util

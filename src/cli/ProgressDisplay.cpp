@@ -31,7 +31,6 @@ ProgressDisplay::ProgressDisplay(std::string device_path, std::string device_mod
     : device_path_(std::move(device_path)), device_model_(std::move(device_model)),
       device_size_bytes_(device_size_bytes), algorithm_name_(std::move(algorithm_name)),
       total_passes_(total_passes), start_time_(std::chrono::steady_clock::now()) {
-
     // Disable colors if not a terminal
     color_enabled_ = is_terminal();
 }
@@ -73,8 +72,7 @@ void ProgressDisplay::update(const WipeProgress& progress) {
 
     if (progress.verification_in_progress) {
         // Verification phase
-        status_line =
-            std::format("Verifying: {} {:5.1f}%", bar, progress.verification_percentage);
+        status_line = std::format("Verifying: {} {:5.1f}%", bar, progress.verification_percentage);
     } else {
         // Wipe phase
         status_line = std::format("Pass {}/{}: {} {:5.1f}%", progress.current_pass,
@@ -114,10 +112,10 @@ void ProgressDisplay::complete(bool success, const std::string& message) {
 }
 
 auto ProgressDisplay::format_bytes(uint64_t bytes) -> std::string {
-    constexpr uint64_t KB = 1024;
-    constexpr uint64_t MB = KB * 1024;
-    constexpr uint64_t GB = MB * 1024;
-    constexpr uint64_t TB = GB * 1024;
+    constexpr uint64_t KB = 1'024;
+    constexpr uint64_t MB = KB * 1'024;
+    constexpr uint64_t GB = MB * 1'024;
+    constexpr uint64_t TB = GB * 1'024;
 
     if (bytes >= TB) {
         return std::format("{:.1f} TB", static_cast<double>(bytes) / static_cast<double>(TB));
@@ -140,8 +138,8 @@ auto ProgressDisplay::format_duration(int64_t seconds) -> std::string {
         return "--:--";
     }
 
-    int64_t hours = seconds / 3600;
-    int64_t minutes = (seconds % 3600) / 60;
+    int64_t hours = seconds / 3'600;
+    int64_t minutes = (seconds % 3'600) / 60;
     int64_t secs = seconds % 60;
 
     if (hours > 0) {

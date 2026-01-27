@@ -104,12 +104,13 @@ auto SmartService::read_ata_smart(const std::string& device_path) -> SmartData {
     }
 
     // Prepare SMART READ DATA command using HDIO_DRIVE_CMD
-    // Structure: [command, sector_count, feature, sector_number, low_cyl, high_cyl, device_head, ...]
+    // Structure: [command, sector_count, feature, sector_number, low_cyl, high_cyl, device_head,
+    // ...]
     std::array<uint8_t, 4 + SMART_DATA_SIZE> buffer{};
-    buffer[0] = ATA_SMART_CMD;       // Command register
-    buffer[1] = 1;                   // Sector count
-    buffer[2] = ATA_SMART_READ_DATA; // Feature register (SMART subcommand)
-    buffer[3] = 0;                   // Sector number
+    buffer[0] = ATA_SMART_CMD;        // Command register
+    buffer[1] = 1;                    // Sector count
+    buffer[2] = ATA_SMART_READ_DATA;  // Feature register (SMART subcommand)
+    buffer[3] = 0;                    // Sector number
 
     // HDIO_DRIVE_CMD requires special cylinder values for SMART
     // This is handled internally by the kernel
@@ -185,7 +186,7 @@ auto SmartService::read_nvme_smart(const std::string& device_path) -> SmartData 
 
     struct nvme_admin_cmd cmd{};
     cmd.opcode = 0x02;  // Get Log Page
-    cmd.nsid = 0xFFFFFFFF;
+    cmd.nsid = 0xFFFF'FFFF;
     cmd.addr = reinterpret_cast<uint64_t>(&smart_log);
     cmd.data_len = sizeof(smart_log);
     cmd.cdw10 = 0x02 | (((sizeof(smart_log) / 4) - 1) << 16);  // Log ID 2, NUMDL
@@ -208,8 +209,8 @@ auto SmartService::read_nvme_smart(const std::string& device_path) -> SmartData 
         uint64_t media_errs = 0;
         std::memcpy(&media_errs, smart_log.media_errors, sizeof(media_errs));
         if (media_errs > 0) {
-            result.uncorrectable_errors = static_cast<int>(
-                media_errs > INT32_MAX ? INT32_MAX : media_errs);
+            result.uncorrectable_errors =
+                static_cast<int>(media_errs > INT32_MAX ? INT32_MAX : media_errs);
         }
 
         // Check critical warning flags
@@ -239,8 +240,7 @@ auto SmartService::calculate_health_status(const SmartData& data) -> SmartData::
     // Check for warning conditions
     if (data.reallocated_sectors >= WARNING_REALLOCATED_SECTORS ||
         data.pending_sectors >= WARNING_PENDING_SECTORS ||
-        data.temperature_celsius >= WARNING_TEMPERATURE ||
-        data.uncorrectable_errors > 0) {
+        data.temperature_celsius >= WARNING_TEMPERATURE || data.uncorrectable_errors > 0) {
         return SmartData::HealthStatus::WARNING;
     }
 
@@ -271,10 +271,8 @@ auto SmartService::parse_ata_attribute(const uint8_t* data, uint8_t attr_id) -> 
 
         if (data[offset] == attr_id) {
             // Return raw value (first 4 bytes of 6-byte raw value)
-            uint32_t raw = data[offset + 5] |
-                          (data[offset + 6] << 8) |
-                          (data[offset + 7] << 16) |
-                          (data[offset + 8] << 24);
+            uint32_t raw = data[offset + 5] | (data[offset + 6] << 8) | (data[offset + 7] << 16) |
+                           (data[offset + 8] << 24);
             return static_cast<int>(raw);
         }
     }

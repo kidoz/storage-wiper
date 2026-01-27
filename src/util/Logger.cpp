@@ -42,8 +42,8 @@ auto Logger::initialize(const std::filesystem::path& log_dir, const std::string&
     std::error_code ec;
     if (!std::filesystem::exists(log_dir_)) {
         if (!std::filesystem::create_directories(log_dir_, ec)) {
-            std::cerr << "Logger: Failed to create log directory: " << log_dir_
-                      << " - " << ec.message() << std::endl;
+            std::cerr << "Logger: Failed to create log directory: " << log_dir_ << " - "
+                      << ec.message() << std::endl;
             return false;
         }
     }
@@ -57,12 +57,9 @@ auto Logger::initialize(const std::filesystem::path& log_dir, const std::string&
 
     // Log initialization
     file_ << get_timestamp() << " [INFO ] [Logger] Logger initialized: "
-          << "app=" << app_name_
-          << " dir=" << log_dir_.string()
-          << " level=" << level_to_string(min_level_)
-          << " max_size=" << policy_.max_file_size_bytes
-          << " max_files=" << policy_.max_files
-          << std::endl;
+          << "app=" << app_name_ << " dir=" << log_dir_.string()
+          << " level=" << level_to_string(min_level_) << " max_size=" << policy_.max_file_size_bytes
+          << " max_files=" << policy_.max_files << std::endl;
     file_.flush();
 
     return true;
@@ -104,7 +101,8 @@ void Logger::log(LogLevel level, std::string_view component, std::string_view me
     auto timestamp = get_timestamp();
     auto level_str = level_to_string(level);
 
-    std::string log_line = std::format("{}[{}] [{}] {}\n", timestamp, level_str, component, message);
+    std::string log_line =
+        std::format("{}[{}] [{}] {}\n", timestamp, level_str, component, message);
 
     // Write to file if initialized
     if (initialized_ && file_.is_open()) {
@@ -181,16 +179,14 @@ void Logger::shutdown() {
 auto Logger::get_timestamp() -> std::string {
     auto now = std::chrono::system_clock::now();
     auto time_t_now = std::chrono::system_clock::to_time_t(now);
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now.time_since_epoch()) % 1000;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1'000;
 
     std::tm tm_buf{};
     gmtime_r(&time_t_now, &tm_buf);
 
     std::ostringstream oss;
-    oss << std::put_time(&tm_buf, "%Y-%m-%dT%H:%M:%S")
-        << '.' << std::setfill('0') << std::setw(3) << ms.count()
-        << "Z ";
+    oss << std::put_time(&tm_buf, "%Y-%m-%dT%H:%M:%S") << '.' << std::setfill('0') << std::setw(3)
+        << ms.count() << "Z ";
 
     return oss.str();
 }

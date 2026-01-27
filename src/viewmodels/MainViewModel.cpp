@@ -259,30 +259,31 @@ void MainViewModel::unmount_and_wipe(const std::string& path) {
 }
 
 void MainViewModel::handle_wipe_progress(const WipeProgress& progress) {
-    // Schedule UI update on main thread
-    auto progress_copy = std::make_unique<WipeProgress>(progress);
+    // Schedule UI update on main thread using g_idle_add_full with destroy notify
+    // to prevent memory leaks if the idle source is removed before execution
     auto weak_self = weak_from_this();
-    auto* progress_ptr = progress_copy.release();
+    auto* data = new std::pair<std::weak_ptr<MainViewModel>, WipeProgress*>(
+        weak_self, new WipeProgress(progress));
 
-    g_idle_add(
-        [](gpointer data) -> gboolean {
-            auto* args = static_cast<std::pair<std::weak_ptr<MainViewModel>, WipeProgress*>*>(data);
+    g_idle_add_full(
+        G_PRIORITY_DEFAULT_IDLE,
+        [](gpointer user_data) -> gboolean {
+            auto* args =
+                static_cast<std::pair<std::weak_ptr<MainViewModel>, WipeProgress*>*>(user_data);
             auto vm = args->first.lock();
-            auto progress = std::unique_ptr<WipeProgress>(args->second);
-            delete args;
 
             if (!vm) {
                 return G_SOURCE_REMOVE;
             }
 
-            vm->wipe_progress.set(*progress);
+            vm->wipe_progress.set(*args->second);
 
-            if (progress->is_complete) {
+            if (args->second->is_complete) {
                 vm->is_wipe_in_progress.set(false);
                 vm->update_can_wipe();
 
-                if (progress->has_error) {
-                    vm->handle_wipe_completion(false, progress->error_message);
+                if (args->second->has_error) {
+                    vm->handle_wipe_completion(false, args->second->error_message);
                 } else {
                     vm->handle_wipe_completion(true);
                 }
@@ -290,7 +291,14 @@ void MainViewModel::handle_wipe_progress(const WipeProgress& progress) {
 
             return G_SOURCE_REMOVE;
         },
-        new std::pair<std::weak_ptr<MainViewModel>, WipeProgress*>(weak_self, progress_ptr));
+        data,
+        [](gpointer user_data) {
+            // Destroy notify - called when source is removed
+            auto* args =
+                static_cast<std::pair<std::weak_ptr<MainViewModel>, WipeProgress*>*>(user_data);
+            delete args->second;
+            delete args;
+        });
 }
 
 void MainViewModel::handle_wipe_completion(bool success, const std::string& error_message) {

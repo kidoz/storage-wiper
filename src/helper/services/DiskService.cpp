@@ -14,6 +14,7 @@
 #include <format>
 #include <fstream>
 #include <future>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -62,7 +63,7 @@ auto is_virtual_device(std::string_view name) noexcept -> bool {
 // ============================================================================
 
 auto MountCache::find_mount_for_device(const std::string& device_path,
-                                        const std::vector<std::string>& dm_holders) const
+                                       const std::vector<std::string>& dm_holders) const
     -> std::optional<MountEntry> {
     // First, check direct mount of device or its partitions
     for (const auto& entry : entries) {
@@ -169,23 +170,39 @@ auto DiskService::get_available_disks() -> std::vector<DiskInfo> {
     // OPTIMIZATION 3: Parallel SMART collection using std::async
     if (!smart_eligible_paths.empty() && smart_service_) {
         // Launch async SMART queries
+        // Capture raw pointer to SmartService since:
+        // 1. SmartService lifetime is tied to DiskService lifetime (owned by unique_ptr)
+        // 2. DiskService waits for all futures before returning from this method
+        // 3. DiskService will not be destroyed during get_available_disks() call
         std::vector<std::future<std::pair<std::string, SmartData>>> smart_futures;
         smart_futures.reserve(smart_eligible_paths.size());
 
+        SmartService* smart_service_ptr = smart_service_.get();
         for (const auto& path : smart_eligible_paths) {
-            smart_futures.push_back(std::async(std::launch::async, [this, path]() {
-                return std::make_pair(path, smart_service_->get_smart_data(path));
+            smart_futures.push_back(std::async(std::launch::async, [smart_service_ptr, path]() {
+                return std::make_pair(path, smart_service_ptr->get_smart_data(path));
             }));
         }
 
         // Collect results and merge into disk info
         std::unordered_map<std::string, SmartData> smart_results;
         for (auto& future : smart_futures) {
+            std::string current_path;
             try {
                 auto [path, data] = future.get();
+                current_path = path;
                 smart_results[path] = std::move(data);
+            } catch (const std::system_error& e) {
+                // System-level error (file access, ioctl, etc.)
+                std::cerr << "System error reading SMART for " << current_path << ": " << e.what()
+                          << std::endl;
+            } catch (const std::exception& e) {
+                // General exception
+                std::cerr << "Failed to read SMART for " << current_path << ": " << e.what()
+                          << std::endl;
             } catch (...) {
-                // Ignore SMART failures - disk will show unknown health
+                // Unknown exception - disk will show unknown health
+                std::cerr << "Unknown error reading SMART for " << current_path << std::endl;
             }
         }
 
@@ -216,7 +233,7 @@ auto DiskService::parse_mount_table() -> MountCache {
     };
 
     std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"),
-                                                        mtab_deleter};
+                                                       mtab_deleter};
     if (!mtab) {
         return cache;
     }
@@ -232,8 +249,8 @@ auto DiskService::parse_mount_table() -> MountCache {
     return cache;
 }
 
-auto DiskService::collect_dm_holders(const std::string& sys_path,
-                                      const std::string& device_name) -> std::vector<std::string> {
+auto DiskService::collect_dm_holders(const std::string& sys_path, const std::string& device_name)
+    -> std::vector<std::string> {
     std::vector<std::string> dm_holders;
 
     auto collect_from_path = [&dm_holders](const fs::path& holders_path) {
@@ -409,8 +426,8 @@ auto DiskService::validate_device_path(const std::string& path)
     return {};
 }
 
-auto DiskService::parse_disk_info(const std::string& device_path,
-                                   const MountCache& mount_cache) -> DiskInfo {
+auto DiskService::parse_disk_info(const std::string& device_path, const MountCache& mount_cache)
+    -> DiskInfo {
     auto info = DiskInfo{.path = device_path,
                          .model = {},
                          .serial = {},

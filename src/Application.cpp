@@ -98,12 +98,14 @@ void StorageWiperApp::setup_main_window() {
     std::weak_ptr<MainViewModel> weak_vm = view_model_;
     dbus_client_->set_connection_state_callback([weak_vm](ConnectionState state,
                                                           const std::string& error) {
-        // Schedule on main thread
+        // Schedule on main thread using g_idle_add_full with destroy notify
+        // to prevent memory leaks if the idle source is removed before execution
         auto* data =
             new std::pair<std::weak_ptr<MainViewModel>, std::pair<ConnectionState, std::string>>(
                 weak_vm, {state, error});
 
-        g_idle_add(
+        g_idle_add_full(
+            G_PRIORITY_DEFAULT_IDLE,
             [](gpointer user_data) -> gboolean {
                 auto* args =
                     static_cast<std::pair<std::weak_ptr<MainViewModel>,
@@ -112,10 +114,15 @@ void StorageWiperApp::setup_main_window() {
                     bool connected = (args->second.first == ConnectionState::CONNECTED);
                     vm->set_connection_state(connected, args->second.second);
                 }
-                delete args;
                 return G_SOURCE_REMOVE;
             },
-            data);
+            data,
+            [](gpointer user_data) {
+                // Destroy notify - called when source is removed (either after callback or on
+                // cancel)
+                delete static_cast<std::pair<std::weak_ptr<MainViewModel>,
+                                             std::pair<ConnectionState, std::string>>*>(user_data);
+            });
     });
 
     // Set initial connection state

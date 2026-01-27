@@ -48,7 +48,8 @@ std::atomic<bool> g_wipe_in_progress{false};
 // D-Bus introspection XML
 // GetDisks return type: a(sssxbbsbsu)
 //   s=path, s=model, s=serial, x=size_bytes, b=is_removable, b=is_ssd,
-//   s=filesystem, b=is_mounted, s=mount_point, u=smart_status (0=unknown,1=good,2=warning,3=critical)
+//   s=filesystem, b=is_mounted, s=mount_point, u=smart_status
+//   (0=unknown,1=good,2=warning,3=critical)
 const char* introspection_xml = R"XML(
 <node>
   <interface name="su.kidoz.storage_wiper.Helper">
@@ -255,14 +256,9 @@ void handle_get_disk_smart(GDBusMethodInvocation* invocation, GVariant* paramete
 
     g_dbus_method_invocation_return_value(
         invocation,
-        g_variant_new("(bbxiiiiu)",
-                      smart.available ? TRUE : FALSE,
-                      smart.healthy ? TRUE : FALSE,
-                      static_cast<gint64>(smart.power_on_hours),
-                      smart.reallocated_sectors,
-                      smart.pending_sectors,
-                      smart.temperature_celsius,
-                      smart.uncorrectable_errors,
+        g_variant_new("(bbxiiiiu)", smart.available ? TRUE : FALSE, smart.healthy ? TRUE : FALSE,
+                      static_cast<gint64>(smart.power_on_hours), smart.reallocated_sectors,
+                      smart.pending_sectors, smart.temperature_celsius, smart.uncorrectable_errors,
                       static_cast<guint32>(smart.status)));
 }
 

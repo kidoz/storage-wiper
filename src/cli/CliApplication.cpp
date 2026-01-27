@@ -9,7 +9,7 @@
 #include "services/DBusClient.hpp"
 
 #include <gio/gio.h>
-#include <getopt.h>
+
 #include <unistd.h>
 
 #include <algorithm>
@@ -20,6 +20,8 @@
 #include <iomanip>
 #include <iostream>
 #include <thread>
+
+#include <getopt.h>
 
 namespace cli {
 
@@ -39,16 +41,17 @@ constexpr auto APP_NAME = "storage-wiper-cli";
 
 // Command line options
 const struct option long_options[] = {
-    {"help", no_argument, nullptr, 'h'},
-    {"version", no_argument, nullptr, 'V'},
-    {"list", no_argument, nullptr, 'l'},
-    {"json", no_argument, nullptr, 'j'},
-    {"wipe", required_argument, nullptr, 'w'},
-    {"algorithm", required_argument, nullptr, 'a'},
-    {"verify", no_argument, nullptr, 'v'},
-    {"force-unmount", no_argument, nullptr, 'f'},
-    {"yes", no_argument, nullptr, 'y'},
-    {nullptr, 0, nullptr, 0}};
+    {         "help",       no_argument, nullptr, 'h'},
+    {      "version",       no_argument, nullptr, 'V'},
+    {         "list",       no_argument, nullptr, 'l'},
+    {         "json",       no_argument, nullptr, 'j'},
+    {         "wipe", required_argument, nullptr, 'w'},
+    {    "algorithm", required_argument, nullptr, 'a'},
+    {       "verify",       no_argument, nullptr, 'v'},
+    {"force-unmount",       no_argument, nullptr, 'f'},
+    {          "yes",       no_argument, nullptr, 'y'},
+    {        nullptr,                 0, nullptr,   0}
+};
 
 }  // namespace
 
@@ -405,11 +408,12 @@ void CliApplication::print_disks_table(const std::vector<DiskInfo>& disks) {
     for (const auto& disk : disks) {
         // Format size
         auto format_size = [](uint64_t bytes) -> std::string {
-            constexpr uint64_t GB = 1024ULL * 1024 * 1024;
-            constexpr uint64_t TB = GB * 1024;
+            constexpr uint64_t GB = 1'024ULL * 1'024 * 1'024;
+            constexpr uint64_t TB = GB * 1'024;
 
             if (bytes >= TB) {
-                return std::format("{:.1f} TB", static_cast<double>(bytes) / static_cast<double>(TB));
+                return std::format("{:.1f} TB",
+                                   static_cast<double>(bytes) / static_cast<double>(TB));
             }
             return std::format("{:.1f} GB", static_cast<double>(bytes) / static_cast<double>(GB));
         };
@@ -427,10 +431,10 @@ void CliApplication::print_disks_table(const std::vector<DiskInfo>& disks) {
             model = model.substr(0, COL_MODEL - 5) + "...";
         }
 
-        std::cout << std::left << std::setw(COL_PATH) << disk.path << std::setw(COL_MODEL)
-                  << model << std::setw(COL_SIZE) << format_size(disk.size_bytes)
-                  << std::setw(COL_TYPE) << type << std::setw(COL_STATUS) << status
-                  << std::setw(COL_HEALTH) << disk.smart.status_string() << "\n";
+        std::cout << std::left << std::setw(COL_PATH) << disk.path << std::setw(COL_MODEL) << model
+                  << std::setw(COL_SIZE) << format_size(disk.size_bytes) << std::setw(COL_TYPE)
+                  << type << std::setw(COL_STATUS) << status << std::setw(COL_HEALTH)
+                  << disk.smart.status_string() << "\n";
     }
 }
 

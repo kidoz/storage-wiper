@@ -46,6 +46,6 @@ bool ZeroFillAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback
 }
 
 bool ZeroFillAlgorithm::verify(int fd, uint64_t size, ProgressCallback callback,
-                                const std::atomic<bool>& cancel_flag) {
+                               const std::atomic<bool>& cancel_flag) {
     return verification::verify_zeros(fd, size, std::move(callback), cancel_flag);
 }

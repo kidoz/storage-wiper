@@ -35,6 +35,11 @@ namespace {
  *
  * Wraps a progress callback to add speed and ETA calculations
  * using a rolling average of recent write speeds.
+ *
+ * @note This class is NOT thread-safe. It is designed to be used
+ *       exclusively from a single thread (the wipe worker thread).
+ *       Do not share instances between threads or call methods
+ *       concurrently.
  */
 class ProgressTracker {
 public:
@@ -137,12 +142,18 @@ WipeService::~WipeService() {
     if (state_->operation_in_progress.load()) {
         state_->cancel_requested.store(true);
 
-        // Wait for thread with timeout to avoid blocking indefinitely
+        // Wait for thread with timeout - log warning but continue waiting
         auto start = std::chrono::steady_clock::now();
         while (state_->operation_in_progress.load()) {
             auto elapsed = std::chrono::steady_clock::now() - start;
             if (elapsed >= SHUTDOWN_TIMEOUT) {
-                std::cerr << "Warning: Wipe thread did not terminate within timeout" << std::endl;
+                // Log critical warning but still wait for join
+                // Better to block shutdown than corrupt data by detaching
+                std::cerr
+                    << "ERROR: WipeService shutdown - thread did not respond to cancel within "
+                    << std::chrono::duration_cast<std::chrono::seconds>(SHUTDOWN_TIMEOUT).count()
+                    << "s timeout. Waiting for thread to complete to prevent data corruption."
+                    << std::endl;
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds{100});
@@ -151,11 +162,10 @@ WipeService::~WipeService() {
 
     std::lock_guard lock(thread_mutex_);
     if (wipe_thread_.joinable()) {
-        if (state_->operation_in_progress.load()) {
-            wipe_thread_.detach();
-        } else {
-            wipe_thread_.join();
-        }
+        // Always join - never detach. If thread is stuck, we wait.
+        // Detaching a wipe thread can lead to data corruption if the process
+        // exits while writing to disk.
+        wipe_thread_.join();
     }
 }
 
@@ -482,8 +492,8 @@ auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorith
                     return;
                 }
 
-                result =
-                    algorithm_ptr->execute(fd.get(), device_size, tracked_callback, state->cancel_requested);
+                result = algorithm_ptr->execute(fd.get(), device_size, tracked_callback,
+                                                state->cancel_requested);
 
                 if (fsync(fd.get()) != 0) {
                     // Log sync error but don't fail the operation
@@ -540,7 +550,8 @@ auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorith
             final_progress.error_message = "Operation was cancelled by user";
         } else if (result && do_verify && !verify_result) {
             final_progress.status = "Wipe completed but verification failed";
-            final_progress.error_message = "Verification failed: data does not match expected pattern";
+            final_progress.error_message =
+                "Verification failed: data does not match expected pattern";
         } else if (result) {
             if (do_verify) {
                 final_progress.status = "Wipe and verification completed successfully";

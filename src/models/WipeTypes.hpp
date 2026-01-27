@@ -42,11 +42,11 @@ struct WipeProgress {
     int64_t estimated_seconds_remaining = -1;  ///< ETA in seconds, -1 if unknown
 
     // Verification fields
-    bool verification_enabled = false;         ///< Whether verification was requested
-    bool verification_in_progress = false;     ///< Currently verifying (not wiping)
-    bool verification_passed = false;          ///< Verification result (only valid when complete)
-    double verification_percentage = 0.0;      ///< Verification progress (0-100)
-    uint64_t verification_mismatches = 0;      ///< Number of bytes that didn't match
+    bool verification_enabled = false;      ///< Whether verification was requested
+    bool verification_in_progress = false;  ///< Currently verifying (not wiping)
+    bool verification_passed = false;       ///< Verification result (only valid when complete)
+    double verification_percentage = 0.0;   ///< Verification progress (0-100)
+    uint64_t verification_mismatches = 0;   ///< Number of bytes that didn't match
 
     auto operator==(const WipeProgress&) const -> bool = default;
 };

@@ -120,9 +120,13 @@ auto DBusClient::attempt_reconnect() -> bool {
         signal_subscription_id_ = 0;
     }
 
-    if (proxy_) {
-        g_object_unref(proxy_);
-        proxy_ = nullptr;
+    // Safely clean up old proxy with mutex protection
+    {
+        std::lock_guard lock(proxy_mutex_);
+        if (proxy_) {
+            g_object_unref(proxy_);
+            proxy_ = nullptr;
+        }
     }
 
     // Don't close the connection - we need it for name watching
@@ -141,14 +145,21 @@ auto DBusClient::attempt_reconnect() -> bool {
         start_name_watching();
     }
 
-    proxy_ = g_dbus_proxy_new_sync(connection_, G_DBUS_PROXY_FLAGS_NONE, nullptr, DBUS_NAME,
-                                   DBUS_PATH, DBUS_INTERFACE, nullptr, &error);
+    GDBusProxy* new_proxy =
+        g_dbus_proxy_new_sync(connection_, G_DBUS_PROXY_FLAGS_NONE, nullptr, DBUS_NAME, DBUS_PATH,
+                              DBUS_INTERFACE, nullptr, &error);
 
-    if (!proxy_) {
+    if (!new_proxy) {
         std::string msg = error ? error->message : "unknown error";
         g_clear_error(&error);
         schedule_reconnect();
         return false;
+    }
+
+    // Safely assign new proxy with mutex protection
+    {
+        std::lock_guard lock(proxy_mutex_);
+        proxy_ = new_proxy;
     }
 
     // Successfully reconnected
@@ -238,10 +249,13 @@ void DBusClient::on_name_vanished(GDBusConnection* /*connection*/, const gchar* 
 
     // Only trigger reconnection if we were connected
     if (current_state == ConnectionState::CONNECTED) {
-        // Clear the proxy since the service is gone
-        if (self->proxy_) {
-            g_object_unref(self->proxy_);
-            self->proxy_ = nullptr;
+        // Safely clear the proxy with mutex protection
+        {
+            std::lock_guard lock(self->proxy_mutex_);
+            if (self->proxy_) {
+                g_object_unref(self->proxy_);
+                self->proxy_ = nullptr;
+            }
         }
 
         self->set_state(ConnectionState::DISCONNECTED, "Helper service stopped");
@@ -261,9 +275,12 @@ void DBusClient::cleanup() {
         signal_subscription_id_ = 0;
     }
 
-    if (proxy_) {
-        g_object_unref(proxy_);
-        proxy_ = nullptr;
+    {
+        std::lock_guard lock(proxy_mutex_);
+        if (proxy_) {
+            g_object_unref(proxy_);
+            proxy_ = nullptr;
+        }
     }
 
     if (connection_) {
@@ -318,6 +335,7 @@ auto DBusClient::connect() -> bool {
 }
 
 auto DBusClient::is_connected() const -> bool {
+    std::lock_guard lock(proxy_mutex_);
     return proxy_ != nullptr;
 }
 
@@ -391,11 +409,16 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/, const gchar
 }
 
 auto DBusClient::get_available_disks() -> std::vector<DiskInfo> {
-    if (!proxy_)
-        return {};
+    GDBusProxy* proxy_copy = nullptr;
+    {
+        std::lock_guard lock(proxy_mutex_);
+        if (!proxy_)
+            return {};
+        proxy_copy = proxy_;
+    }
 
     GError* error = nullptr;
-    GVariant* result = g_dbus_proxy_call_sync(proxy_, "GetDisks",
+    GVariant* result = g_dbus_proxy_call_sync(proxy_copy, "GetDisks",
                                               nullptr,  // no parameters
                                               G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS,
                                               nullptr,  // cancellable
@@ -427,11 +450,17 @@ auto DBusClient::get_available_disks() -> std::vector<DiskInfo> {
     while (g_variant_iter_next(&iter, "(&s&s&sxbb&sb&su)", &path, &model, &serial, &size_bytes,
                                &is_removable, &is_ssd, &filesystem, &is_mounted, &mount_point,
                                &smart_status)) {
+        // Validate required string fields - path is required, others can be empty
+        if (!path) {
+            std::cerr << "Warning: Skipping disk with null path from helper" << std::endl;
+            continue;
+        }
+
         SmartData smart;
         smart.status = static_cast<SmartData::HealthStatus>(smart_status);
         smart.available = (smart_status != 0);  // 0 = UNKNOWN means not available
 
-        disks.push_back(DiskInfo{.path = path ? path : "",
+        disks.push_back(DiskInfo{.path = path,
                                  .model = model ? model : "",
                                  .serial = serial ? serial : "",
                                  .size_bytes = static_cast<uint64_t>(size_bytes),
@@ -451,13 +480,18 @@ auto DBusClient::get_available_disks() -> std::vector<DiskInfo> {
 }
 
 auto DBusClient::validate_device_path(const std::string& path) -> std::expected<void, util::Error> {
-    if (!proxy_) {
-        return std::unexpected(util::Error{"Not connected to helper service"});
+    GDBusProxy* proxy_copy = nullptr;
+    {
+        std::lock_guard lock(proxy_mutex_);
+        if (!proxy_) {
+            return std::unexpected(util::Error{"Not connected to helper service"});
+        }
+        proxy_copy = proxy_;
     }
 
     GError* error = nullptr;
     GVariant* result =
-        g_dbus_proxy_call_sync(proxy_, "ValidateDevicePath", g_variant_new("(s)", path.c_str()),
+        g_dbus_proxy_call_sync(proxy_copy, "ValidateDevicePath", g_variant_new("(s)", path.c_str()),
                                G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
@@ -479,12 +513,17 @@ auto DBusClient::validate_device_path(const std::string& path) -> std::expected<
 }
 
 auto DBusClient::is_disk_writable(const std::string& path) -> bool {
-    if (!proxy_)
-        return false;
+    GDBusProxy* proxy_copy = nullptr;
+    {
+        std::lock_guard lock(proxy_mutex_);
+        if (!proxy_)
+            return false;
+        proxy_copy = proxy_;
+    }
 
     GError* error = nullptr;
     GVariant* result =
-        g_dbus_proxy_call_sync(proxy_, "IsDeviceWritable", g_variant_new("(s)", path.c_str()),
+        g_dbus_proxy_call_sync(proxy_copy, "IsDeviceWritable", g_variant_new("(s)", path.c_str()),
                                G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
@@ -511,13 +550,18 @@ auto DBusClient::get_disk_size(const std::string& path) -> std::expected<uint64_
 }
 
 auto DBusClient::unmount_disk(const std::string& path) -> std::expected<void, util::Error> {
-    if (!proxy_) {
-        return std::unexpected(util::Error{"Not connected to helper service"});
+    GDBusProxy* proxy_copy = nullptr;
+    {
+        std::lock_guard lock(proxy_mutex_);
+        if (!proxy_) {
+            return std::unexpected(util::Error{"Not connected to helper service"});
+        }
+        proxy_copy = proxy_;
     }
 
     GError* error = nullptr;
     GVariant* result =
-        g_dbus_proxy_call_sync(proxy_, "UnmountDevice", g_variant_new("(s)", path.c_str()),
+        g_dbus_proxy_call_sync(proxy_copy, "UnmountDevice", g_variant_new("(s)", path.c_str()),
                                G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
@@ -539,12 +583,18 @@ auto DBusClient::unmount_disk(const std::string& path) -> std::expected<void, ut
 }
 
 void DBusClient::load_algorithms() {
-    if (algorithms_loaded_ || !proxy_)
-        return;
+    GDBusProxy* proxy_copy = nullptr;
+    {
+        std::lock_guard lock(proxy_mutex_);
+        if (algorithms_loaded_ || !proxy_)
+            return;
+        proxy_copy = proxy_;
+    }
 
     GError* error = nullptr;
-    GVariant* result = g_dbus_proxy_call_sync(
-        proxy_, "GetAlgorithms", nullptr, G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
+    GVariant* result =
+        g_dbus_proxy_call_sync(proxy_copy, "GetAlgorithms", nullptr, G_DBUS_CALL_FLAGS_NONE,
+                               DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
         g_clear_error(&error);
@@ -579,8 +629,13 @@ auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm
 
 auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm,
                            ProgressCallback callback, bool verify) -> bool {
-    if (!proxy_)
-        return false;
+    GDBusProxy* proxy_copy = nullptr;
+    {
+        std::lock_guard lock(proxy_mutex_);
+        if (!proxy_)
+            return false;
+        proxy_copy = proxy_;
+    }
 
     // Store callback for signal handler
     {
@@ -590,7 +645,7 @@ auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm
 
     GError* error = nullptr;
     GVariant* result = g_dbus_proxy_call_sync(
-        proxy_, "StartWipe",
+        proxy_copy, "StartWipe",
         g_variant_new("(sub)", disk_path.c_str(), static_cast<guint32>(algorithm),
                       verify ? TRUE : FALSE),
         G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
@@ -657,12 +712,18 @@ auto DBusClient::is_ssd_compatible(WipeAlgorithm algo) -> bool {
 }
 
 auto DBusClient::cancel_current_operation() -> bool {
-    if (!proxy_)
-        return false;
+    GDBusProxy* proxy_copy = nullptr;
+    {
+        std::lock_guard lock(proxy_mutex_);
+        if (!proxy_)
+            return false;
+        proxy_copy = proxy_;
+    }
 
     GError* error = nullptr;
-    GVariant* result = g_dbus_proxy_call_sync(proxy_, "CancelWipe", nullptr, G_DBUS_CALL_FLAGS_NONE,
-                                              DBUS_TIMEOUT_MS, nullptr, &error);
+    GVariant* result =
+        g_dbus_proxy_call_sync(proxy_copy, "CancelWipe", nullptr, G_DBUS_CALL_FLAGS_NONE,
+                               DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
         g_clear_error(&error);
@@ -679,12 +740,17 @@ auto DBusClient::cancel_current_operation() -> bool {
 auto DBusClient::get_smart_data(const std::string& path) -> SmartData {
     SmartData smart;
 
-    if (!proxy_)
-        return smart;
+    GDBusProxy* proxy_copy = nullptr;
+    {
+        std::lock_guard lock(proxy_mutex_);
+        if (!proxy_)
+            return smart;
+        proxy_copy = proxy_;
+    }
 
     GError* error = nullptr;
     GVariant* result =
-        g_dbus_proxy_call_sync(proxy_, "GetDiskSMART", g_variant_new("(s)", path.c_str()),
+        g_dbus_proxy_call_sync(proxy_copy, "GetDiskSMART", g_variant_new("(s)", path.c_str()),
                                G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {

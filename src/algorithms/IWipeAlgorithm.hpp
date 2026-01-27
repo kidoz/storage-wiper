@@ -121,7 +121,7 @@ public:
      * - Multi-pass algorithms: verify final pattern
      */
     virtual bool verify(int fd, uint64_t size, ProgressCallback callback,
-                       const std::atomic<bool>& cancel_flag) {
+                        const std::atomic<bool>& cancel_flag) {
         // Default implementation: verification not supported
         (void)fd;
         (void)size;

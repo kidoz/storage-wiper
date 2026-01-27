@@ -15,9 +15,9 @@
  * @brief Cached mount information for a single mount point
  */
 struct MountEntry {
-    std::string device;      // e.g., "/dev/sda1"
-    std::string mount_point; // e.g., "/home"
-    std::string filesystem;  // e.g., "ext4"
+    std::string device;       // e.g., "/dev/sda1"
+    std::string mount_point;  // e.g., "/home"
+    std::string filesystem;   // e.g., "ext4"
 };
 
 /**
@@ -28,7 +28,7 @@ struct MountCache {
 
     // Quick lookup by device path prefix
     [[nodiscard]] auto find_mount_for_device(const std::string& device_path,
-                                              const std::vector<std::string>& dm_holders) const
+                                             const std::vector<std::string>& dm_holders) const
         -> std::optional<MountEntry>;
 };
 
@@ -71,7 +71,7 @@ private:
      * @return DiskInfo with smart.available = false
      */
     [[nodiscard]] auto parse_disk_info(const std::string& device_path,
-                                        const MountCache& mount_cache) -> DiskInfo;
+                                       const MountCache& mount_cache) -> DiskInfo;
 
     [[nodiscard]] auto check_if_ssd(const std::string& device_path) -> bool;
 
@@ -88,7 +88,7 @@ private:
      * @return List of dm-* device names
      */
     [[nodiscard]] static auto collect_dm_holders(const std::string& sys_path,
-                                                  const std::string& device_name)
+                                                 const std::string& device_name)
         -> std::vector<std::string>;
 
     std::unique_ptr<SmartService> smart_service_;

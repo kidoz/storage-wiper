@@ -33,8 +33,7 @@ namespace verification {
  * @param cancel_flag Cancellation flag
  * @return true if all bytes match the pattern
  */
-[[nodiscard]] auto verify_pattern(int fd, uint64_t size, uint8_t pattern,
-                                  ProgressCallback callback,
+[[nodiscard]] auto verify_pattern(int fd, uint64_t size, uint8_t pattern, ProgressCallback callback,
                                   const std::atomic<bool>& cancel_flag) -> bool;
 
 /**

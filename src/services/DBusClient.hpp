@@ -122,6 +122,7 @@ public:
 private:
     GDBusConnection* connection_ = nullptr;
     GDBusProxy* proxy_ = nullptr;
+    mutable std::mutex proxy_mutex_;  // Protects proxy_ access during reconnection
     guint signal_subscription_id_ = 0;
     ProgressCallback progress_callback_;
     mutable std::mutex callback_mutex_;

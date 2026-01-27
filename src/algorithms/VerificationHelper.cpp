@@ -38,7 +38,8 @@ void emit_progress(ProgressCallback& callback, uint64_t verified, uint64_t total
 
     WipeProgress progress{};
     progress.verification_in_progress = true;
-    progress.verification_percentage = (static_cast<double>(verified) / static_cast<double>(total)) * 100.0;
+    progress.verification_percentage =
+        (static_cast<double>(verified) / static_cast<double>(total)) * 100.0;
     progress.bytes_written = verified;
     progress.total_bytes = total;
     progress.percentage = progress.verification_percentage;
@@ -54,8 +55,7 @@ auto verify_zeros(int fd, uint64_t size, ProgressCallback callback,
     return verify_pattern(fd, size, 0x00, std::move(callback), cancel_flag);
 }
 
-auto verify_pattern(int fd, uint64_t size, uint8_t pattern,
-                    ProgressCallback callback,
+auto verify_pattern(int fd, uint64_t size, uint8_t pattern, ProgressCallback callback,
                     const std::atomic<bool>& cancel_flag) -> bool {
     if (size == 0)
         return true;
@@ -158,10 +158,9 @@ auto verify_random(int fd, uint64_t size, ProgressCallback callback,
     return chi_squared < CRITICAL_VALUE && max_ratio < MAX_BYTE_RATIO;
 }
 
-auto verify_buffer_pattern(int fd, uint64_t size,
-                           const std::vector<uint8_t>& expected_pattern,
-                           ProgressCallback callback,
-                           const std::atomic<bool>& cancel_flag) -> bool {
+auto verify_buffer_pattern(int fd, uint64_t size, const std::vector<uint8_t>& expected_pattern,
+                           ProgressCallback callback, const std::atomic<bool>& cancel_flag)
+    -> bool {
     if (size == 0 || expected_pattern.empty())
         return true;
 
