@@ -3,13 +3,15 @@
 #include "services/DBusClient.hpp"
 #include "services/IDiskService.hpp"
 #include "services/IWipeService.hpp"
+#include "util/Logger.hpp"
 #include "viewmodels/MainViewModel.hpp"
 #include "views/MainWindow.hpp"
 
 #include <gtkmm.h>
 #include <gtkmm/init.h>
 
-#include <iostream>
+#include <filesystem>
+#include <format>
 
 StorageWiperApp::StorageWiperApp() : app_(nullptr), main_window_(nullptr) {
     app_ = gtk_application_new("su.kidoz.storage_wiper", G_APPLICATION_DEFAULT_FLAGS);
@@ -40,6 +42,10 @@ void StorageWiperApp::on_startup(GtkApplication*, gpointer) {
     // Initialize gtkmm type system for hybrid C API / gtkmm usage
     // This is required when using raw C GtkApplication with gtkmm widgets
     Gtk::init_gtkmm_internals();
+
+    // Initialize logger for GUI application
+    auto log_dir = std::filesystem::path(g_get_user_data_dir()) / "storage-wiper" / "logs";
+    util::Logger::instance().initialize(log_dir, "storage-wiper");
 }
 
 void StorageWiperApp::on_activate(GtkApplication* app, gpointer user_data) {
@@ -61,7 +67,7 @@ void StorageWiperApp::on_activate(GtkApplication* app, gpointer user_data) {
         gtk_window_present(GTK_WINDOW(self->main_window_));
 
     } catch (const std::exception& e) {
-        std::cerr << "Error during application activation: " << e.what() << std::endl;
+        LOG_ERROR("Application", std::format("Error during application activation: {}", e.what()));
         g_application_quit(G_APPLICATION(app));
     }
 }
@@ -72,8 +78,8 @@ void StorageWiperApp::configure_services() {
 
     // Attempt to connect - if it fails, reconnection logic will retry automatically
     if (!dbus_client_->connect()) {
-        std::cerr << "Initial connection to storage-wiper-helper failed. "
-                  << "Will retry automatically when service becomes available." << std::endl;
+        LOG_WARNING("Application", "Initial connection to storage-wiper-helper failed. "
+                                   "Will retry automatically when service becomes available.");
         // Don't throw - the reconnection logic will handle it
     }
 

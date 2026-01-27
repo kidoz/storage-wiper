@@ -13,11 +13,14 @@
 #include "algorithms/VSITRAlgorithm.hpp"
 #include "algorithms/ZeroFillAlgorithm.hpp"
 
+// Project headers
+#include "util/Logger.hpp"
+
 // Standard library
 #include <cerrno>
 #include <cstring>
 #include <deque>
-#include <iostream>
+#include <format>
 #include <utility>
 
 // System headers
@@ -149,11 +152,13 @@ WipeService::~WipeService() {
             if (elapsed >= SHUTDOWN_TIMEOUT) {
                 // Log critical warning but still wait for join
                 // Better to block shutdown than corrupt data by detaching
-                std::cerr
-                    << "ERROR: WipeService shutdown - thread did not respond to cancel within "
-                    << std::chrono::duration_cast<std::chrono::seconds>(SHUTDOWN_TIMEOUT).count()
-                    << "s timeout. Waiting for thread to complete to prevent data corruption."
-                    << std::endl;
+                LOG_ERROR(
+                    "WipeService",
+                    std::format("Shutdown - thread did not respond to cancel within "
+                                "{}s timeout. Waiting for thread to complete to prevent "
+                                "data corruption.",
+                                std::chrono::duration_cast<std::chrono::seconds>(SHUTDOWN_TIMEOUT)
+                                    .count()));
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds{100});
@@ -188,10 +193,10 @@ auto WipeService::get_algorithm(WipeAlgorithm algo) const -> std::shared_ptr<IWi
     return nullptr;
 }
 
-auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm,
-                            ProgressCallback callback) -> bool {
+auto WipeService::prepare_wipe(const std::string& disk_path, WipeAlgorithm algorithm,
+                               const ProgressCallback& callback) -> std::optional<WipePreparation> {
     if (state_->operation_in_progress.load()) {
-        return false;  // Operation already in progress
+        return std::nullopt;  // Operation already in progress
     }
 
     if (!disk_service_) {
@@ -202,7 +207,7 @@ auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorith
             progress.is_complete = true;
             callback(progress);
         }
-        return false;
+        return std::nullopt;
     }
 
     if (auto eligible = device_policy::validate_wipe_target(*disk_service_, disk_path); !eligible) {
@@ -213,7 +218,7 @@ auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorith
             progress.is_complete = true;
             callback(progress);
         }
-        return false;
+        return std::nullopt;
     }
 
     // Join previous thread if it exists (with lock)
@@ -236,101 +241,101 @@ auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorith
             progress.error_message = "Unknown algorithm";
             callback(progress);
         }
-        return false;
+        return std::nullopt;
     }
 
-    // Run wipe operation in separate thread
-    const bool requires_device_access = algorithm_ptr->requires_device_access();
+    return WipePreparation{.algorithm = algorithm_ptr,
+                           .requires_device_access = algorithm_ptr->requires_device_access()};
+}
 
-    std::lock_guard lock(thread_mutex_);
-    wipe_thread_ =
-        std::thread([disk_path, callback, state = state_, algorithm_ptr, requires_device_access]() {
-            bool result = false;
+auto WipeService::execute_wipe_on_device(
+    const std::string& disk_path, const std::shared_ptr<IWipeAlgorithm>& algorithm_ptr,
+    bool requires_device_access, const std::function<void(const WipeProgress&)>& tracked_callback,
+    std::shared_ptr<ThreadState> state) -> WipeResult {
+    uint64_t device_size = 0;
+    bool result = false;
 
-            // Create progress tracker to calculate speed and ETA
-            auto tracker = std::make_shared<ProgressTracker>(callback);
-            auto tracked_callback = [tracker](const WipeProgress& progress) {
-                tracker->report(progress);
-            };
+    // Some algorithms (like ATA Secure Erase) need device-level access
+    if (requires_device_access) {
+        // Get device size first
+        util::FileDescriptor probe_fd(open(disk_path.c_str(), O_RDONLY));
+        if (probe_fd) {
+            ioctl(probe_fd.get(), BLKGETSIZE64, &device_size);
+        }
+        // probe_fd closed automatically
 
-            try {
-                // Some algorithms (like ATA Secure Erase) need device-level access
-                if (requires_device_access) {
-                    // Get device size first
-                    util::FileDescriptor probe_fd(open(disk_path.c_str(), O_RDONLY));
-                    uint64_t size = 0;
-                    if (probe_fd) {
-                        ioctl(probe_fd.get(), BLKGETSIZE64, &size);
-                    }
-                    // probe_fd closed automatically
-
-                    // Use execute_on_device which handles the device internally
-                    result = algorithm_ptr->execute_on_device(disk_path, size, tracked_callback,
-                                                              state->cancel_requested);
-                } else {
-                    util::FileDescriptor fd(open(disk_path.c_str(), O_WRONLY | O_SYNC));
-                    if (!fd) {
-                        WipeProgress progress{};
-                        progress.has_error = true;
-                        progress.error_message =
-                            "Failed to open device: " + std::string(strerror(errno));
-                        progress.is_complete = true;
-                        tracked_callback(progress);
-                        state->operation_in_progress.store(false);
-                        return;
-                    }
-
-                    uint64_t size;
-                    if (ioctl(fd.get(), BLKGETSIZE64, &size) == -1) {
-                        WipeProgress progress{};
-                        progress.has_error = true;
-                        progress.error_message = "Failed to get device size";
-                        progress.is_complete = true;
-                        tracked_callback(progress);
-                        state->operation_in_progress.store(false);
-                        return;
-                    }
-
-                    result = algorithm_ptr->execute(fd.get(), size, tracked_callback,
-                                                    state->cancel_requested);
-
-                    if (fsync(fd.get()) != 0) {
-                        // Log sync error but don't fail the operation
-                        std::cerr << "Warning: fsync failed: " << strerror(errno) << std::endl;
-                    }
-                    // fd automatically closed by RAII
-                }
-            } catch (const std::exception& e) {
-                WipeProgress progress{};
-                progress.has_error = true;
-                progress.error_message = "Wipe operation failed: " + std::string(e.what());
-                tracked_callback(progress);
-                result = false;
-            }
-
-            // Send completion callback
-            WipeProgress final_progress{};
-            final_progress.is_complete = true;
-            final_progress.has_error = !result;
-            final_progress.percentage = result ? 100.0 : 0.0;
-
-            if (state->cancel_requested.load()) {
-                final_progress.status = "Operation cancelled";
-                final_progress.has_error = true;
-                final_progress.error_message = "Operation was cancelled by user";
-            } else if (result) {
-                final_progress.status = "Wipe completed successfully";
-            } else if (!final_progress.has_error) {
-                final_progress.has_error = true;
-                final_progress.error_message = "Wipe operation failed";
-            }
-
-            tracked_callback(final_progress);
-
+        // Use execute_on_device which handles the device internally
+        result = algorithm_ptr->execute_on_device(disk_path, device_size, tracked_callback,
+                                                  state->cancel_requested);
+    } else {
+        util::FileDescriptor fd(open(disk_path.c_str(), O_WRONLY | O_SYNC));
+        if (!fd) {
+            WipeProgress progress{};
+            progress.has_error = true;
+            progress.error_message = "Failed to open device: " + std::string(strerror(errno));
+            progress.is_complete = true;
+            tracked_callback(progress);
             state->operation_in_progress.store(false);
-        });
+            return {.success = false, .device_size = 0};
+        }
 
-    return true;
+        if (ioctl(fd.get(), BLKGETSIZE64, &device_size) == -1) {
+            WipeProgress progress{};
+            progress.has_error = true;
+            progress.error_message = "Failed to get device size";
+            progress.is_complete = true;
+            tracked_callback(progress);
+            state->operation_in_progress.store(false);
+            return {.success = false, .device_size = 0};
+        }
+
+        result = algorithm_ptr->execute(fd.get(), device_size, tracked_callback,
+                                        state->cancel_requested);
+
+        if (fsync(fd.get()) != 0) {
+            // Log sync error but don't fail the operation
+            LOG_WARNING("WipeService", std::format("fsync failed: {}", strerror(errno)));
+        }
+        // fd automatically closed by RAII
+    }
+
+    return {.success = result, .device_size = device_size};
+}
+
+auto WipeService::build_completion_status(bool wipe_result, bool do_verify, bool verify_result,
+                                          bool cancelled) -> WipeProgress {
+    WipeProgress final_progress{};
+    final_progress.is_complete = true;
+    final_progress.has_error = !wipe_result || (do_verify && !verify_result);
+    final_progress.percentage = wipe_result ? 100.0 : 0.0;
+    final_progress.verification_enabled = do_verify;
+    final_progress.verification_passed = verify_result;
+
+    if (cancelled) {
+        final_progress.status = "Operation cancelled";
+        final_progress.has_error = true;
+        final_progress.error_message = "Operation was cancelled by user";
+    } else if (wipe_result && do_verify && !verify_result) {
+        final_progress.status = "Wipe completed but verification failed";
+        final_progress.error_message = "Verification failed: data does not match expected pattern";
+    } else if (wipe_result) {
+        if (do_verify) {
+            final_progress.status = "Wipe and verification completed successfully";
+        } else {
+            final_progress.status = "Wipe completed successfully";
+        }
+    } else if (!final_progress.has_error) {
+        final_progress.has_error = true;
+        final_progress.error_message = "Wipe operation failed";
+    }
+
+    return final_progress;
+}
+
+auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm,
+                            ProgressCallback callback) -> bool {
+    // Delegate to the full overload with verify=false
+    return wipe_disk(disk_path, algorithm, std::move(callback), false);
 }
 
 auto WipeService::cancel_current_operation() -> bool {
@@ -385,188 +390,87 @@ auto WipeService::supports_verification(WipeAlgorithm algo) -> bool {
 
 auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm,
                             ProgressCallback callback, bool verify) -> bool {
-    if (state_->operation_in_progress.load()) {
-        return false;  // Operation already in progress
-    }
-
-    if (!disk_service_) {
-        if (callback) {
-            WipeProgress progress{};
-            progress.has_error = true;
-            progress.error_message = "Disk service not configured";
-            progress.is_complete = true;
-            callback(progress);
-        }
-        return false;
-    }
-
-    if (auto eligible = device_policy::validate_wipe_target(*disk_service_, disk_path); !eligible) {
-        if (callback) {
-            WipeProgress progress{};
-            progress.has_error = true;
-            progress.error_message = eligible.error().message;
-            progress.is_complete = true;
-            callback(progress);
-        }
-        return false;
-    }
-
-    // Join previous thread if it exists (with lock)
-    {
-        std::lock_guard lock(thread_mutex_);
-        if (wipe_thread_.joinable()) {
-            wipe_thread_.join();
-        }
-    }
-
-    state_->cancel_requested.store(false);
-    state_->operation_in_progress.store(true);
-
-    auto algorithm_ptr = get_algorithm(algorithm);
-    if (!algorithm_ptr) {
-        state_->operation_in_progress.store(false);
-        if (callback) {
-            WipeProgress progress{};
-            progress.has_error = true;
-            progress.error_message = "Unknown algorithm";
-            callback(progress);
-        }
+    // Validate and prepare for wipe
+    auto preparation = prepare_wipe(disk_path, algorithm, callback);
+    if (!preparation) {
         return false;
     }
 
     // Check if verification is requested but not supported
-    const bool do_verify = verify && algorithm_ptr->supports_verification();
+    const bool do_verify = verify && preparation->algorithm->supports_verification();
 
     // Run wipe operation in separate thread
-    const bool requires_device_access = algorithm_ptr->requires_device_access();
-
     std::lock_guard lock(thread_mutex_);
-    wipe_thread_ = std::thread([disk_path, callback, state = state_, algorithm_ptr,
-                                requires_device_access, do_verify]() {
-        bool result = false;
-        bool verify_result = true;
-
-        // Create progress tracker to calculate speed and ETA
-        auto tracker = std::make_shared<ProgressTracker>(callback);
-        auto tracked_callback = [tracker, do_verify](const WipeProgress& progress) {
-            WipeProgress p = progress;
-            p.verification_enabled = do_verify;
-            tracker->report(p);
-        };
-
-        try {
+    wipe_thread_ =
+        std::thread([disk_path, callback, state = state_, algorithm_ptr = preparation->algorithm,
+                     requires_device_access = preparation->requires_device_access, do_verify]() {
+            bool wipe_result = false;
+            bool verify_result = true;
             uint64_t device_size = 0;
 
-            // Some algorithms (like ATA Secure Erase) need device-level access
-            if (requires_device_access) {
-                // Get device size first
-                util::FileDescriptor probe_fd(open(disk_path.c_str(), O_RDONLY));
-                if (probe_fd) {
-                    ioctl(probe_fd.get(), BLKGETSIZE64, &device_size);
-                }
-                // probe_fd closed automatically
+            // Create progress tracker to calculate speed and ETA
+            auto tracker = std::make_shared<ProgressTracker>(callback);
+            auto tracked_callback = [tracker, do_verify](const WipeProgress& progress) {
+                WipeProgress p = progress;
+                p.verification_enabled = do_verify;
+                tracker->report(p);
+            };
 
-                // Use execute_on_device which handles the device internally
-                result = algorithm_ptr->execute_on_device(disk_path, device_size, tracked_callback,
-                                                          state->cancel_requested);
-            } else {
-                util::FileDescriptor fd(open(disk_path.c_str(), O_WRONLY | O_SYNC));
-                if (!fd) {
-                    WipeProgress progress{};
-                    progress.has_error = true;
-                    progress.error_message =
-                        "Failed to open device: " + std::string(strerror(errno));
-                    progress.is_complete = true;
-                    tracked_callback(progress);
-                    state->operation_in_progress.store(false);
-                    return;
+            try {
+                // Execute the wipe operation
+                auto result = execute_wipe_on_device(
+                    disk_path, algorithm_ptr, requires_device_access, tracked_callback, state);
+
+                // Check for early exit (device open/size failure already reported)
+                if (!result.success && result.device_size == 0 &&
+                    !state->operation_in_progress.load()) {
+                    return;  // Error already handled and reported
                 }
 
-                if (ioctl(fd.get(), BLKGETSIZE64, &device_size) == -1) {
-                    WipeProgress progress{};
-                    progress.has_error = true;
-                    progress.error_message = "Failed to get device size";
-                    progress.is_complete = true;
-                    tracked_callback(progress);
-                    state->operation_in_progress.store(false);
-                    return;
+                wipe_result = result.success;
+                device_size = result.device_size;
+
+                // Perform verification if requested, wipe succeeded, and not cancelled
+                if (do_verify && wipe_result && !state->cancel_requested.load()) {
+                    // Reopen device for reading
+                    util::FileDescriptor verify_fd(open(disk_path.c_str(), O_RDONLY));
+                    if (!verify_fd) {
+                        WipeProgress progress{};
+                        progress.has_error = true;
+                        progress.error_message = "Failed to open device for verification";
+                        progress.is_complete = true;
+                        tracked_callback(progress);
+                        state->operation_in_progress.store(false);
+                        return;
+                    }
+
+                    // Create verification progress callback
+                    auto verify_callback = [&tracked_callback](const WipeProgress& progress) {
+                        WipeProgress p = progress;
+                        p.verification_in_progress = true;
+                        p.status = "Verifying wipe...";
+                        tracked_callback(p);
+                    };
+
+                    verify_result = algorithm_ptr->verify(verify_fd.get(), device_size,
+                                                          verify_callback, state->cancel_requested);
                 }
 
-                result = algorithm_ptr->execute(fd.get(), device_size, tracked_callback,
-                                                state->cancel_requested);
-
-                if (fsync(fd.get()) != 0) {
-                    // Log sync error but don't fail the operation
-                    std::cerr << "Warning: fsync failed: " << strerror(errno) << std::endl;
-                }
-                // fd automatically closed by RAII
+            } catch (const std::exception& e) {
+                WipeProgress progress{};
+                progress.has_error = true;
+                progress.error_message = "Wipe operation failed: " + std::string(e.what());
+                tracked_callback(progress);
+                wipe_result = false;
             }
 
-            // Perform verification if requested, wipe succeeded, and not cancelled
-            if (do_verify && result && !state->cancel_requested.load()) {
-                // Reopen device for reading
-                util::FileDescriptor verify_fd(open(disk_path.c_str(), O_RDONLY));
-                if (!verify_fd) {
-                    WipeProgress progress{};
-                    progress.has_error = true;
-                    progress.error_message = "Failed to open device for verification";
-                    progress.is_complete = true;
-                    tracked_callback(progress);
-                    state->operation_in_progress.store(false);
-                    return;
-                }
+            // Build and send completion status
+            auto final_progress = build_completion_status(wipe_result, do_verify, verify_result,
+                                                          state->cancel_requested.load());
+            tracked_callback(final_progress);
 
-                // Create verification progress callback
-                auto verify_callback = [&tracked_callback](const WipeProgress& progress) {
-                    WipeProgress p = progress;
-                    p.verification_in_progress = true;
-                    p.status = "Verifying wipe...";
-                    tracked_callback(p);
-                };
-
-                verify_result = algorithm_ptr->verify(verify_fd.get(), device_size, verify_callback,
-                                                      state->cancel_requested);
-            }
-
-        } catch (const std::exception& e) {
-            WipeProgress progress{};
-            progress.has_error = true;
-            progress.error_message = "Wipe operation failed: " + std::string(e.what());
-            tracked_callback(progress);
-            result = false;
-        }
-
-        // Send completion callback
-        WipeProgress final_progress{};
-        final_progress.is_complete = true;
-        final_progress.has_error = !result || (do_verify && !verify_result);
-        final_progress.percentage = result ? 100.0 : 0.0;
-        final_progress.verification_enabled = do_verify;
-        final_progress.verification_passed = verify_result;
-
-        if (state->cancel_requested.load()) {
-            final_progress.status = "Operation cancelled";
-            final_progress.has_error = true;
-            final_progress.error_message = "Operation was cancelled by user";
-        } else if (result && do_verify && !verify_result) {
-            final_progress.status = "Wipe completed but verification failed";
-            final_progress.error_message =
-                "Verification failed: data does not match expected pattern";
-        } else if (result) {
-            if (do_verify) {
-                final_progress.status = "Wipe and verification completed successfully";
-            } else {
-                final_progress.status = "Wipe completed successfully";
-            }
-        } else if (!final_progress.has_error) {
-            final_progress.has_error = true;
-            final_progress.error_message = "Wipe operation failed";
-        }
-
-        tracked_callback(final_progress);
-
-        state->operation_in_progress.store(false);
-    });
+            state->operation_in_progress.store(false);
+        });
 
     return true;
 }

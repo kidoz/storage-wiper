@@ -1,7 +1,8 @@
 #include "views/MainWindow.hpp"
 
+#include "util/Logger.hpp"
+
 #include <format>
-#include <iostream>
 
 #include "config.h"
 
@@ -149,7 +150,7 @@ void MainWindow::show_message(const MessageInfo& message) {
 void MainWindow::show_confirmation_dialog(const MessageInfo& message) {
     auto* dialog = adw_alert_dialog_new(message.title.c_str(), message.message.c_str());
     if (!dialog) {
-        std::cerr << "Error: Failed to create confirmation dialog" << std::endl;
+        LOG_ERROR("MainWindow", "Failed to create confirmation dialog");
         return;
     }
 
@@ -196,7 +197,7 @@ void MainWindow::show_confirmation_dialog(const MessageInfo& message) {
 void MainWindow::show_info_dialog(const MessageInfo& message) {
     auto* dialog = adw_alert_dialog_new(message.title.c_str(), message.message.c_str());
     if (!dialog) {
-        std::cerr << "Error: Failed to create info dialog" << std::endl;
+        LOG_ERROR("MainWindow", "Failed to create info dialog");
         return;
     }
     adw_alert_dialog_add_response(ADW_ALERT_DIALOG(dialog), "ok", "OK");

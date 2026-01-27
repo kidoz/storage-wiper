@@ -5,7 +5,9 @@
 
 #include "services/DBusClient.hpp"
 
-#include <iostream>
+#include "util/Logger.hpp"
+
+#include <format>
 
 namespace {
 constexpr auto DBUS_NAME = "su.kidoz.storage_wiper.Helper";
@@ -300,7 +302,7 @@ auto DBusClient::connect() -> bool {
     connection_ = g_bus_get_sync(G_BUS_TYPE_SYSTEM, nullptr, &error);
     if (!connection_) {
         std::string msg = error ? error->message : "unknown";
-        std::cerr << "Failed to connect to system bus: " << msg << std::endl;
+        LOG_ERROR("DBusClient", std::format("Failed to connect to system bus: {}", msg));
         g_clear_error(&error);
         set_state(ConnectionState::DISCONNECTED, msg);
         return false;
@@ -318,7 +320,7 @@ auto DBusClient::connect() -> bool {
 
     if (!proxy_) {
         std::string msg = error ? error->message : "unknown";
-        std::cerr << "Failed to create D-Bus proxy: " << msg << std::endl;
+        LOG_ERROR("DBusClient", std::format("Failed to create D-Bus proxy: {}", msg));
         g_clear_error(&error);
         // Don't fully cleanup - keep connection and name watcher for reconnection
         set_state(ConnectionState::DISCONNECTED, msg);
@@ -425,7 +427,8 @@ auto DBusClient::get_available_disks() -> std::vector<DiskInfo> {
                                               &error);
 
     if (!result) {
-        std::cerr << "GetDisks failed: " << (error ? error->message : "unknown") << std::endl;
+        LOG_ERROR("DBusClient",
+                  std::format("GetDisks failed: {}", error ? error->message : "unknown"));
         g_clear_error(&error);
         return {};
     }
@@ -452,7 +455,7 @@ auto DBusClient::get_available_disks() -> std::vector<DiskInfo> {
                                &smart_status)) {
         // Validate required string fields - path is required, others can be empty
         if (!path) {
-            std::cerr << "Warning: Skipping disk with null path from helper" << std::endl;
+            LOG_WARNING("DBusClient", "Skipping disk with null path from helper");
             continue;
         }
 
@@ -611,10 +614,9 @@ void DBusClient::load_algorithms() {
     gint pass_count = 0;
 
     while (g_variant_iter_next(&iter, "(u&s&si)", &id, &name, &description, &pass_count)) {
-        algorithms_.push_back(AlgorithmInfo{.id = id,
-                                            .name = name ? name : "",
-                                            .description = description ? description : "",
-                                            .pass_count = pass_count});
+        algorithms_.emplace(id, AlgorithmInfo{.name = name ? name : "",
+                                              .description = description ? description : "",
+                                              .pass_count = pass_count});
     }
 
     g_variant_unref(array);
@@ -651,7 +653,8 @@ auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm
         G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
-        std::cerr << "StartWipe failed: " << (error ? error->message : "unknown") << std::endl;
+        LOG_ERROR("DBusClient",
+                  std::format("StartWipe failed: {}", error ? error->message : "unknown"));
         g_clear_error(&error);
         return false;
     }
@@ -662,8 +665,8 @@ auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm
     g_variant_unref(result);
 
     if (!started) {
-        std::cerr << "Wipe not started: " << (error_message ? error_message : "unknown")
-                  << std::endl;
+        LOG_ERROR("DBusClient",
+                  std::format("Wipe not started: {}", error_message ? error_message : "unknown"));
     }
 
     return started != FALSE;
@@ -671,30 +674,24 @@ auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm
 
 auto DBusClient::get_algorithm_name(WipeAlgorithm algo) -> std::string {
     load_algorithms();
-    auto id = static_cast<uint32_t>(algo);
-    for (const auto& info : algorithms_) {
-        if (info.id == id)
-            return info.name;
+    if (auto it = algorithms_.find(static_cast<uint32_t>(algo)); it != algorithms_.end()) {
+        return it->second.name;
     }
     return "Unknown";
 }
 
 auto DBusClient::get_algorithm_description(WipeAlgorithm algo) -> std::string {
     load_algorithms();
-    auto id = static_cast<uint32_t>(algo);
-    for (const auto& info : algorithms_) {
-        if (info.id == id)
-            return info.description;
+    if (auto it = algorithms_.find(static_cast<uint32_t>(algo)); it != algorithms_.end()) {
+        return it->second.description;
     }
     return "";
 }
 
 auto DBusClient::get_pass_count(WipeAlgorithm algo) -> int {
     load_algorithms();
-    auto id = static_cast<uint32_t>(algo);
-    for (const auto& info : algorithms_) {
-        if (info.id == id)
-            return info.pass_count;
+    if (auto it = algorithms_.find(static_cast<uint32_t>(algo)); it != algorithms_.end()) {
+        return it->second.pass_count;
     }
     return 1;
 }

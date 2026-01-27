@@ -2,6 +2,7 @@
 
 #include "helper/services/SmartService.hpp"
 #include "util/FileDescriptor.hpp"
+#include "util/Logger.hpp"
 
 // Standard library
 #include <algorithm>
@@ -14,7 +15,6 @@
 #include <format>
 #include <fstream>
 #include <future>
-#include <iostream>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -194,15 +194,16 @@ auto DiskService::get_available_disks() -> std::vector<DiskInfo> {
                 smart_results[path] = std::move(data);
             } catch (const std::system_error& e) {
                 // System-level error (file access, ioctl, etc.)
-                std::cerr << "System error reading SMART for " << current_path << ": " << e.what()
-                          << std::endl;
+                LOG_WARNING("DiskService", std::format("System error reading SMART for {}: {}",
+                                                       current_path, e.what()));
             } catch (const std::exception& e) {
                 // General exception
-                std::cerr << "Failed to read SMART for " << current_path << ": " << e.what()
-                          << std::endl;
+                LOG_WARNING("DiskService",
+                            std::format("Failed to read SMART for {}: {}", current_path, e.what()));
             } catch (...) {
                 // Unknown exception - disk will show unknown health
-                std::cerr << "Unknown error reading SMART for " << current_path << std::endl;
+                LOG_WARNING("DiskService",
+                            std::format("Unknown error reading SMART for {}", current_path));
             }
         }
 

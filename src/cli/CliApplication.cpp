@@ -7,6 +7,7 @@
 
 #include "cli/ProgressDisplay.hpp"
 #include "services/DBusClient.hpp"
+#include "util/Logger.hpp"
 
 #include <gio/gio.h>
 
@@ -16,6 +17,7 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <filesystem>
 #include <format>
 #include <iomanip>
 #include <iostream>
@@ -60,6 +62,10 @@ CliApplication::CliApplication() = default;
 CliApplication::~CliApplication() = default;
 
 auto CliApplication::run(int argc, char* argv[]) -> int {
+    // Initialize logger for CLI application
+    auto log_dir = std::filesystem::path(g_get_user_data_dir()) / "storage-wiper" / "logs";
+    util::Logger::instance().initialize(log_dir, "storage-wiper-cli");
+
     auto options = parse_args(argc, argv);
 
     if (options.show_help) {
@@ -74,6 +80,7 @@ auto CliApplication::run(int argc, char* argv[]) -> int {
 
     // Connect to D-Bus helper
     if (!connect()) {
+        LOG_ERROR("CLI", "Failed to connect to storage-wiper-helper service");
         std::cerr << "Error: Failed to connect to storage-wiper-helper service.\n"
                   << "Make sure the helper is installed and D-Bus is running.\n";
         return 1;
@@ -200,6 +207,7 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
     // Parse algorithm
     auto algo = parse_algorithm(options.algorithm);
     if (!algo) {
+        LOG_ERROR("CLI", std::format("Unknown algorithm: {}", options.algorithm));
         std::cerr << "Error: Unknown algorithm '" << options.algorithm << "'\n"
                   << "Run with --help to see available algorithms.\n";
         return 1;
@@ -208,6 +216,8 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
     // Validate device path
     auto valid = client_->validate_device_path(options.device_path);
     if (!valid) {
+        LOG_ERROR("CLI", std::format("Invalid device path {}: {}", options.device_path,
+                                     valid.error().message));
         std::cerr << "Error: " << valid.error().message << "\n";
         return 1;
     }
@@ -218,6 +228,7 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
                                 [&](const DiskInfo& d) { return d.path == options.device_path; });
 
     if (disk_it == disks.end()) {
+        LOG_ERROR("CLI", std::format("Device not found: {}", options.device_path));
         std::cerr << "Error: Device not found: " << options.device_path << "\n";
         return 1;
     }
@@ -230,6 +241,8 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
             std::cout << "Unmounting " << options.device_path << "...\n";
             auto unmount_result = client_->unmount_disk(options.device_path);
             if (!unmount_result) {
+                LOG_ERROR("CLI", std::format("Failed to unmount {}: {}", options.device_path,
+                                             unmount_result.error().message));
                 std::cerr << "Error: Failed to unmount: " << unmount_result.error().message << "\n";
                 return 1;
             }
@@ -277,6 +290,7 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
 
     // Start wipe
     if (!client_->wipe_disk(options.device_path, *algo, callback, options.verify)) {
+        LOG_ERROR("CLI", std::format("Failed to start wipe operation for {}", options.device_path));
         std::cerr << "Error: Failed to start wipe operation.\n";
         return 1;
     }

@@ -13,13 +13,14 @@
 #include "helper/services/DiskService.hpp"
 #include "helper/services/WipeService.hpp"
 #include "services/DevicePolicy.hpp"
+#include "util/Logger.hpp"
 
 #include <gio/gio.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <iostream>
+#include <format>
 #include <memory>
 #include <string>
 #include <thread>
@@ -210,7 +211,7 @@ void emit_wipe_progress(const WipeProgress& progress) {
         &error);
 
     if (error) {
-        std::cerr << "Failed to emit signal: " << error->message << std::endl;
+        LOG_ERROR("Helper", std::format("Failed to emit signal: {}", error->message));
         g_error_free(error);
     }
 }
@@ -455,7 +456,7 @@ const GDBusInterfaceVTable interface_vtable = {
  * Callback when D-Bus name is acquired
  */
 void on_name_acquired(GDBusConnection* connection, const gchar* name, gpointer /*user_data*/) {
-    std::cout << "Acquired D-Bus name: " << name << std::endl;
+    LOG_INFO("Helper", std::format("Acquired D-Bus name: {}", name));
     g_connection = connection;
 
     // Parse introspection data
@@ -463,8 +464,8 @@ void on_name_acquired(GDBusConnection* connection, const gchar* name, gpointer /
     GDBusNodeInfo* introspection_data = g_dbus_node_info_new_for_xml(introspection_xml, &error);
 
     if (!introspection_data) {
-        std::cerr << "Failed to parse introspection XML: " << (error ? error->message : "unknown")
-                  << std::endl;
+        LOG_ERROR("Helper", std::format("Failed to parse introspection XML: {}",
+                                        error ? error->message : "unknown"));
         g_clear_error(&error);
         g_main_loop_quit(g_main_loop);
         return;
@@ -480,21 +481,21 @@ void on_name_acquired(GDBusConnection* connection, const gchar* name, gpointer /
     g_dbus_node_info_unref(introspection_data);
 
     if (registration_id == 0) {
-        std::cerr << "Failed to register object: " << (error ? error->message : "unknown")
-                  << std::endl;
+        LOG_ERROR("Helper",
+                  std::format("Failed to register object: {}", error ? error->message : "unknown"));
         g_clear_error(&error);
         g_main_loop_quit(g_main_loop);
         return;
     }
 
-    std::cout << "D-Bus object registered at " << DBUS_PATH << std::endl;
+    LOG_INFO("Helper", std::format("D-Bus object registered at {}", DBUS_PATH));
 }
 
 /**
  * Callback when D-Bus name is lost
  */
 void on_name_lost(GDBusConnection* /*connection*/, const gchar* name, gpointer /*user_data*/) {
-    std::cerr << "Lost D-Bus name: " << name << std::endl;
+    LOG_ERROR("Helper", std::format("Lost D-Bus name: {}", name));
     g_main_loop_quit(g_main_loop);
 }
 
@@ -503,19 +504,22 @@ void on_name_lost(GDBusConnection* /*connection*/, const gchar* name, gpointer /
  */
 void on_bus_acquired(GDBusConnection* /*connection*/, const gchar* /*name*/,
                      gpointer /*user_data*/) {
-    std::cout << "Bus acquired" << std::endl;
+    LOG_INFO("Helper", "Bus acquired");
 }
 
 }  // namespace
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
+    // Initialize logger for helper daemon
+    util::Logger::instance().initialize("/var/log/storage-wiper", "storage-wiper-helper");
+
     // Check if running as root
     if (getuid() != 0) {
-        std::cerr << "Error: This helper must run as root" << std::endl;
+        LOG_ERROR("Helper", "This helper must run as root");
         return 1;
     }
 
-    std::cout << "Storage Wiper Helper starting..." << std::endl;
+    LOG_INFO("Helper", "Storage Wiper Helper starting...");
 
     // Initialize services
     g_disk_service = std::make_shared<DiskService>();
@@ -540,6 +544,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     g_wipe_service.reset();
     g_disk_service.reset();
 
-    std::cout << "Storage Wiper Helper stopped" << std::endl;
+    LOG_INFO("Helper", "Storage Wiper Helper stopped");
     return 0;
 }

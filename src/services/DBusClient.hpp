@@ -20,6 +20,7 @@
 #include <mutex>
 #include <random>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 /**
@@ -129,12 +130,11 @@ private:
 
     // Algorithm info cache (fetched once from helper)
     struct AlgorithmInfo {
-        uint32_t id;
         std::string name;
         std::string description;
         int pass_count;
     };
-    std::vector<AlgorithmInfo> algorithms_;
+    std::unordered_map<uint32_t, AlgorithmInfo> algorithms_;
     bool algorithms_loaded_ = false;
 
     // Connection state management
