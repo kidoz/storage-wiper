@@ -52,10 +52,11 @@ public:
     ObservableObject() = default;
     ~ObservableObject() override = default;
 
+    // Non-copyable and non-movable due to mutex_ member
     ObservableObject(const ObservableObject&) = delete;
     ObservableObject& operator=(const ObservableObject&) = delete;
-    ObservableObject(ObservableObject&&) = default;
-    ObservableObject& operator=(ObservableObject&&) = default;
+    ObservableObject(ObservableObject&&) = delete;
+    ObservableObject& operator=(ObservableObject&&) = delete;
 
     auto subscribe(PropertyChangedCallback callback) -> size_t override {
         std::lock_guard lock(mutex_);

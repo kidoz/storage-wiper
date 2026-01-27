@@ -37,11 +37,11 @@ public:
     DiskService();
     ~DiskService() override = default;
 
-    // Non-copyable, moveable
+    // Non-copyable and non-movable due to mutex member
     DiskService(const DiskService&) = delete;
     DiskService& operator=(const DiskService&) = delete;
-    DiskService(DiskService&&) = default;
-    DiskService& operator=(DiskService&&) = default;
+    DiskService(DiskService&&) = delete;
+    DiskService& operator=(DiskService&&) = delete;
 
     [[nodiscard]] auto get_available_disks() -> std::vector<DiskInfo> override;
     auto unmount_disk(const std::string& path) -> std::expected<void, util::Error> override;
