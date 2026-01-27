@@ -15,3 +15,9 @@ option('enable_tests',
   value: false,
   description: 'Build and enable unit tests with Google Test (run: meson test -C builddir)'
 )
+
+# Note: Use built-in meson options for sanitizers:
+#   meson configure builddir -Db_sanitize=address        # AddressSanitizer (ASAN)
+#   meson configure builddir -Db_sanitize=undefined      # UndefinedBehaviorSanitizer (UBSAN)
+#   meson configure builddir -Db_sanitize=address,undefined  # Both ASAN + UBSAN
+#   meson configure builddir -Db_sanitize=thread         # ThreadSanitizer (TSAN)

@@ -90,5 +90,4 @@ CheckOptions:
     value: false
 
 HeaderFilterRegex: '.*'
-AnalyzeTemporaryDtors: true
 FormatStyle: file

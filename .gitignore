@@ -34,6 +34,14 @@ CTestTestfile.cmake
 *.clang-tidy.log
 cppcheck-build-dir/
 
+# Static analysis
+scan-results/
+build-scan/
+
+# Valgrind reports
+valgrind-report.txt
+valgrind-new-suppressions.txt
+
 # Documentation
 *.md~
 /packaging/archlinux/pkg/

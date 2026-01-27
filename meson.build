@@ -242,6 +242,9 @@ install_data(
   install_dir: get_option('datadir') / 'metainfo'
 )
 
+# All source files for static analysis
+all_sources = sources + shared_sources + util_sources + helper_sources + cli_sources
+
 # Optional: clang-tidy support
 clang_tidy = find_program('clang-tidy', required: false)
 if clang_tidy.found() and get_option('enable_clang_tidy')
@@ -252,7 +255,7 @@ if clang_tidy.found() and get_option('enable_clang_tidy')
       clang_tidy,
       '-p', meson.project_build_root(),
       '--header-filter=.*',
-      sources
+      all_sources
     ]
   )
 endif
@@ -272,6 +275,12 @@ if cppcheck.found() and get_option('enable_cppcheck')
       '--project=@0@/compile_commands.json'.format(meson.project_build_root()),
     ]
   )
+endif
+
+# Optional: Clang Static Analyzer (scan-build) support
+scan_build = find_program('scan-build', required: false)
+if scan_build.found()
+  message('scan-build found: @0@'.format(scan_build.full_path()))
 endif
 
 # ========== Testing Configuration ==========
@@ -343,14 +352,30 @@ message('  GTK4 Version: @0@'.format(gtk4_dep.version()))
 message('  gtkmm4 Version: @0@'.format(gtkmm_dep.version()))
 message('  Adwaita Version: @0@'.format(adwaita_dep.version()))
 message('  Install prefix: @0@'.format(get_option('prefix')))
+message('')
+message('Static Analysis Tools:')
 if clang_tidy.found()
-  message('  clang-tidy: enabled (run: meson compile -C builddir clang-tidy)')
+  message('  clang-tidy: found (run: just lint or just lint-parallel)')
 else
-  message('  clang-tidy: not found')
+  message('  clang-tidy: not found (install clang-tools-extra)')
 endif
 if cppcheck.found()
-  message('  cppcheck: enabled (run: meson compile -C builddir cppcheck)')
+  message('  cppcheck: found (run: just cppcheck)')
 else
-  message('  cppcheck: not found')
+  message('  cppcheck: not found (install cppcheck)')
 endif
+if scan_build.found()
+  message('  scan-build: found (run: just scan-build)')
+else
+  message('  scan-build: not found (install clang-analyzer)')
+endif
+message('')
+message('Memory Analysis:')
+valgrind = find_program('valgrind', required: false)
+if valgrind.found()
+  message('  valgrind: found (run: just valgrind)')
+else
+  message('  valgrind: not found (install valgrind)')
+endif
+message('  sanitizers: use just build-asan, build-ubsan, build-tsan')
 message('')
