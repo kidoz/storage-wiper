@@ -92,6 +92,29 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="1.3.1" date="2025-01-27">
+      <description>
+        <p>Performance improvements:</p>
+        <ul>
+          <li>Significantly faster disk list loading with parallel SMART queries</li>
+          <li>Optimized mount table parsing (single pass instead of multiple)</li>
+          <li>Added result caching with 500ms TTL for rapid UI updates</li>
+          <li>Reduced startup time for systems with many disks</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.3.0" date="2025-01-25">
+      <description>
+        <p>CLI and SMART health monitoring:</p>
+        <ul>
+          <li>New command-line interface (storage-wiper-cli) for scripted wiping</li>
+          <li>SMART health status indicator (Good/Warning/Critical)</li>
+          <li>Post-wipe verification support for zero-fill, random-fill, and DoD algorithms</li>
+          <li>JSON output mode for CLI disk listing</li>
+          <li>Arch Linux packaging with install hooks</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.2.0" date="2025-01-22">
       <description>
         <p>Desktop integration and UX improvements:</p>

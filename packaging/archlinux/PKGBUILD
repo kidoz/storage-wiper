@@ -1,7 +1,7 @@
 # Maintainer: Your Name <your.email@example.com>
 
 pkgname=storage-wiper
-pkgver=1.3.0
+pkgver=1.3.1
 pkgrel=1
 pkgdesc='Secure disk wiping tool with GTK4/libadwaita interface and DoD-compliant algorithms'
 arch=('x86_64')
