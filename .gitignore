@@ -47,3 +47,4 @@ valgrind-new-suppressions.txt
 /packaging/archlinux/pkg/
 /packaging/archlinux/src/
 /packaging/archlinux/storage-wiper/
+/packaging/archlinux/.SRCINFO

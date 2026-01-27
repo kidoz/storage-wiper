@@ -6,6 +6,7 @@
 #include "cli/CliApplication.hpp"
 
 #include "cli/ProgressDisplay.hpp"
+#include "config.h"
 #include "services/DBusClient.hpp"
 #include "util/Logger.hpp"
 
@@ -37,8 +38,7 @@ void signal_handler(int /*signal*/) {
     std::cerr << "\nCancellation requested..." << std::endl;
 }
 
-// Version info
-constexpr auto VERSION = "1.3.0";
+// Application name
 constexpr auto APP_NAME = "storage-wiper-cli";
 
 // Command line options
@@ -173,7 +173,7 @@ void CliApplication::print_help() {
 }
 
 void CliApplication::print_version() {
-    std::cout << APP_NAME << " version " << VERSION << "\n"
+    std::cout << APP_NAME << " version " << PROJECT_VERSION << "\n"
               << "Part of Storage Wiper - Secure disk wiping tool\n";
 }
 
