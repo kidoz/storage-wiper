@@ -92,6 +92,19 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="1.3.2" date="2025-01-27">
+      <description>
+        <p>Code quality and developer tooling improvements:</p>
+        <ul>
+          <li>Consistent logging with structured Logger utility (ISO 8601 timestamps, log levels)</li>
+          <li>Optimized algorithm lookup from O(n) to O(1) using hash map</li>
+          <li>Refactored WipeService to eliminate code duplication</li>
+          <li>Added Clang Static Analyzer (scan-build) support</li>
+          <li>Added Valgrind memory leak detection with suppressions</li>
+          <li>Added sanitizer builds (ASAN, UBSAN, TSAN) for runtime checks</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.3.1" date="2025-01-27">
       <description>
         <p>Performance improvements:</p>
