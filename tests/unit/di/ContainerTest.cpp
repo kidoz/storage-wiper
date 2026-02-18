@@ -215,3 +215,8 @@ TEST(ServiceLocatorTest, Singleton_ReturnsSameInstance) {
 
     di::ServiceLocator::reset();
 }
+
+// Test: verify Lifetime enum size optimization
+TEST_F(ContainerTest, LifetimeEnum_IsOneByte) {
+    EXPECT_EQ(sizeof(di::Lifetime), 1);
+}

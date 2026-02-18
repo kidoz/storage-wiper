@@ -6,7 +6,8 @@
  * the view, viewmodel, and service layers using dependency injection.
  */
 
-#pragma once
+#ifndef STORAGE_WIPER_APPLICATION_HPP
+#define STORAGE_WIPER_APPLICATION_HPP
 
 #include "di/Container.hpp"
 
@@ -65,3 +66,5 @@ private:
     // D-Bus client (kept for lifetime management)
     std::shared_ptr<DBusClient> dbus_client_;
 };
+
+#endif // STORAGE_WIPER_APPLICATION_HPP

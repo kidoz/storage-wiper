@@ -6,9 +6,11 @@
  * Supports singleton and transient lifetimes with interface-based resolution.
  */
 
-#pragma once
+#ifndef STORAGE_WIPER_DI_CONTAINER_HPP
+#define STORAGE_WIPER_DI_CONTAINER_HPP
 
 #include <any>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -22,7 +24,7 @@ namespace di {
  * @enum Lifetime
  * @brief Specifies the lifetime of a registered service
  */
-enum class Lifetime {
+enum class Lifetime : std::uint8_t {
     SINGLETON,  ///< Single instance shared across all resolutions
     TRANSIENT   ///< New instance created on each resolution
 };
@@ -73,7 +75,7 @@ public:
             return std::make_shared<Implementation>();
         };
 
-        std::lock_guard lock(mutex_);
+        std::scoped_lock lock(mutex_);
         registrations_[std::type_index(typeid(Interface))] =
             Registration{.factory = [factory]() -> std::any { return factory(); },
                          .lifetime = lifetime,
@@ -97,7 +99,7 @@ public:
     template <typename Interface>
     void register_factory(std::function<std::shared_ptr<Interface>()> factory,
                           Lifetime lifetime = Lifetime::SINGLETON) {
-        std::lock_guard lock(mutex_);
+        std::scoped_lock lock(mutex_);
         registrations_[std::type_index(typeid(Interface))] =
             Registration{.factory = [factory]() -> std::any { return factory(); },
                          .lifetime = lifetime,
@@ -117,7 +119,7 @@ public:
      */
     template <typename Interface>
     void register_instance(std::shared_ptr<Interface> instance) {
-        std::lock_guard lock(mutex_);
+        std::scoped_lock lock(mutex_);
         registrations_[std::type_index(typeid(Interface))] =
             Registration{.factory = nullptr, .lifetime = Lifetime::SINGLETON, .instance = instance};
     }
@@ -135,7 +137,7 @@ public:
      */
     template <typename Interface>
     [[nodiscard]] auto resolve() -> std::shared_ptr<Interface> {
-        std::lock_guard lock(mutex_);
+        std::scoped_lock lock(mutex_);
 
         auto type_id = std::type_index(typeid(Interface));
         auto it = registrations_.find(type_id);
@@ -175,7 +177,7 @@ public:
      */
     template <typename Interface>
     [[nodiscard]] auto is_registered() const -> bool {
-        std::lock_guard lock(mutex_);
+        std::scoped_lock lock(mutex_);
         return registrations_.contains(std::type_index(typeid(Interface)));
     }
 
@@ -183,7 +185,7 @@ public:
      * @brief Clear all registrations and cached instances
      */
     void clear() {
-        std::lock_guard lock(mutex_);
+        std::scoped_lock lock(mutex_);
         registrations_.clear();
     }
 
@@ -192,7 +194,7 @@ public:
      * @return Number of registered types
      */
     [[nodiscard]] auto size() const -> size_t {
-        std::lock_guard lock(mutex_);
+        std::scoped_lock lock(mutex_);
         return registrations_.size();
     }
 
@@ -263,3 +265,5 @@ public:
 };
 
 }  // namespace di
+
+#endif // STORAGE_WIPER_DI_CONTAINER_HPP

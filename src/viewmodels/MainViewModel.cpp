@@ -1,9 +1,8 @@
 #include "viewmodels/MainViewModel.hpp"
 
-#include <glib.h>
+#include <glibmm/main.h>
 
 #include <algorithm>
-#include <iostream>
 #include <sstream>
 #include <utility>
 
@@ -78,30 +77,38 @@ void MainViewModel::load_disks() {
         return;
     }
 
-    try {
-        auto disk_list = disk_service_->get_available_disks();
-        disks.set(disk_list);
+    auto weak_self = weak_from_this();
+    disk_service_->get_available_disks(
+        [weak_self](std::expected<std::vector<DiskInfo>, util::Error> result) {
+            // Schedule update on main thread
+            Glib::signal_idle().connect([weak_self, result = std::move(result)]() {
+                if (auto vm = weak_self.lock()) {
+                    if (result) {
+                        vm->disks.set(*result);
 
-        // Clear selection if previously selected disk is no longer available
-        const auto& current_selection = selected_disk_path.get();
-        if (!current_selection.empty()) {
-            bool found = false;
-            for (const auto& disk : disk_list) {
-                if (disk.path == current_selection) {
-                    found = true;
-                    break;
+                        // Clear selection if previously selected disk is no longer available
+                        const auto& current_selection = vm->selected_disk_path.get();
+                        if (!current_selection.empty()) {
+                            bool found = false;
+                            for (const auto& disk : *result) {
+                                if (disk.path == current_selection) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (!found) {
+                                vm->selected_disk_path.set("");
+                            }
+                        }
+                        vm->update_can_wipe();
+                    } else {
+                        vm->show_message(MessageInfo::Type::ERROR, "Error",
+                                         "Failed to refresh disk list: " + result.error().message);
+                    }
                 }
-            }
-            if (!found) {
-                selected_disk_path.set("");
-            }
-        }
-
-        update_can_wipe();
-    } catch (const std::exception& e) {
-        show_message(MessageInfo::Type::ERROR, "Error",
-                     "Failed to refresh disk list: " + std::string(e.what()));
-    }
+                return false;  // G_SOURCE_REMOVE
+            });
+        });
 }
 
 void MainViewModel::load_algorithms() {
@@ -259,46 +266,25 @@ void MainViewModel::unmount_and_wipe(const std::string& path) {
 }
 
 void MainViewModel::handle_wipe_progress(const WipeProgress& progress) {
-    // Schedule UI update on main thread using g_idle_add_full with destroy notify
-    // to prevent memory leaks if the idle source is removed before execution
+    // Schedule UI update on main thread using Glib::signal_idle
     auto weak_self = weak_from_this();
-    auto* data = new std::pair<std::weak_ptr<MainViewModel>, WipeProgress*>(
-        weak_self, new WipeProgress(progress));
+    Glib::signal_idle().connect([weak_self, progress]() {
+        if (auto vm = weak_self.lock()) {
+            vm->wipe_progress.set(progress);
 
-    g_idle_add_full(
-        G_PRIORITY_DEFAULT_IDLE,
-        [](gpointer user_data) -> gboolean {
-            auto* args =
-                static_cast<std::pair<std::weak_ptr<MainViewModel>, WipeProgress*>*>(user_data);
-            auto vm = args->first.lock();
-
-            if (!vm) {
-                return G_SOURCE_REMOVE;
-            }
-
-            vm->wipe_progress.set(*args->second);
-
-            if (args->second->is_complete) {
+            if (progress.is_complete) {
                 vm->is_wipe_in_progress.set(false);
                 vm->update_can_wipe();
 
-                if (args->second->has_error) {
-                    vm->handle_wipe_completion(false, args->second->error_message);
+                if (progress.has_error) {
+                    vm->handle_wipe_completion(false, progress.error_message);
                 } else {
                     vm->handle_wipe_completion(true);
                 }
             }
-
-            return G_SOURCE_REMOVE;
-        },
-        data,
-        [](gpointer user_data) {
-            // Destroy notify - called when source is removed
-            auto* args =
-                static_cast<std::pair<std::weak_ptr<MainViewModel>, WipeProgress*>*>(user_data);
-            delete args->second;
-            delete args;
-        });
+        }
+        return false; // G_SOURCE_REMOVE
+    });
 }
 
 void MainViewModel::handle_wipe_completion(bool success, const std::string& error_message) {

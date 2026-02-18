@@ -65,7 +65,7 @@ TEST_F(ZeroFillAlgorithmTest, Execute_CallsProgressCallback) {
     constexpr uint64_t test_size = 4'096;
 
     // Start reader thread to consume pipe data
-    std::thread reader([this, test_size]() {
+    std::thread reader([this]() {
         std::vector<uint8_t> buffer(test_size);
         size_t total_read = 0;
         while (total_read < test_size) {
@@ -98,7 +98,7 @@ TEST_F(ZeroFillAlgorithmTest, Execute_CallsProgressCallback) {
 TEST_F(ZeroFillAlgorithmTest, Execute_NullCallback_DoesNotCrash) {
     constexpr uint64_t test_size = 1'024;
 
-    std::thread reader([this, test_size]() {
+    std::thread reader([this]() {
         std::vector<uint8_t> buffer(test_size);
         read(pipe_fds[0], buffer.data(), test_size);
     });
@@ -145,7 +145,7 @@ TEST_F(ZeroFillAlgorithmTest, Execute_WritesOnlyZeros) {
     std::vector<uint8_t> read_buffer(test_size, 0xFF);  // Pre-fill with non-zeros
 
     // Reader thread captures data
-    std::thread reader([this, &read_buffer, test_size]() {
+    std::thread reader([this, &read_buffer]() {
         size_t total_read = 0;
         while (total_read < test_size) {
             ssize_t n = read(pipe_fds[0], read_buffer.data() + total_read, test_size - total_read);
@@ -168,7 +168,7 @@ TEST_F(ZeroFillAlgorithmTest, Execute_WritesOnlyZeros) {
 TEST_F(ZeroFillAlgorithmTest, Execute_ProgressReaches100OnCompletion) {
     constexpr uint64_t test_size = 2'048;
 
-    std::thread reader([this, test_size]() {
+    std::thread reader([this]() {
         std::vector<uint8_t> buffer(test_size);
         size_t total_read = 0;
         while (total_read < test_size) {

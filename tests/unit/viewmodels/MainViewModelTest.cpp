@@ -17,11 +17,11 @@ using ::testing::Return;
 
 class MainViewModelTest : public ViewModelTestFixture {
 protected:
-    std::unique_ptr<MainViewModel> view_model;
+    std::shared_ptr<MainViewModel> view_model;
 
     void SetUp() override {
         ViewModelTestFixture::SetUp();
-        view_model = std::make_unique<MainViewModel>(mock_disk_service, mock_wipe_service);
+        view_model = std::make_shared<MainViewModel>(mock_disk_service, mock_wipe_service);
     }
 
     void TearDown() override {
@@ -30,7 +30,10 @@ protected:
     }
 
     // Helper to simulate connected state (required for disk loading)
-    void SimulateConnected() { view_model->set_connection_state(true, ""); }
+    void SimulateConnected() {
+        view_model->set_connection_state(true, "");
+        PumpMainLoop();
+    }
 };
 
 // Test: initialization creates valid view model
@@ -44,7 +47,8 @@ TEST_F(MainViewModelTest, Initialize_LoadsDisks) {
                                         MockDiskService::CreateTestDisk("/dev/sdb")};
 
     // set_connection_state(true) will call load_disks()
-    EXPECT_CALL(*mock_disk_service, get_available_disks()).WillOnce(Return(test_disks));
+    EXPECT_CALL(*mock_disk_service, get_available_disks(testing::_))
+        .WillOnce(Invoke([test_disks](auto callback) { callback(test_disks); }));
 
     view_model->initialize();  // Won't load disks since not connected
     SimulateConnected();       // This triggers load_disks()
@@ -54,8 +58,8 @@ TEST_F(MainViewModelTest, Initialize_LoadsDisks) {
 
 // Test: initialize with empty disk list when connected
 TEST_F(MainViewModelTest, Initialize_HandlesEmptyDiskList) {
-    EXPECT_CALL(*mock_disk_service, get_available_disks())
-        .WillOnce(Return(std::vector<DiskInfo>{}));
+    EXPECT_CALL(*mock_disk_service, get_available_disks(testing::_))
+        .WillOnce(Invoke([](auto callback) { callback(std::vector<DiskInfo>{}); }));
 
     view_model->initialize();
     SimulateConnected();
@@ -65,8 +69,8 @@ TEST_F(MainViewModelTest, Initialize_HandlesEmptyDiskList) {
 
 // Test: select_disk updates selected_disk_path
 TEST_F(MainViewModelTest, SelectDisk_UpdatesSelectedPath) {
-    EXPECT_CALL(*mock_disk_service, get_available_disks())
-        .WillOnce(Return(std::vector<DiskInfo>{}));
+    EXPECT_CALL(*mock_disk_service, get_available_disks(testing::_))
+        .WillOnce(Invoke([](auto callback) { callback(std::vector<DiskInfo>{}); }));
 
     view_model->initialize();
     SimulateConnected();
@@ -126,9 +130,9 @@ TEST_F(MainViewModelTest, Observable_MultipleSubscribers) {
 
 // Test: refresh_command calls load_disks when connected
 TEST_F(MainViewModelTest, RefreshCommand_ReloadsDisks) {
-    EXPECT_CALL(*mock_disk_service, get_available_disks())
+    EXPECT_CALL(*mock_disk_service, get_available_disks(testing::_))
         .Times(2)  // Once for SimulateConnected, once for refresh
-        .WillRepeatedly(Return(std::vector<DiskInfo>{}));
+        .WillRepeatedly(Invoke([](auto callback) { callback(std::vector<DiskInfo>{}); }));
 
     view_model->initialize();
     SimulateConnected();
@@ -144,8 +148,8 @@ TEST_F(MainViewModelTest, Commands_AreNotNull) {
 
 // Test: refresh_command can execute when connected
 TEST_F(MainViewModelTest, RefreshCommand_CanAlwaysExecute) {
-    EXPECT_CALL(*mock_disk_service, get_available_disks())
-        .WillOnce(Return(std::vector<DiskInfo>{}));
+    EXPECT_CALL(*mock_disk_service, get_available_disks(testing::_))
+        .WillOnce(Invoke([](auto callback) { callback(std::vector<DiskInfo>{}); }));
 
     view_model->initialize();
     SimulateConnected();
@@ -155,8 +159,8 @@ TEST_F(MainViewModelTest, RefreshCommand_CanAlwaysExecute) {
 
 // Test: wipe_command disabled when no selection
 TEST_F(MainViewModelTest, WipeCommand_DisabledWithoutSelection) {
-    EXPECT_CALL(*mock_disk_service, get_available_disks())
-        .WillOnce(Return(std::vector<DiskInfo>{}));
+    EXPECT_CALL(*mock_disk_service, get_available_disks(testing::_))
+        .WillOnce(Invoke([](auto callback) { callback(std::vector<DiskInfo>{}); }));
 
     view_model->initialize();
     SimulateConnected();
@@ -167,8 +171,8 @@ TEST_F(MainViewModelTest, WipeCommand_DisabledWithoutSelection) {
 
 // Test: cancel_command disabled when not wiping
 TEST_F(MainViewModelTest, CancelCommand_DisabledWhenNotWiping) {
-    EXPECT_CALL(*mock_disk_service, get_available_disks())
-        .WillOnce(Return(std::vector<DiskInfo>{}));
+    EXPECT_CALL(*mock_disk_service, get_available_disks(testing::_))
+        .WillOnce(Invoke([](auto callback) { callback(std::vector<DiskInfo>{}); }));
 
     view_model->initialize();
     SimulateConnected();
@@ -178,8 +182,8 @@ TEST_F(MainViewModelTest, CancelCommand_DisabledWhenNotWiping) {
 
 // Test: cancel_command enabled during wipe
 TEST_F(MainViewModelTest, CancelCommand_EnabledDuringWipe) {
-    EXPECT_CALL(*mock_disk_service, get_available_disks())
-        .WillOnce(Return(std::vector<DiskInfo>{}));
+    EXPECT_CALL(*mock_disk_service, get_available_disks(testing::_))
+        .WillOnce(Invoke([](auto callback) { callback(std::vector<DiskInfo>{}); }));
 
     view_model->initialize();
     SimulateConnected();
@@ -190,8 +194,8 @@ TEST_F(MainViewModelTest, CancelCommand_EnabledDuringWipe) {
 
 // Test: algorithms observable is populated
 TEST_F(MainViewModelTest, Algorithms_ArePopulated) {
-    EXPECT_CALL(*mock_disk_service, get_available_disks())
-        .WillOnce(Return(std::vector<DiskInfo>{}));
+    EXPECT_CALL(*mock_disk_service, get_available_disks(testing::_))
+        .WillOnce(Invoke([](auto callback) { callback(std::vector<DiskInfo>{}); }));
 
     view_model->initialize();
     SimulateConnected();
@@ -204,9 +208,10 @@ TEST_F(MainViewModelTest, Algorithms_ArePopulated) {
 TEST_F(MainViewModelTest, LoadDisks_ClearsInvalidSelection) {
     auto disk = MockDiskService::CreateTestDisk("/dev/sda");
 
-    EXPECT_CALL(*mock_disk_service, get_available_disks())
-        .WillOnce(Return(std::vector<DiskInfo>{disk}))
-        .WillOnce(Return(std::vector<DiskInfo>{}));  // Disk removed
+    EXPECT_CALL(*mock_disk_service, get_available_disks(testing::_))
+        .WillOnce(Invoke([disk](auto callback) { callback(std::vector<DiskInfo>{disk}); }))
+        .WillOnce(
+            Invoke([](auto callback) { callback(std::vector<DiskInfo>{}); }));  // Disk removed
 
     view_model->initialize();
     SimulateConnected();  // First load - disk exists
@@ -215,6 +220,7 @@ TEST_F(MainViewModelTest, LoadDisks_ClearsInvalidSelection) {
 
     // Simulate refresh after disk removal
     view_model->refresh_command->execute();
+    PumpMainLoop();
 
     EXPECT_EQ(view_model->selected_disk_path.get(), "");
 }

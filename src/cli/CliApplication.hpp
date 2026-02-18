@@ -7,7 +7,9 @@
 
 #include "models/DiskInfo.hpp"
 #include "models/WipeTypes.hpp"
+#include "util/Result.hpp"
 
+#include <expected>
 #include <memory>
 #include <optional>
 #include <string>
@@ -130,6 +132,12 @@ private:
      * @brief Print disk list as table
      */
     void print_disks_table(const std::vector<DiskInfo>& disks);
+
+    /**
+     * @brief Helper to get disks synchronously by pumping the main loop
+     */
+    [[nodiscard]] auto get_disks_blocking()
+        -> std::expected<std::vector<DiskInfo>, util::Error>;
 
     std::unique_ptr<DBusClient> client_;
 };

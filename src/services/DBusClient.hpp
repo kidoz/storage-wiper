@@ -93,7 +93,10 @@ public:
     [[nodiscard]] auto is_service_available() const -> bool;
 
     // IDiskService interface
-    [[nodiscard]] auto get_available_disks() -> std::vector<DiskInfo> override;
+    void get_available_disks(
+        std::function<void(std::expected<std::vector<DiskInfo>, util::Error>)> callback) override;
+    [[nodiscard]] auto get_available_disks_blocking()
+        -> std::expected<std::vector<DiskInfo>, util::Error> override;
     [[nodiscard]] auto validate_device_path(const std::string& path)
         -> std::expected<void, util::Error> override;
     [[nodiscard]] auto is_disk_writable(const std::string& path) -> bool override;

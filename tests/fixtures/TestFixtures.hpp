@@ -10,6 +10,7 @@
 #include "mocks/MockWipeAlgorithm.hpp"
 #include "mocks/MockWipeService.hpp"
 
+#include <glibmm.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -55,8 +56,9 @@ protected:
 
     virtual void SetupDefaultExpectations() {
         // Default: empty disk list
-        ON_CALL(*mock_disk_service, get_available_disks())
-            .WillByDefault(testing::Return(std::vector<DiskInfo>{}));
+        ON_CALL(*mock_disk_service, get_available_disks(testing::_))
+            .WillByDefault(testing::Invoke(
+                [](auto callback) { callback(std::vector<DiskInfo>{}); }));
 
         // Default: validation passes
         ON_CALL(*mock_disk_service, validate_device_path(testing::_))
@@ -74,6 +76,14 @@ protected:
         ON_CALL(*mock_wipe_service, get_pass_count(testing::_)).WillByDefault(testing::Return(1));
         ON_CALL(*mock_wipe_service, is_ssd_compatible(testing::_))
             .WillByDefault(testing::Return(true));
+    }
+
+    void PumpMainLoop() {
+        // Dispatch all pending idle handlers
+        auto context = Glib::MainContext::get_default();
+        while (context->pending()) {
+            context->iteration(false);
+        }
     }
 
     void TearDown() override {

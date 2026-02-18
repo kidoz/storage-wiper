@@ -10,16 +10,13 @@
 #include "services/DBusClient.hpp"
 #include "util/Logger.hpp"
 
-#include <gio/gio.h>
-
-#include <unistd.h>
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
 #include <filesystem>
 #include <format>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <thread>
@@ -182,8 +179,33 @@ auto CliApplication::connect() -> bool {
     return client_->connect();
 }
 
+auto CliApplication::get_disks_blocking() -> std::expected<std::vector<DiskInfo>, util::Error> {
+    std::promise<std::expected<std::vector<DiskInfo>, util::Error>> promise;
+    auto future = promise.get_future();
+
+    client_->get_available_disks([&promise](auto result) { promise.set_value(result); });
+
+    auto* main_context = g_main_context_default();
+    while (future.wait_for(std::chrono::milliseconds(10)) != std::future_status::ready) {
+        g_main_context_iteration(main_context, TRUE);
+    }
+
+    return future.get();
+}
+
 auto CliApplication::cmd_list(bool json) -> int {
-    auto disks = client_->get_available_disks();
+    auto disks_res = get_disks_blocking();
+
+    if (!disks_res) {
+        if (json) {
+            std::cout << "[]\n";
+        } else {
+            std::cerr << "Error listing disks: " << disks_res.error().message << "\n";
+        }
+        return 1;
+    }
+
+    const auto& disks = *disks_res;
 
     if (disks.empty()) {
         if (json) {
@@ -223,7 +245,13 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
     }
 
     // Get disk info
-    auto disks = client_->get_available_disks();
+    auto disks_res = get_disks_blocking();
+    if (!disks_res) {
+        std::cerr << "Error getting disk info: " << disks_res.error().message << "\n";
+        return 1;
+    }
+    const auto& disks = *disks_res;
+
     auto disk_it = std::find_if(disks.begin(), disks.end(),
                                 [&](const DiskInfo& d) { return d.path == options.device_path; });
 

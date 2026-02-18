@@ -1,12 +1,12 @@
 #include "algorithms/GutmannAlgorithm.hpp"
 
 #include "models/WipeTypes.hpp"
+#include "util/RandomBuffer.hpp"
 #include "util/WriteHelpers.hpp"
 
 #include <unistd.h>
 
 #include <algorithm>
-#include <random>
 #include <string>
 #include <vector>
 
@@ -18,35 +18,20 @@ bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
     }
 
     // Gutmann 35-pass algorithm (Simplified Modern Implementation)
-    //
-    // NOTE: This is a simplified implementation suitable for modern drives.
-    // The original Gutmann method (1996) specified 22 specific patterns designed
-    // for MFM/RLL encoded drives from the 1980s-1990s. Modern drives no longer
-    // use these encoding schemes, making the specific patterns unnecessary.
-    //
-    // Peter Gutmann himself has stated that the full 35-pass with MFM/RLL patterns
-    // is overkill for modern drives and that even a single pass is often sufficient
-    // for current hardware due to increased track density.
-    //
-    // This implementation maintains the 35-pass structure (4 random + 27 patterns + 4 random)
-    // but uses simplified patterns appropriate for modern drive technology.
-    //
+    // The original 1996 method specified patterns for MFM/RLL encoded drives.
+    // Modern drives no longer use these encodings, so simplified patterns suffice.
+    // Structure: 4 random + 27 pattern + 4 random = 35 passes.
     // Reference: "Secure Deletion of Data from Magnetic and Solid-State Memory"
     // by Peter Gutmann, 1996
 
     std::vector<uint8_t> buffer(BUFFER_SIZE);
-    std::random_device random_device;
-    std::mt19937 random_generator(random_device());
-    std::uniform_int_distribution<uint8_t> byte_distribution(0, 255);
 
     // Passes 1-4: Random data
     for (int pass = 1; pass <= 4; ++pass) {
         uint64_t written = 0;
 
         while (written < size && !cancel_flag.load()) {
-            for (auto& byte : buffer) {
-                byte = byte_distribution(random_generator);
-            }
+            util::RandomBufferGenerator::fill(buffer);
 
             size_t to_write = std::min(static_cast<uint64_t>(BUFFER_SIZE), size - written);
             ssize_t result = util::write_with_retry(fd, buffer.data(), to_write);
@@ -98,9 +83,7 @@ bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
         uint64_t written = 0;
 
         while (written < size && !cancel_flag.load()) {
-            for (auto& byte : buffer) {
-                byte = byte_distribution(random_generator);
-            }
+            util::RandomBufferGenerator::fill(buffer);
 
             size_t to_write = std::min(static_cast<uint64_t>(BUFFER_SIZE), size - written);
             ssize_t result = util::write_with_retry(fd, buffer.data(), to_write);

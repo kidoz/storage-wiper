@@ -16,7 +16,12 @@ inline auto validate_wipe_target(IDiskService& disk_service, const std::string& 
         return std::unexpected(valid.error());
     }
 
-    auto disks = disk_service.get_available_disks();
+    auto disks_res = disk_service.get_available_disks_blocking();
+    if (!disks_res) {
+        return std::unexpected(disks_res.error());
+    }
+    const auto& disks = *disks_res;
+
     auto it = std::find_if(disks.begin(), disks.end(),
                            [&path](const DiskInfo& disk) { return disk.path == path; });
     if (it == disks.end()) {

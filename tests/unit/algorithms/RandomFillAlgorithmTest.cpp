@@ -67,7 +67,7 @@ TEST_F(RandomFillAlgorithmTest, Execute_WritesRandomData) {
     std::vector<uint8_t> read_buffer(test_size, 0);
 
     // Reader thread captures data
-    std::thread reader([this, &read_buffer, test_size]() {
+    std::thread reader([this, &read_buffer]() {
         size_t total_read = 0;
         while (total_read < test_size) {
             ssize_t n = read(pipe_fds[0], read_buffer.data() + total_read, test_size - total_read);
@@ -92,7 +92,7 @@ TEST_F(RandomFillAlgorithmTest, Execute_WritesRandomData) {
 TEST_F(RandomFillAlgorithmTest, Execute_CallsProgressCallback) {
     constexpr uint64_t test_size = 4'096;
 
-    std::thread reader([this, test_size]() {
+    std::thread reader([this]() {
         std::vector<uint8_t> buffer(test_size);
         size_t total_read = 0;
         while (total_read < test_size) {
@@ -156,7 +156,7 @@ TEST_F(RandomFillAlgorithmTest, Execute_ProducesDifferentDataEachTime) {
         int fds1[2];
         ASSERT_EQ(pipe(fds1), 0);
 
-        std::thread reader([&fds1, &buffer1, test_size]() {
+        std::thread reader([&fds1, &buffer1]() {
             size_t total = 0;
             while (total < test_size) {
                 ssize_t n = read(fds1[0], buffer1.data() + total, test_size - total);
@@ -180,7 +180,7 @@ TEST_F(RandomFillAlgorithmTest, Execute_ProducesDifferentDataEachTime) {
         int fds2[2];
         ASSERT_EQ(pipe(fds2), 0);
 
-        std::thread reader([&fds2, &buffer2, test_size]() {
+        std::thread reader([&fds2, &buffer2]() {
             size_t total = 0;
             while (total < test_size) {
                 ssize_t n = read(fds2[0], buffer2.data() + total, test_size - total);

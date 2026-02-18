@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -30,10 +31,18 @@ public:
     virtual ~IDiskService() = default;
 
     /**
-     * @brief Get list of available storage devices
-     * @return Vector of DiskInfo structures
+     * @brief Get list of available storage devices asynchronously
+     * @param callback Function called with the result (vector of DiskInfo or error)
      */
-    [[nodiscard]] virtual auto get_available_disks() -> std::vector<DiskInfo> = 0;
+    virtual void get_available_disks(
+        std::function<void(std::expected<std::vector<DiskInfo>, util::Error>)> callback) = 0;
+
+    /**
+     * @brief Get list of available storage devices synchronously (blocking)
+     * @return Vector of DiskInfo structures or error
+     */
+    [[nodiscard]] virtual auto get_available_disks_blocking()
+        -> std::expected<std::vector<DiskInfo>, util::Error> = 0;
 
     /**
      * @brief Safely unmount a disk

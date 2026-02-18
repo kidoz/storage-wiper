@@ -23,7 +23,6 @@
 #include <format>
 #include <memory>
 #include <string>
-#include <thread>
 
 #include <polkit/polkit.h>
 
@@ -224,7 +223,7 @@ void handle_get_disks(GDBusMethodInvocation* invocation) {
         return;
     }
 
-    auto disks = g_disk_service->get_available_disks();
+    auto disks = g_disk_service->get_available_disks_sync();
 
     GVariantBuilder builder;
     g_variant_builder_init(&builder, G_VARIANT_TYPE("a(sssxbbsbsu)"));

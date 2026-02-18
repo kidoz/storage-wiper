@@ -325,7 +325,7 @@ if get_option('enable_tests')
     shared_sources,
     test_extra_sources,
     include_directories: test_inc,
-    dependencies: [gtest_dep, gmock_dep, gio_dep],
+    dependencies: [gtest_dep, gmock_dep, gio_dep, gtkmm_dep],
     cpp_args: ['-DUNIT_TESTING'],
     install: false
   )

@@ -11,7 +11,11 @@
 
 class MockDiskService : public IDiskService {
 public:
-    MOCK_METHOD(std::vector<DiskInfo>, get_available_disks, (), (override));
+    MOCK_METHOD(void, get_available_disks,
+                (std::function<void(std::expected<std::vector<DiskInfo>, util::Error>)>),
+                (override));
+    MOCK_METHOD((std::expected<std::vector<DiskInfo>, util::Error>), get_available_disks_blocking,
+                (), (override));
     MOCK_METHOD((std::expected<void, util::Error>), unmount_disk, (const std::string& path),
                 (override));
     MOCK_METHOD(bool, is_disk_writable, (const std::string& path), (override));
@@ -32,7 +36,9 @@ public:
         ON_CALL(*mock, is_disk_writable(testing::_)).WillByDefault(testing::Return(true));
 
         // Default: empty disk list
-        ON_CALL(*mock, get_available_disks())
+        ON_CALL(*mock, get_available_disks(testing::_))
+            .WillByDefault([](auto callback) { callback(std::vector<DiskInfo>{}); });
+        ON_CALL(*mock, get_available_disks_blocking())
             .WillByDefault(testing::Return(std::vector<DiskInfo>{}));
 
         return mock;

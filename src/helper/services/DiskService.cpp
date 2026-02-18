@@ -122,7 +122,7 @@ void DiskService::invalidate_cache() {
     cache_timestamp_ = {};
 }
 
-auto DiskService::get_available_disks() -> std::vector<DiskInfo> {
+auto DiskService::get_available_disks_sync() -> std::vector<DiskInfo> {
     // Check cache first (with TTL)
     {
         std::lock_guard lock{cache_mutex_};
@@ -223,6 +223,18 @@ auto DiskService::get_available_disks() -> std::vector<DiskInfo> {
     }
 
     return disks;
+}
+
+auto DiskService::get_available_disks_blocking()
+    -> std::expected<std::vector<DiskInfo>, util::Error> {
+    return get_available_disks_sync();
+}
+
+void DiskService::get_available_disks(
+    std::function<void(std::expected<std::vector<DiskInfo>, util::Error>)> callback) {
+    if (callback) {
+        callback(get_available_disks_sync());
+    }
 }
 
 auto DiskService::parse_mount_table() -> MountCache {

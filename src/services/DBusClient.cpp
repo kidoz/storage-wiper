@@ -8,6 +8,7 @@
 #include "util/Logger.hpp"
 
 #include <format>
+#include <future>
 
 namespace {
 constexpr auto DBUS_NAME = "su.kidoz.storage_wiper.Helper";
@@ -410,76 +411,104 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/, const gchar
     }
 }
 
-auto DBusClient::get_available_disks() -> std::vector<DiskInfo> {
+void DBusClient::get_available_disks(
+    std::function<void(std::expected<std::vector<DiskInfo>, util::Error>)> callback) {
     GDBusProxy* proxy_copy = nullptr;
     {
         std::lock_guard lock(proxy_mutex_);
-        if (!proxy_)
-            return {};
-        proxy_copy = proxy_;
-    }
-
-    GError* error = nullptr;
-    GVariant* result = g_dbus_proxy_call_sync(proxy_copy, "GetDisks",
-                                              nullptr,  // no parameters
-                                              G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS,
-                                              nullptr,  // cancellable
-                                              &error);
-
-    if (!result) {
-        LOG_ERROR("DBusClient",
-                  std::format("GetDisks failed: {}", error ? error->message : "unknown"));
-        g_clear_error(&error);
-        return {};
-    }
-
-    std::vector<DiskInfo> disks;
-
-    GVariant* array = g_variant_get_child_value(result, 0);
-    GVariantIter iter;
-    g_variant_iter_init(&iter, array);
-
-    const gchar* path = nullptr;
-    const gchar* model = nullptr;
-    const gchar* serial = nullptr;
-    gint64 size_bytes = 0;
-    gboolean is_removable = FALSE;
-    gboolean is_ssd = FALSE;
-    const gchar* filesystem = nullptr;
-    gboolean is_mounted = FALSE;
-    const gchar* mount_point = nullptr;
-    guint32 smart_status = 0;
-
-    while (g_variant_iter_next(&iter, "(&s&s&sxbb&sb&su)", &path, &model, &serial, &size_bytes,
-                               &is_removable, &is_ssd, &filesystem, &is_mounted, &mount_point,
-                               &smart_status)) {
-        // Validate required string fields - path is required, others can be empty
-        if (!path) {
-            LOG_WARNING("DBusClient", "Skipping disk with null path from helper");
-            continue;
+        if (!proxy_) {
+            callback(std::unexpected(util::Error{"Not connected"}));
+            return;
         }
-
-        SmartData smart;
-        smart.status = static_cast<SmartData::HealthStatus>(smart_status);
-        smart.available = (smart_status != 0);  // 0 = UNKNOWN means not available
-
-        disks.push_back(DiskInfo{.path = path,
-                                 .model = model ? model : "",
-                                 .serial = serial ? serial : "",
-                                 .size_bytes = static_cast<uint64_t>(size_bytes),
-                                 .is_removable = is_removable != FALSE,
-                                 .is_ssd = is_ssd != FALSE,
-                                 .filesystem = filesystem ? filesystem : "",
-                                 .is_mounted = is_mounted != FALSE,
-                                 .mount_point = mount_point ? mount_point : "",
-                                 .is_lvm_pv = false,  // Not transmitted via D-Bus currently
-                                 .smart = smart});
+        proxy_copy = proxy_;
+        g_object_ref(proxy_copy);  // Increment ref count for the async operation
     }
 
-    g_variant_unref(array);
-    g_variant_unref(result);
+    // Move callback to heap to pass to C callback
+    auto* cb_ptr =
+        new std::function<void(std::expected<std::vector<DiskInfo>, util::Error>)>(
+            std::move(callback));
 
-    return disks;
+    g_dbus_proxy_call(
+        proxy_copy, "GetDisks", nullptr, G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr,
+        [](GObject* source_object, GAsyncResult* res, gpointer user_data) {
+            auto* proxy = G_DBUS_PROXY(source_object);
+            auto* cb =
+                static_cast<std::function<void(std::expected<std::vector<DiskInfo>, util::Error>)>*>(
+                    user_data);
+
+            GError* error = nullptr;
+            GVariant* result = g_dbus_proxy_call_finish(proxy, res, &error);
+
+            if (!result) {
+                (*cb)(std::unexpected(util::Error{error ? error->message : "Unknown error"}));
+                g_clear_error(&error);
+            } else {
+                std::vector<DiskInfo> disks;
+                GVariant* array = g_variant_get_child_value(result, 0);
+                GVariantIter iter;
+                g_variant_iter_init(&iter, array);
+
+                const gchar* path = nullptr;
+                const gchar* model = nullptr;
+                const gchar* serial = nullptr;
+                gint64 size_bytes = 0;
+                gboolean is_removable = FALSE;
+                gboolean is_ssd = FALSE;
+                const gchar* filesystem = nullptr;
+                gboolean is_mounted = FALSE;
+                const gchar* mount_point = nullptr;
+                guint32 smart_status = 0;
+
+                while (g_variant_iter_next(&iter, "(&s&s&sxbb&sb&su)", &path, &model, &serial,
+                                           &size_bytes, &is_removable, &is_ssd, &filesystem,
+                                           &is_mounted, &mount_point, &smart_status)) {
+                    if (path) {
+                        SmartData smart;
+                        smart.status = static_cast<SmartData::HealthStatus>(smart_status);
+                        smart.available = (smart_status != 0);
+
+                        disks.push_back(DiskInfo{.path = path,
+                                                 .model = model ? model : "",
+                                                 .serial = serial ? serial : "",
+                                                 .size_bytes = static_cast<uint64_t>(size_bytes),
+                                                 .is_removable = is_removable != FALSE,
+                                                 .is_ssd = is_ssd != FALSE,
+                                                 .filesystem = filesystem ? filesystem : "",
+                                                 .is_mounted = is_mounted != FALSE,
+                                                 .mount_point = mount_point ? mount_point : "",
+                                                 .is_lvm_pv = false,
+                                                 .smart = smart});
+                    }
+                }
+                g_variant_unref(array);
+                g_variant_unref(result);
+
+                (*cb)(disks);
+            }
+
+            delete cb;
+            g_object_unref(proxy);  // Release the reference taken before call
+        },
+        cb_ptr);
+}
+
+auto DBusClient::get_available_disks_blocking()
+    -> std::expected<std::vector<DiskInfo>, util::Error> {
+    std::promise<std::expected<std::vector<DiskInfo>, util::Error>> promise;
+    auto future = promise.get_future();
+
+    get_available_disks([&promise](auto result) { promise.set_value(result); });
+
+    auto* context = g_main_context_get_thread_default();
+    if (!context)
+        context = g_main_context_default();
+
+    while (future.wait_for(std::chrono::milliseconds(1)) != std::future_status::ready) {
+        g_main_context_iteration(context, TRUE);
+    }
+
+    return future.get();
 }
 
 auto DBusClient::validate_device_path(const std::string& path) -> std::expected<void, util::Error> {
@@ -543,14 +572,19 @@ auto DBusClient::is_disk_writable(const std::string& path) -> bool {
 
 auto DBusClient::get_disk_size(const std::string& path) -> std::expected<uint64_t, util::Error> {
     // Get disk info and extract size
-    auto disks = get_available_disks();
-    for (const auto& disk : disks) {
+    auto disks_res = get_available_disks_blocking();
+    if (!disks_res) {
+        return std::unexpected(disks_res.error());
+    }
+
+    for (const auto& disk : *disks_res) {
         if (disk.path == path) {
             return disk.size_bytes;
         }
     }
     return std::unexpected(util::Error{"Disk not found"});
 }
+
 
 auto DBusClient::unmount_disk(const std::string& path) -> std::expected<void, util::Error> {
     GDBusProxy* proxy_copy = nullptr;

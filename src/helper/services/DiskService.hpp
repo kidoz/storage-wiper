@@ -4,6 +4,7 @@
 #include "services/IDiskService.hpp"
 
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -43,7 +44,14 @@ public:
     DiskService(DiskService&&) = delete;
     DiskService& operator=(DiskService&&) = delete;
 
-    [[nodiscard]] auto get_available_disks() -> std::vector<DiskInfo> override;
+    void get_available_disks(
+        std::function<void(std::expected<std::vector<DiskInfo>, util::Error>)> callback) override;
+
+    [[nodiscard]] auto get_available_disks_blocking()
+        -> std::expected<std::vector<DiskInfo>, util::Error> override;
+
+    // Helper method for synchronous access within the daemon process (not part of IDiskService)
+    [[nodiscard]] auto get_available_disks_sync() -> std::vector<DiskInfo>;
     auto unmount_disk(const std::string& path) -> std::expected<void, util::Error> override;
     [[nodiscard]] auto is_disk_writable(const std::string& path) -> bool override;
     [[nodiscard]] auto get_disk_size(const std::string& path)

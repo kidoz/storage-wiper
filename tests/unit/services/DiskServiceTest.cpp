@@ -162,13 +162,13 @@ TEST_F(DiskServiceTest, UnmountDisk_EmptyPath_ReturnsError) {
 TEST_F(DiskServiceTest, GetAvailableDisks_ReturnsVector) {
     // This test just verifies the function runs without crashing
     // and returns a vector (may be empty if no disks)
-    auto disks = service.get_available_disks();
+    auto disks = service.get_available_disks_sync();
     // We can't assert on content, but we can check it's a valid vector
     SUCCEED();
 }
 
 TEST_F(DiskServiceTest, GetAvailableDisks_ExcludesLoopDevices) {
-    auto disks = service.get_available_disks();
+    auto disks = service.get_available_disks_sync();
     for (const auto& disk : disks) {
         EXPECT_FALSE(disk.path.find("/dev/loop") != std::string::npos)
             << "Loop device found in disk list: " << disk.path;
@@ -176,7 +176,7 @@ TEST_F(DiskServiceTest, GetAvailableDisks_ExcludesLoopDevices) {
 }
 
 TEST_F(DiskServiceTest, GetAvailableDisks_ExcludesRamDisks) {
-    auto disks = service.get_available_disks();
+    auto disks = service.get_available_disks_sync();
     for (const auto& disk : disks) {
         EXPECT_FALSE(disk.path.find("/dev/ram") != std::string::npos)
             << "RAM disk found in disk list: " << disk.path;
@@ -184,7 +184,7 @@ TEST_F(DiskServiceTest, GetAvailableDisks_ExcludesRamDisks) {
 }
 
 TEST_F(DiskServiceTest, GetAvailableDisks_ExcludesDmDevices) {
-    auto disks = service.get_available_disks();
+    auto disks = service.get_available_disks_sync();
     for (const auto& disk : disks) {
         EXPECT_FALSE(disk.path.find("/dev/dm-") != std::string::npos)
             << "Device-mapper device found in disk list: " << disk.path;
@@ -192,7 +192,7 @@ TEST_F(DiskServiceTest, GetAvailableDisks_ExcludesDmDevices) {
 }
 
 TEST_F(DiskServiceTest, GetAvailableDisks_HasValidPaths) {
-    auto disks = service.get_available_disks();
+    auto disks = service.get_available_disks_sync();
     for (const auto& disk : disks) {
         // All returned disks should have valid path prefixes
         EXPECT_TRUE(disk.path.starts_with("/dev/sd") || disk.path.starts_with("/dev/nvme") ||
@@ -202,7 +202,7 @@ TEST_F(DiskServiceTest, GetAvailableDisks_HasValidPaths) {
 }
 
 TEST_F(DiskServiceTest, GetAvailableDisks_HasNonZeroSize) {
-    auto disks = service.get_available_disks();
+    auto disks = service.get_available_disks_sync();
     for (const auto& disk : disks) {
         // All returned disks should have non-zero size
         EXPECT_GT(disk.size_bytes, 0ULL) << "Disk has zero size: " << disk.path;
