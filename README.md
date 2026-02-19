@@ -79,7 +79,7 @@ A modern, secure disk wiping application built with GTK4 and libadwaita for Linu
 sudo pacman -S gtk4 gtkmm-4.0 libadwaita meson ninja gcc pkgconf just
 
 # Clone repository
-git clone https://github.com/yourusername/storage-wiper.git
+git clone https://github.com/kidoz/storage-wiper.git
 cd storage-wiper
 
 # Build using just (recommended)
@@ -295,7 +295,7 @@ Static analysis available via:
 
 ## Project Status
 
-**Current Version**: 1.2.0
+**Current Version**: 1.3.2
 
 ### Completed Features
 - ✅ Core disk detection and enumeration
@@ -373,8 +373,8 @@ This is a defensive security tool intended for legitimate data sanitization purp
 
 ## Support
 
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/yourusername/storage-wiper/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/yourusername/storage-wiper/discussions)
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/kidoz/storage-wiper/issues)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/kidoz/storage-wiper/discussions)
 - 📧 **Security Issues**: Report privately via email
 
 ## See Also
@@ -386,3 +386,5 @@ This is a defensive security tool intended for legitimate data sanitization purp
 ---
 
 **Made with ❤️ for secure data sanitization**
+
+**Author**: Aleksandr Pavlov (<ckidoz@gmail.com>)

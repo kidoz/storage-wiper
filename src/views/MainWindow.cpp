@@ -223,16 +223,16 @@ void MainWindow::show_about_dialog() {
 
     adw_about_dialog_set_application_name(about, "Storage Wiper");
     adw_about_dialog_set_version(about, PROJECT_VERSION);
-    adw_about_dialog_set_developer_name(about, "Storage Wiper Contributors");
+    adw_about_dialog_set_developer_name(about, "Aleksandr Pavlov");
     adw_about_dialog_set_comments(
         about, "Secure disk wiping tool with multiple DoD-compliant algorithms.\n\n"
                "Supports Zero Fill, Random Fill, DoD 5220.22-M, Schneier, "
                "VSITR, Gutmann, GOST R 50739-95, and ATA Secure Erase methods.");
     adw_about_dialog_set_license_type(about, GTK_LICENSE_MIT_X11);
-    adw_about_dialog_set_copyright(about, "Copyright \xC2\xA9 2024 Storage Wiper Contributors");
+    adw_about_dialog_set_copyright(about, "Copyright \xC2\xA9 2025 Aleksandr Pavlov");
 
-    adw_about_dialog_set_issue_url(about, "https://github.com/storage-wiper/storage-wiper/issues");
-    adw_about_dialog_set_website(about, "https://github.com/storage-wiper/storage-wiper");
+    adw_about_dialog_set_issue_url(about, "https://github.com/kidoz/storage-wiper/issues");
+    adw_about_dialog_set_website(about, "https://github.com/kidoz/storage-wiper");
 
     const char* developers[] = {"Storage Wiper Contributors", nullptr};
     adw_about_dialog_set_developers(about, developers);
