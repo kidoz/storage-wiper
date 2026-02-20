@@ -234,7 +234,7 @@ void MainWindow::show_about_dialog() {
     adw_about_dialog_set_issue_url(about, "https://github.com/kidoz/storage-wiper/issues");
     adw_about_dialog_set_website(about, "https://github.com/kidoz/storage-wiper");
 
-    const char* developers[] = {"Storage Wiper Contributors", nullptr};
+    const char* developers[] = {"Aleksandr Pavlov <ckidoz@gmail.com>", nullptr};
     adw_about_dialog_set_developers(about, developers);
 
     // Credits section
