@@ -16,6 +16,69 @@ constexpr auto DBUS_PATH = "/su/kidoz/storage_wiper/Helper";
 constexpr auto DBUS_INTERFACE = "su.kidoz.storage_wiper.Helper";
 constexpr auto DBUS_TIMEOUT_MS = 30'000;  // 30 second timeout for polkit dialogs
 
+auto fallback_algorithm_name(WipeAlgorithm algo) -> std::string {
+    switch (algo) {
+        case WipeAlgorithm::ZERO_FILL:
+            return "Zero Fill";
+        case WipeAlgorithm::RANDOM_FILL:
+            return "Random Data";
+        case WipeAlgorithm::DOD_5220_22_M:
+            return "DoD 5220.22-M";
+        case WipeAlgorithm::GUTMANN:
+            return "Gutmann";
+        case WipeAlgorithm::SCHNEIER:
+            return "Schneier Method";
+        case WipeAlgorithm::VSITR:
+            return "VSITR";
+        case WipeAlgorithm::GOST_R_50739_95:
+            return "GOST R 50739-95";
+        case WipeAlgorithm::ATA_SECURE_ERASE:
+            return "ATA Secure Erase";
+    }
+    return "Unknown";
+}
+
+auto fallback_algorithm_description(WipeAlgorithm algo) -> std::string {
+    switch (algo) {
+        case WipeAlgorithm::ZERO_FILL:
+            return "Single pass overwrite with zeros";
+        case WipeAlgorithm::RANDOM_FILL:
+            return "Single pass overwrite with random data";
+        case WipeAlgorithm::DOD_5220_22_M:
+            return "US Department of Defense 3-pass standard";
+        case WipeAlgorithm::GUTMANN:
+            return "Peter Gutmann's 35-pass secure deletion";
+        case WipeAlgorithm::SCHNEIER:
+            return "Bruce Schneier's 7-pass secure deletion";
+        case WipeAlgorithm::VSITR:
+            return "German BSI VSITR 7-pass standard";
+        case WipeAlgorithm::GOST_R_50739_95:
+            return "Russian GOST R 50739-95 2-pass standard";
+        case WipeAlgorithm::ATA_SECURE_ERASE:
+            return "Hardware-based secure erase using ATA Security commands";
+    }
+    return "Unknown algorithm";
+}
+
+auto fallback_algorithm_pass_count(WipeAlgorithm algo) -> int {
+    switch (algo) {
+        case WipeAlgorithm::DOD_5220_22_M:
+            return 3;
+        case WipeAlgorithm::GUTMANN:
+            return 35;
+        case WipeAlgorithm::SCHNEIER:
+        case WipeAlgorithm::VSITR:
+            return 7;
+        case WipeAlgorithm::GOST_R_50739_95:
+            return 2;
+        case WipeAlgorithm::ZERO_FILL:
+        case WipeAlgorithm::RANDOM_FILL:
+        case WipeAlgorithm::ATA_SECURE_ERASE:
+            return 1;
+    }
+    return 1;
+}
+
 // Owns a ref taken under proxy_mutex_; releases it on scope exit so the
 // helper's GDBusProxy cannot be unref'd from on_name_vanished while a
 // synchronous call is in flight.
@@ -441,17 +504,15 @@ void DBusClient::get_available_disks(
     }
 
     // Move callback to heap to pass to C callback
-    auto* cb_ptr =
-        new std::function<void(std::expected<std::vector<DiskInfo>, util::Error>)>(
-            std::move(callback));
+    auto* cb_ptr = new std::function<void(std::expected<std::vector<DiskInfo>, util::Error>)>(
+        std::move(callback));
 
     g_dbus_proxy_call(
         proxy_copy, "GetDisks", nullptr, G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr,
         [](GObject* source_object, GAsyncResult* res, gpointer user_data) {
             auto* proxy = G_DBUS_PROXY(source_object);
-            auto* cb =
-                static_cast<std::function<void(std::expected<std::vector<DiskInfo>, util::Error>)>*>(
-                    user_data);
+            auto* cb = static_cast<
+                std::function<void(std::expected<std::vector<DiskInfo>, util::Error>)>*>(user_data);
 
             GError* error = nullptr;
             GVariant* result = g_dbus_proxy_call_finish(proxy, res, &error);
@@ -605,7 +666,6 @@ auto DBusClient::get_disk_size(const std::string& path) -> std::expected<uint64_
     return std::unexpected(util::Error{"Disk not found"});
 }
 
-
 auto DBusClient::unmount_disk(const std::string& path) -> std::expected<void, util::Error> {
     GDBusProxy* proxy_copy = nullptr;
     {
@@ -737,7 +797,7 @@ auto DBusClient::get_algorithm_name(WipeAlgorithm algo) -> std::string {
     if (auto it = algorithms_.find(static_cast<uint32_t>(algo)); it != algorithms_.end()) {
         return it->second.name;
     }
-    return "Unknown";
+    return fallback_algorithm_name(algo);
 }
 
 auto DBusClient::get_algorithm_description(WipeAlgorithm algo) -> std::string {
@@ -745,7 +805,7 @@ auto DBusClient::get_algorithm_description(WipeAlgorithm algo) -> std::string {
     if (auto it = algorithms_.find(static_cast<uint32_t>(algo)); it != algorithms_.end()) {
         return it->second.description;
     }
-    return "";
+    return fallback_algorithm_description(algo);
 }
 
 auto DBusClient::get_pass_count(WipeAlgorithm algo) -> int {
@@ -753,7 +813,7 @@ auto DBusClient::get_pass_count(WipeAlgorithm algo) -> int {
     if (auto it = algorithms_.find(static_cast<uint32_t>(algo)); it != algorithms_.end()) {
         return it->second.pass_count;
     }
-    return 1;
+    return fallback_algorithm_pass_count(algo);
 }
 
 auto DBusClient::is_ssd_compatible(WipeAlgorithm algo) -> bool {
