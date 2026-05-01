@@ -768,6 +768,17 @@ auto DBusClient::is_ssd_compatible(WipeAlgorithm algo) -> bool {
     }
 }
 
+auto DBusClient::supports_verification(WipeAlgorithm algo) -> bool {
+    switch (algo) {
+        case WipeAlgorithm::ZERO_FILL:
+        case WipeAlgorithm::RANDOM_FILL:
+        case WipeAlgorithm::DOD_5220_22_M:
+            return true;
+        default:
+            return false;
+    }
+}
+
 auto DBusClient::cancel_current_operation() -> bool {
     GDBusProxy* proxy_copy = nullptr;
     {

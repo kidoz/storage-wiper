@@ -21,6 +21,7 @@ public:
     MOCK_METHOD(std::string, get_algorithm_description, (WipeAlgorithm algo), (override));
     MOCK_METHOD(int, get_pass_count, (WipeAlgorithm algo), (override));
     MOCK_METHOD(bool, is_ssd_compatible, (WipeAlgorithm algo), (override));
+    MOCK_METHOD(bool, supports_verification, (WipeAlgorithm algo), (override));
     MOCK_METHOD(bool, cancel_current_operation, (), (override));
 
     // Helper: Create a nice mock with sensible defaults
@@ -33,6 +34,7 @@ public:
             .WillByDefault(testing::Return("Test algorithm description"));
         ON_CALL(*mock, get_pass_count(testing::_)).WillByDefault(testing::Return(1));
         ON_CALL(*mock, is_ssd_compatible(testing::_)).WillByDefault(testing::Return(true));
+        ON_CALL(*mock, supports_verification(testing::_)).WillByDefault(testing::Return(true));
         ON_CALL(*mock, wipe_disk(testing::_, testing::_, testing::_))
             .WillByDefault(testing::Return(true));
         ON_CALL(*mock, cancel_current_operation()).WillByDefault(testing::Return(true));

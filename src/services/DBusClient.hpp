@@ -121,6 +121,7 @@ public:
     [[nodiscard]] auto get_algorithm_description(WipeAlgorithm algo) -> std::string override;
     [[nodiscard]] auto get_pass_count(WipeAlgorithm algo) -> int override;
     [[nodiscard]] auto is_ssd_compatible(WipeAlgorithm algo) -> bool override;
+    [[nodiscard]] auto supports_verification(WipeAlgorithm algo) -> bool override;
     auto cancel_current_operation() -> bool override;
 
 private:
