@@ -83,6 +83,7 @@ shared_sources = files(
 # Utility sources (shared)
 util_sources = files(
   'src/util/Logger.cpp',
+  'src/util/SecureRandom.cpp',
 )
 
 # Source files for privileged helper
@@ -305,6 +306,7 @@ if get_option('enable_tests')
     'tests/unit/services/DiskServiceTest.cpp',
     'tests/unit/services/DevicePathMatcherTest.cpp',
     'tests/unit/util/JsonEscapeTest.cpp',
+    'tests/unit/util/SecureRandomTest.cpp',
     'tests/unit/viewmodels/MainViewModelTest.cpp',
   )
 
@@ -318,6 +320,7 @@ if get_option('enable_tests')
     'src/helper/services/WipeService.cpp',
     'src/helper/services/SmartService.cpp',
     'src/util/Logger.cpp',
+    'src/util/SecureRandom.cpp',
   )
 
   # Build test executable
