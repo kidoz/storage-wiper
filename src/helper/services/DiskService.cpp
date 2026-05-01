@@ -1,5 +1,6 @@
 #include "helper/services/DiskService.hpp"
 
+#include "helper/services/DevicePathMatcher.hpp"
 #include "helper/services/SmartService.hpp"
 #include "util/FileDescriptor.hpp"
 #include "util/Logger.hpp"
@@ -40,14 +41,6 @@ namespace rng = std::ranges;
 namespace {
 constexpr auto BYTES_PER_SECTOR = uint64_t{512};
 
-auto is_partition_suffix(std::string_view suffix) noexcept -> bool {
-    if (suffix.empty()) {
-        return false;
-    }
-    const auto first = static_cast<unsigned char>(suffix.front());
-    return std::isdigit(first) || suffix.front() == 'p';
-}
-
 // Virtual device patterns to skip
 constexpr std::array VIRTUAL_PATTERNS{"loop", "ram", "dm-"};
 
@@ -67,9 +60,7 @@ auto MountCache::find_mount_for_device(const std::string& device_path,
     -> std::optional<MountEntry> {
     // First, check direct mount of device or its partitions
     for (const auto& entry : entries) {
-        if (entry.device == device_path ||
-            (entry.device.starts_with(device_path) &&
-             is_partition_suffix(std::string_view{entry.device}.substr(device_path.size())))) {
+        if (device_path_matcher::is_device_or_partition_of(device_path, entry.device)) {
             return entry;
         }
     }
@@ -316,9 +307,9 @@ auto DiskService::unmount_disk(const std::string& path) -> std::expected<void, u
         while (auto* entry = ::getmntent(mtab.get())) {
             const std::string_view mount_device{entry->mnt_fsname};
 
-            // Match device itself or any partition (e.g., /dev/sda, /dev/sda1, /dev/sda2)
-            if (mount_device == path ||
-                (mount_device.starts_with(path) && mount_device.size() > path.size())) {
+            // Match device itself or any partition (e.g., /dev/sda, /dev/sda1, /dev/sda2).
+            // Suffix check guards against /dev/sdaa1 leaking into a /dev/sda match.
+            if (device_path_matcher::is_device_or_partition_of(path, mount_device)) {
                 mount_points.push_back(entry->mnt_dir);
             }
         }
@@ -358,8 +349,7 @@ auto DiskService::unmount_disk(const std::string& path) -> std::expected<void, u
         while (auto* entry = ::getmntent(mtab.get())) {
             const std::string_view mount_device{entry->mnt_fsname};
 
-            if (mount_device == path ||
-                (mount_device.starts_with(path) && mount_device.size() > path.size())) {
+            if (device_path_matcher::is_device_or_partition_of(path, mount_device)) {
                 // Still mounted
                 const std::string error_str =
                     last_errno ? std::strerror(last_errno) : "Device busy";

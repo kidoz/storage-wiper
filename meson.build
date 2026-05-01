@@ -303,6 +303,7 @@ if get_option('enable_tests')
     'tests/unit/algorithms/ATASecureEraseAlgorithmTest.cpp',
     'tests/unit/services/WipeServiceTest.cpp',
     'tests/unit/services/DiskServiceTest.cpp',
+    'tests/unit/services/DevicePathMatcherTest.cpp',
     'tests/unit/viewmodels/MainViewModelTest.cpp',
   )
 
