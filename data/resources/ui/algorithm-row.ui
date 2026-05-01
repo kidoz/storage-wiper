@@ -14,25 +14,31 @@
 
     <!-- Label container -->
     <child>
-      <object class="GtkBox" id="label_box">
-        <property name="orientation">vertical</property>
-        <property name="spacing">2</property>
+          <object class="GtkBox" id="label_box">
+            <property name="orientation">vertical</property>
+            <property name="spacing">2</property>
+            <property name="hexpand">true</property>
 
-        <!-- Algorithm name with pass count -->
-        <child>
-          <object class="GtkLabel" id="name_label">
-            <property name="halign">start</property>
-          </object>
-        </child>
+            <!-- Algorithm name with pass count -->
+            <child>
+              <object class="GtkLabel" id="name_label">
+                <property name="halign">start</property>
+                <property name="wrap">true</property>
+                <property name="hexpand">true</property>
+              </object>
+            </child>
 
-        <!-- Algorithm description -->
-        <child>
-          <object class="GtkLabel" id="description_label">
-            <property name="halign">start</property>
-            <style>
-              <class name="dim-label"/>
-              <class name="caption"/>
-            </style>
+            <!-- Algorithm description -->
+            <child>
+              <object class="GtkLabel" id="description_label">
+                <property name="halign">start</property>
+                <property name="wrap">true</property>
+                <property name="wrap-mode">word-char</property>
+                <property name="hexpand">true</property>
+                <style>
+                  <class name="dim-label"/>
+                  <class name="caption"/>
+                </style>
           </object>
         </child>
       </object>

@@ -28,6 +28,8 @@
           <object class="GtkLabel" id="name_label">
             <property name="halign">start</property>
             <property name="use-markup">true</property>
+            <property name="ellipsize">end</property>
+            <property name="hexpand">true</property>
           </object>
         </child>
 
@@ -35,6 +37,9 @@
         <child>
           <object class="GtkLabel" id="info_label">
             <property name="halign">start</property>
+            <property name="wrap">true</property>
+            <property name="wrap-mode">word-char</property>
+            <property name="hexpand">true</property>
             <style>
               <class name="dim-label"/>
             </style>
@@ -68,13 +73,14 @@
 
     <!-- Mounted indicator -->
     <child>
-      <object class="GtkLabel" id="mounted_label">
-        <property name="label">MOUNTED</property>
-        <property name="visible">false</property>
-        <style>
-          <class name="warning"/>
-        </style>
-      </object>
-    </child>
+          <object class="GtkLabel" id="mounted_label">
+            <property name="label">MOUNTED</property>
+            <property name="visible">false</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="warning"/>
+            </style>
+          </object>
+        </child>
   </object>
 </interface>
