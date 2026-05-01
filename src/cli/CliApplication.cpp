@@ -28,12 +28,14 @@ namespace cli {
 
 namespace {
 
-// Global for signal handling
+// Global for signal handling.
+// Writes to std::cerr (or anything that may take a lock or allocate) are not
+// async-signal-safe, so the handler only flips the flag; the main loop owns
+// any user-visible reporting.
 std::atomic<bool> g_cancel_requested{false};
 
-void signal_handler(int /*signal*/) {
-    g_cancel_requested.store(true);
-    std::cerr << "\nCancellation requested..." << std::endl;
+void signal_handler(int /*signal*/) noexcept {
+    g_cancel_requested.store(true, std::memory_order_relaxed);
 }
 
 // Application name
@@ -326,11 +328,16 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
 
     // Wait for completion, checking for cancellation
     auto main_context = g_main_context_default();
+    bool cancel_reported = false;
     while (!complete.load()) {
         // Process GLib events for D-Bus signals
         g_main_context_iteration(main_context, FALSE);
 
-        if (g_cancel_requested.load()) {
+        if (g_cancel_requested.load(std::memory_order_relaxed)) {
+            if (!cancel_reported) {
+                std::cerr << "\nCancellation requested...\n";
+                cancel_reported = true;
+            }
             client_->cancel_current_operation();
         }
 
