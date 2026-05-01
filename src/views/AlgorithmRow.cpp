@@ -54,7 +54,11 @@ void AlgorithmRow::populate_from_algorithm_info() {
     name_label_->set_text(name_text);
 
     // Set description
-    description_label_->set_text(algo_.description);
+    auto description = algo_.description;
+    if (!algo_.is_ssd_compatible) {
+        description += " Not recommended for SSDs.";
+    }
+    description_label_->set_text(description);
 }
 
 void AlgorithmRow::set_active(bool active) {
