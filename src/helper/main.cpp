@@ -118,9 +118,9 @@ const char* introspection_xml = R"XML(
 
 auto is_supported_algorithm(WipeAlgorithm algorithm) -> bool {
     constexpr std::array supported_algorithms = {
-        WipeAlgorithm::ZERO_FILL, WipeAlgorithm::RANDOM_FILL, WipeAlgorithm::DOD_5220_22_M,
-        WipeAlgorithm::SCHNEIER,  WipeAlgorithm::VSITR,       WipeAlgorithm::GOST_R_50739_95,
-        WipeAlgorithm::GUTMANN};
+        WipeAlgorithm::ZERO_FILL, WipeAlgorithm::RANDOM_FILL,     WipeAlgorithm::DOD_5220_22_M,
+        WipeAlgorithm::SCHNEIER,  WipeAlgorithm::VSITR,           WipeAlgorithm::GOST_R_50739_95,
+        WipeAlgorithm::GUTMANN,   WipeAlgorithm::ATA_SECURE_ERASE};
 
     return std::find(supported_algorithms.begin(), supported_algorithms.end(), algorithm) !=
            supported_algorithms.end();
@@ -319,10 +319,10 @@ void handle_get_algorithms(GDBusMethodInvocation* invocation) {
     GVariantBuilder builder;
     g_variant_builder_init(&builder, G_VARIANT_TYPE("a(ussi)"));
 
-    constexpr std::array algorithms = {WipeAlgorithm::ZERO_FILL,     WipeAlgorithm::RANDOM_FILL,
-                                       WipeAlgorithm::DOD_5220_22_M, WipeAlgorithm::SCHNEIER,
-                                       WipeAlgorithm::VSITR,         WipeAlgorithm::GOST_R_50739_95,
-                                       WipeAlgorithm::GUTMANN};
+    constexpr std::array algorithms = {
+        WipeAlgorithm::ZERO_FILL, WipeAlgorithm::RANDOM_FILL,     WipeAlgorithm::DOD_5220_22_M,
+        WipeAlgorithm::SCHNEIER,  WipeAlgorithm::VSITR,           WipeAlgorithm::GOST_R_50739_95,
+        WipeAlgorithm::GUTMANN,   WipeAlgorithm::ATA_SECURE_ERASE};
 
     for (auto algo : algorithms) {
         g_variant_builder_add(&builder, "(ussi)", static_cast<guint32>(algo),
