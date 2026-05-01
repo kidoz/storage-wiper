@@ -2,6 +2,29 @@
 
 #include <format>
 
+namespace {
+
+auto format_size(uint64_t bytes) -> std::string {
+    constexpr auto KIB = 1'024.0;
+    constexpr auto MIB = KIB * 1'024.0;
+    constexpr auto GIB = MIB * 1'024.0;
+    constexpr auto TIB = GIB * 1'024.0;
+
+    const auto size = static_cast<double>(bytes);
+    if (size >= TIB) {
+        return std::format("{:.2f} TB", size / TIB);
+    }
+    if (size >= GIB) {
+        return std::format("{:.1f} GB", size / GIB);
+    }
+    if (size >= MIB) {
+        return std::format("{:.1f} MB", size / MIB);
+    }
+    return std::format("{} bytes", bytes);
+}
+
+}  // namespace
+
 DiskRow::DiskRow(const DiskInfo& disk) : disk_(disk) {
     setup_from_builder();
     populate_from_disk_info();
@@ -36,19 +59,31 @@ void DiskRow::setup_from_builder() {
 
 void DiskRow::populate_from_disk_info() {
     // Set disk name with model (using markup for bold path)
-    auto name_markup = std::format("<b>{}</b> - {}", disk_.path, disk_.model);
+    const auto escaped_path = Glib::Markup::escape_text(disk_.path).raw();
+    const auto model = disk_.model.empty() ? std::string{"Unknown model"} : disk_.model;
+    const auto escaped_model = Glib::Markup::escape_text(model).raw();
+    auto name_markup = std::format("<b>{}</b> - {}", escaped_path, escaped_model);
     name_label_->set_markup(name_markup);
 
-    // Build info text: size, type, LVM/mount status
-    auto size_gb = static_cast<double>(disk_.size_bytes) / (1024.0 * 1024.0 * 1024.0);
-    auto info_text = std::format("{:.1f} GB", size_gb);
+    // Build info text: size, type, serial, LVM/mount status
+    auto info_text = format_size(disk_.size_bytes);
 
-    if (disk_.is_ssd) {
-        info_text += " (SSD)";
-    }
+    info_text += disk_.is_ssd ? " - SSD" : " - HDD";
 
     if (disk_.is_lvm_pv) {
-        info_text += " [LVM]";
+        info_text += " - LVM physical volume";
+    }
+
+    if (disk_.is_removable) {
+        info_text += " - Removable";
+    }
+
+    if (!disk_.serial.empty()) {
+        info_text += " - Serial: " + disk_.serial;
+    }
+
+    if (!disk_.filesystem.empty()) {
+        info_text += " - " + disk_.filesystem;
     }
 
     if (disk_.is_mounted) {
@@ -56,6 +91,7 @@ void DiskRow::populate_from_disk_info() {
     }
 
     info_label_->set_text(info_text);
+    set_tooltip_text(info_text);
 
     // Setup health indicator from SMART data
     setup_health_indicator();
