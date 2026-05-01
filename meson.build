@@ -304,6 +304,7 @@ if get_option('enable_tests')
     'tests/unit/services/WipeServiceTest.cpp',
     'tests/unit/services/DiskServiceTest.cpp',
     'tests/unit/services/DevicePathMatcherTest.cpp',
+    'tests/unit/util/JsonEscapeTest.cpp',
     'tests/unit/viewmodels/MainViewModelTest.cpp',
   )
 

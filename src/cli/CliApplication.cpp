@@ -8,6 +8,7 @@
 #include "cli/ProgressDisplay.hpp"
 #include "config.h"
 #include "services/DBusClient.hpp"
+#include "util/JsonEscape.hpp"
 #include "util/Logger.hpp"
 
 #include <algorithm>
@@ -414,15 +415,16 @@ void CliApplication::print_disks_json(const std::vector<DiskInfo>& disks) {
         const auto& disk = disks[i];
 
         std::cout << "  {\n";
-        std::cout << "    \"path\": \"" << disk.path << "\",\n";
-        std::cout << "    \"model\": \"" << disk.model << "\",\n";
+        std::cout << "    \"path\": \"" << util::json_escape(disk.path) << "\",\n";
+        std::cout << "    \"model\": \"" << util::json_escape(disk.model) << "\",\n";
         std::cout << "    \"size_bytes\": " << disk.size_bytes << ",\n";
         std::cout << "    \"is_ssd\": " << (disk.is_ssd ? "true" : "false") << ",\n";
         std::cout << "    \"is_removable\": " << (disk.is_removable ? "true" : "false") << ",\n";
         std::cout << "    \"is_mounted\": " << (disk.is_mounted ? "true" : "false") << ",\n";
-        std::cout << "    \"mount_point\": \"" << disk.mount_point << "\",\n";
-        std::cout << "    \"filesystem\": \"" << disk.filesystem << "\",\n";
-        std::cout << "    \"smart_status\": \"" << disk.smart.status_string() << "\"\n";
+        std::cout << "    \"mount_point\": \"" << util::json_escape(disk.mount_point) << "\",\n";
+        std::cout << "    \"filesystem\": \"" << util::json_escape(disk.filesystem) << "\",\n";
+        std::cout << "    \"smart_status\": \"" << util::json_escape(disk.smart.status_string())
+                  << "\"\n";
         std::cout << "  }" << (i < disks.size() - 1 ? "," : "") << "\n";
     }
     std::cout << "]\n";
