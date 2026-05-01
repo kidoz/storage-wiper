@@ -15,6 +15,22 @@ constexpr auto DBUS_NAME = "su.kidoz.storage_wiper.Helper";
 constexpr auto DBUS_PATH = "/su/kidoz/storage_wiper/Helper";
 constexpr auto DBUS_INTERFACE = "su.kidoz.storage_wiper.Helper";
 constexpr auto DBUS_TIMEOUT_MS = 30'000;  // 30 second timeout for polkit dialogs
+
+// Owns a ref taken under proxy_mutex_; releases it on scope exit so the
+// helper's GDBusProxy cannot be unref'd from on_name_vanished while a
+// synchronous call is in flight.
+struct ProxyRefGuard {
+    GDBusProxy* proxy;
+    explicit ProxyRefGuard(GDBusProxy* p) noexcept : proxy(p) {}
+    ~ProxyRefGuard() {
+        if (proxy)
+            g_object_unref(proxy);
+    }
+    ProxyRefGuard(const ProxyRefGuard&) = delete;
+    ProxyRefGuard& operator=(const ProxyRefGuard&) = delete;
+    ProxyRefGuard(ProxyRefGuard&&) = delete;
+    ProxyRefGuard& operator=(ProxyRefGuard&&) = delete;
+};
 }  // namespace
 
 DBusClient::DBusClient() = default;
@@ -519,7 +535,9 @@ auto DBusClient::validate_device_path(const std::string& path) -> std::expected<
             return std::unexpected(util::Error{"Not connected to helper service"});
         }
         proxy_copy = proxy_;
+        g_object_ref(proxy_copy);
     }
+    ProxyRefGuard proxy_guard{proxy_copy};
 
     GError* error = nullptr;
     GVariant* result =
@@ -551,7 +569,9 @@ auto DBusClient::is_disk_writable(const std::string& path) -> bool {
         if (!proxy_)
             return false;
         proxy_copy = proxy_;
+        g_object_ref(proxy_copy);
     }
+    ProxyRefGuard proxy_guard{proxy_copy};
 
     GError* error = nullptr;
     GVariant* result =
@@ -594,7 +614,9 @@ auto DBusClient::unmount_disk(const std::string& path) -> std::expected<void, ut
             return std::unexpected(util::Error{"Not connected to helper service"});
         }
         proxy_copy = proxy_;
+        g_object_ref(proxy_copy);
     }
+    ProxyRefGuard proxy_guard{proxy_copy};
 
     GError* error = nullptr;
     GVariant* result =
@@ -626,7 +648,9 @@ void DBusClient::load_algorithms() {
         if (algorithms_loaded_ || !proxy_)
             return;
         proxy_copy = proxy_;
+        g_object_ref(proxy_copy);
     }
+    ProxyRefGuard proxy_guard{proxy_copy};
 
     GError* error = nullptr;
     GVariant* result =
@@ -671,7 +695,9 @@ auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm
         if (!proxy_)
             return false;
         proxy_copy = proxy_;
+        g_object_ref(proxy_copy);
     }
+    ProxyRefGuard proxy_guard{proxy_copy};
 
     // Store callback for signal handler
     {
@@ -749,7 +775,9 @@ auto DBusClient::cancel_current_operation() -> bool {
         if (!proxy_)
             return false;
         proxy_copy = proxy_;
+        g_object_ref(proxy_copy);
     }
+    ProxyRefGuard proxy_guard{proxy_copy};
 
     GError* error = nullptr;
     GVariant* result =
@@ -777,7 +805,9 @@ auto DBusClient::get_smart_data(const std::string& path) -> SmartData {
         if (!proxy_)
             return smart;
         proxy_copy = proxy_;
+        g_object_ref(proxy_copy);
     }
+    ProxyRefGuard proxy_guard{proxy_copy};
 
     GError* error = nullptr;
     GVariant* result =
