@@ -10,6 +10,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 using ::testing::_;
 using ::testing::Invoke;
 using ::testing::NiceMock;
@@ -202,6 +204,49 @@ TEST_F(MainViewModelTest, Algorithms_ArePopulated) {
 
     // Should have multiple algorithms available
     EXPECT_FALSE(view_model->algorithms.get().empty());
+}
+
+TEST_F(MainViewModelTest, Algorithms_IncludeATASecureErase) {
+    EXPECT_CALL(*mock_disk_service, get_available_disks(testing::_))
+        .WillOnce(Invoke([](auto callback) { callback(std::vector<DiskInfo>{}); }));
+
+    view_model->initialize();
+    SimulateConnected();
+
+    const auto algorithms = view_model->algorithms.get();
+    const auto it = std::ranges::find_if(algorithms, [](const AlgorithmInfo& info) {
+        return info.algorithm == WipeAlgorithm::ATA_SECURE_ERASE;
+    });
+
+    EXPECT_NE(it, algorithms.end());
+}
+
+TEST_F(MainViewModelTest, Verification_DisabledWhenAlgorithmDoesNotSupportIt) {
+    ON_CALL(*mock_wipe_service, supports_verification(WipeAlgorithm::GUTMANN))
+        .WillByDefault(Return(false));
+
+    view_model->verification_enabled.set(true);
+    view_model->select_algorithm(WipeAlgorithm::GUTMANN);
+
+    EXPECT_FALSE(view_model->verification_available.get());
+    EXPECT_FALSE(view_model->verification_enabled.get());
+}
+
+TEST_F(MainViewModelTest, SsdAlgorithmWarning_ShownForIncompatibleAlgorithm) {
+    auto disk = MockDiskService::CreateTestDisk("/dev/nvme0n1");
+    disk.is_ssd = true;
+
+    ON_CALL(*mock_wipe_service, is_ssd_compatible(WipeAlgorithm::DOD_5220_22_M))
+        .WillByDefault(Return(false));
+    EXPECT_CALL(*mock_disk_service, get_available_disks(testing::_))
+        .WillOnce(Invoke([disk](auto callback) { callback(std::vector<DiskInfo>{disk}); }));
+
+    view_model->initialize();
+    SimulateConnected();
+    view_model->select_disk("/dev/nvme0n1");
+    view_model->select_algorithm(WipeAlgorithm::DOD_5220_22_M);
+
+    EXPECT_FALSE(view_model->algorithm_warning.get().empty());
 }
 
 // Test: disk selection cleared when disk no longer available

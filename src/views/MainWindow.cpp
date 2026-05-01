@@ -56,6 +56,15 @@ MainWindow::~MainWindow() {
     if (view_model_ && message_subscription_id_ != 0) {
         view_model_->current_message.unsubscribe(message_subscription_id_);
     }
+    if (view_model_ && refresh_connected_subscription_id_ != 0) {
+        view_model_->is_connected.unsubscribe(refresh_connected_subscription_id_);
+    }
+    if (view_model_ && refresh_wipe_subscription_id_ != 0) {
+        view_model_->is_wipe_in_progress.unsubscribe(refresh_wipe_subscription_id_);
+    }
+    if (view_model_ && refresh_pending_subscription_id_ != 0) {
+        view_model_->is_operation_pending.unsubscribe(refresh_pending_subscription_id_);
+    }
 }
 
 void MainWindow::bind(std::shared_ptr<MainViewModel> view_model) {
@@ -66,6 +75,7 @@ void MainWindow::bind(std::shared_ptr<MainViewModel> view_model) {
 
     // Bind messages (handled at window level for Adwaita dialogs)
     bind_messages();
+    bind_refresh_state();
 }
 
 void MainWindow::setup_ui() {
@@ -94,10 +104,10 @@ void MainWindow::create_header_bar() {
         adw_window_title_new("Storage Wiper", "Secure Disk Wiping Tool"));
 
     // Refresh button
-    auto* refresh_button = gtk_button_new_from_icon_name("view-refresh-symbolic");
-    gtk_widget_set_tooltip_text(refresh_button, "Refresh disk list");
-    g_signal_connect(refresh_button, "clicked", G_CALLBACK(on_refresh_clicked), this);
-    adw_header_bar_pack_start(ADW_HEADER_BAR(header_bar_), refresh_button);
+    refresh_button_ = gtk_button_new_from_icon_name("view-refresh-symbolic");
+    gtk_widget_set_tooltip_text(refresh_button_, "Refresh disk list");
+    g_signal_connect(refresh_button_, "clicked", G_CALLBACK(on_refresh_clicked), this);
+    adw_header_bar_pack_start(ADW_HEADER_BAR(header_bar_), refresh_button_);
 
     // About button
     auto* about_button = gtk_button_new_from_icon_name("help-about-symbolic");
@@ -134,6 +144,28 @@ void MainWindow::bind_messages() {
                     delete args;
                 });
         });
+}
+
+void MainWindow::bind_refresh_state() {
+    if (!view_model_ || !refresh_button_)
+        return;
+
+    refresh_connected_subscription_id_ =
+        view_model_->is_connected.subscribe([this](bool) { update_refresh_button_state(); });
+    refresh_wipe_subscription_id_ =
+        view_model_->is_wipe_in_progress.subscribe([this](bool) { update_refresh_button_state(); });
+    refresh_pending_subscription_id_ = view_model_->is_operation_pending.subscribe(
+        [this](bool) { update_refresh_button_state(); });
+
+    update_refresh_button_state();
+}
+
+void MainWindow::update_refresh_button_state() {
+    if (!view_model_ || !refresh_button_)
+        return;
+
+    gtk_widget_set_sensitive(refresh_button_, view_model_->refresh_command &&
+                                                  view_model_->refresh_command->can_execute());
 }
 
 void MainWindow::show_message(const MessageInfo& message) {

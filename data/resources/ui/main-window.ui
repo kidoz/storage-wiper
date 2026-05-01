@@ -23,6 +23,45 @@
           </object>
         </child>
 
+        <!-- Connection/loading/empty state -->
+        <child>
+          <object class="GtkBox" id="status_box">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">8</property>
+            <property name="visible">false</property>
+            <property name="margin-bottom">4</property>
+            <child>
+              <object class="GtkSpinner" id="status_spinner">
+                <property name="visible">false</property>
+                <property name="valign">center</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="status_text_box">
+                <property name="orientation">vertical</property>
+                <property name="spacing">2</property>
+                <property name="hexpand">true</property>
+                <child>
+                  <object class="GtkLabel" id="status_title_label">
+                    <property name="halign">start</property>
+                    <property name="wrap">true</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="status_detail_label">
+                    <property name="halign">start</property>
+                    <property name="wrap">true</property>
+                    <style>
+                      <class name="dim-label"/>
+                      <class name="caption"/>
+                    </style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
         <!-- Disk list in scrolled window -->
         <child>
           <object class="GtkScrolledWindow" id="disk_scroll">
@@ -61,6 +100,32 @@
             <property name="margin-bottom">12</property>
             <style>
               <class name="card"/>
+            </style>
+          </object>
+        </child>
+
+        <!-- Verification option -->
+        <child>
+          <object class="GtkCheckButton" id="verification_check">
+            <property name="label">Verify wipe after writing</property>
+            <property name="tooltip-text">Read the device after wiping and verify supported algorithms. This makes the operation take longer.</property>
+            <property name="margin-start">12</property>
+            <property name="margin-end">12</property>
+            <property name="margin-top">4</property>
+          </object>
+        </child>
+
+        <!-- Algorithm/device compatibility warning -->
+        <child>
+          <object class="GtkLabel" id="algorithm_warning_label">
+            <property name="visible">false</property>
+            <property name="halign">start</property>
+            <property name="wrap">true</property>
+            <property name="margin-start">12</property>
+            <property name="margin-end">12</property>
+            <style>
+              <class name="warning"/>
+              <class name="caption"/>
             </style>
           </object>
         </child>

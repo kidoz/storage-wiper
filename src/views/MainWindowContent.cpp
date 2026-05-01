@@ -87,9 +87,16 @@ void MainWindowContent::setup_from_builder() {
     progress_label_ = builder->get_widget<Gtk::Label>("progress_label");
     wipe_button_ = builder->get_widget<Gtk::Button>("wipe_button");
     cancel_button_ = builder->get_widget<Gtk::Button>("cancel_button");
+    verification_check_ = builder->get_widget<Gtk::CheckButton>("verification_check");
+    status_box_ = builder->get_widget<Gtk::Box>("status_box");
+    status_spinner_ = builder->get_widget<Gtk::Spinner>("status_spinner");
+    status_title_label_ = builder->get_widget<Gtk::Label>("status_title_label");
+    status_detail_label_ = builder->get_widget<Gtk::Label>("status_detail_label");
+    algorithm_warning_label_ = builder->get_widget<Gtk::Label>("algorithm_warning_label");
 
     if (!disk_list_ || !options_box_ || !progress_bar_ || !progress_label_ || !wipe_button_ ||
-        !cancel_button_) {
+        !cancel_button_ || !verification_check_ || !status_box_ || !status_spinner_ ||
+        !status_title_label_ || !status_detail_label_ || !algorithm_warning_label_) {
         throw std::runtime_error("Failed to load main-window.ui: required widgets not found");
     }
 }
@@ -109,6 +116,8 @@ void MainWindowContent::connect_signals() {
         sigc::mem_fun(*this, &MainWindowContent::on_wipe_clicked));
     cancel_button_->signal_clicked().connect(
         sigc::mem_fun(*this, &MainWindowContent::on_cancel_clicked));
+    verification_check_->signal_toggled().connect(
+        sigc::mem_fun(*this, &MainWindowContent::on_verification_toggled));
 }
 
 void MainWindowContent::bind(std::shared_ptr<MainViewModel> view_model) {
@@ -119,6 +128,10 @@ void MainWindowContent::bind(std::shared_ptr<MainViewModel> view_model) {
     bind_algorithms();
     bind_progress();
     bind_can_wipe();
+    bind_status();
+    bind_operation_state();
+    bind_verification();
+    bind_algorithm_warning();
 }
 
 void MainWindowContent::post_ui_update(std::function<void()> task) {
@@ -206,6 +219,82 @@ void MainWindowContent::bind_can_wipe() {
     }
 }
 
+void MainWindowContent::bind_status() {
+    if (!view_model_)
+        return;
+
+    auto update = [this]() {
+        post_ui_update([this]() { update_status_message(); });
+    };
+
+    subscriptions_.push_back(view_model_->disks.subscribe([update](const auto&) { update(); }));
+    subscriptions_.push_back(view_model_->is_connected.subscribe([update](bool) { update(); }));
+    subscriptions_.push_back(
+        view_model_->connection_error.subscribe([update](const auto&) { update(); }));
+    subscriptions_.push_back(
+        view_model_->is_disk_refreshing.subscribe([update](bool) { update(); }));
+    subscriptions_.push_back(
+        view_model_->is_operation_pending.subscribe([update](bool) { update(); }));
+
+    update_status_message();
+}
+
+void MainWindowContent::bind_operation_state() {
+    if (!view_model_)
+        return;
+
+    auto update = [this]() {
+        post_ui_update([this]() { update_operation_controls(); });
+    };
+
+    subscriptions_.push_back(view_model_->is_connected.subscribe([update](bool) { update(); }));
+    subscriptions_.push_back(
+        view_model_->is_wipe_in_progress.subscribe([update](bool) { update(); }));
+    subscriptions_.push_back(
+        view_model_->is_operation_pending.subscribe([update](bool) { update(); }));
+
+    update_operation_controls();
+}
+
+void MainWindowContent::bind_verification() {
+    if (!view_model_)
+        return;
+
+    auto update = [this]() {
+        post_ui_update([this]() { update_verification_control(); });
+    };
+
+    subscriptions_.push_back(
+        view_model_->verification_enabled.subscribe([update](bool) { update(); }));
+    subscriptions_.push_back(
+        view_model_->verification_available.subscribe([update](bool) { update(); }));
+    subscriptions_.push_back(
+        view_model_->is_wipe_in_progress.subscribe([update](bool) { update(); }));
+    subscriptions_.push_back(
+        view_model_->is_operation_pending.subscribe([update](bool) { update(); }));
+
+    update_verification_control();
+}
+
+void MainWindowContent::bind_algorithm_warning() {
+    if (!view_model_)
+        return;
+
+    auto id = view_model_->algorithm_warning.subscribe([this](const std::string& warning) {
+        post_ui_update([this, warning]() {
+            if (algorithm_warning_label_) {
+                algorithm_warning_label_->set_text(warning);
+                algorithm_warning_label_->set_visible(!warning.empty());
+            }
+        });
+    });
+    subscriptions_.push_back(id);
+
+    const auto warning = view_model_->algorithm_warning.get();
+    algorithm_warning_label_->set_text(warning);
+    algorithm_warning_label_->set_visible(!warning.empty());
+}
+
 void MainWindowContent::update_disk_list(const std::vector<DiskInfo>& disks) {
     if (!disk_list_)
         return;
@@ -265,6 +354,10 @@ void MainWindowContent::update_algorithm_list(const std::vector<AlgorithmInfo>& 
         options_box_->remove(*child);
     }
 
+    AlgorithmRow* selected_row = nullptr;
+    const auto selected_algorithm =
+        view_model_ ? view_model_->selected_algorithm.get() : WipeAlgorithm::ZERO_FILL;
+
     // Add new algorithm rows
     for (const auto& algo : algorithms) {
         auto* row = Gtk::make_managed<AlgorithmRow>(algo, first_radio_);
@@ -273,7 +366,10 @@ void MainWindowContent::update_algorithm_list(const std::vector<AlgorithmInfo>& 
         // First radio button becomes the group leader
         if (!first_radio_) {
             first_radio_ = row->get_radio_button();
-            row->set_active(true);  // Select first by default
+        }
+
+        if (algo.algorithm == selected_algorithm) {
+            selected_row = row;
         }
 
         // Connect toggled signal
@@ -284,6 +380,12 @@ void MainWindowContent::update_algorithm_list(const std::vector<AlgorithmInfo>& 
         });
 
         options_box_->append(*row);
+    }
+
+    if (selected_row) {
+        selected_row->set_active(true);
+    } else if (!algorithm_rows_.empty()) {
+        algorithm_rows_.front()->set_active(true);
     }
 }
 
@@ -297,6 +399,10 @@ void MainWindowContent::update_progress(const WipeProgress& progress) {
         status << progress.status;
         if (progress.current_pass > 0 && progress.total_passes > 1) {
             status << " (Pass " << progress.current_pass << "/" << progress.total_passes << ")";
+        }
+        if (progress.verification_in_progress) {
+            status << " (Verification " << static_cast<int>(progress.verification_percentage)
+                   << "%)";
         }
         status << " - " << static_cast<int>(progress.percentage) << "%";
 
@@ -331,6 +437,89 @@ void MainWindowContent::update_progress_visibility(bool visible) {
     }
 }
 
+void MainWindowContent::update_status_message() {
+    if (!view_model_ || !status_box_ || !status_spinner_ || !status_title_label_ ||
+        !status_detail_label_) {
+        return;
+    }
+
+    bool visible = true;
+    bool spinning = false;
+    std::string title;
+    std::string detail;
+
+    if (!view_model_->is_connected.get()) {
+        title = "Helper service unavailable";
+        detail = view_model_->connection_error.get();
+        if (detail.empty()) {
+            detail = "Install and start the privileged helper, then refresh the disk list.";
+        }
+    } else if (view_model_->is_operation_pending.get()) {
+        title = "Preparing wipe operation";
+        detail = "Waiting for the privileged helper to finish the requested operation.";
+        spinning = true;
+    } else if (view_model_->is_disk_refreshing.get()) {
+        title = "Loading storage devices";
+        detail = "Reading block devices and SMART health information.";
+        spinning = true;
+    } else if (view_model_->disks.get().empty()) {
+        title = "No storage devices found";
+        detail = "Attach a supported disk or refresh after installing the helper service.";
+    } else {
+        visible = false;
+    }
+
+    status_box_->set_visible(visible);
+    status_spinner_->set_visible(spinning);
+    if (spinning) {
+        status_spinner_->start();
+    } else {
+        status_spinner_->stop();
+    }
+    status_title_label_->set_text(title);
+    status_detail_label_->set_text(detail);
+}
+
+void MainWindowContent::update_operation_controls() {
+    if (!view_model_)
+        return;
+
+    const bool controls_enabled = view_model_->is_connected.get() &&
+                                  !view_model_->is_wipe_in_progress.get() &&
+                                  !view_model_->is_operation_pending.get();
+
+    if (disk_list_) {
+        disk_list_->set_sensitive(controls_enabled);
+    }
+    if (options_box_) {
+        options_box_->set_sensitive(controls_enabled);
+    }
+    if (verification_check_) {
+        verification_check_->set_sensitive(controls_enabled &&
+                                           view_model_->verification_available.get());
+    }
+}
+
+void MainWindowContent::update_verification_control() {
+    if (!view_model_ || !verification_check_)
+        return;
+
+    const bool enabled = view_model_->verification_enabled.get();
+    if (verification_check_->get_active() != enabled) {
+        verification_check_->set_active(enabled);
+    }
+
+    const bool controls_enabled = view_model_->is_connected.get() &&
+                                  !view_model_->is_wipe_in_progress.get() &&
+                                  !view_model_->is_operation_pending.get();
+    const bool available = view_model_->verification_available.get();
+    verification_check_->set_sensitive(controls_enabled && available);
+    verification_check_->set_tooltip_text(
+        available ? "Read the device after wiping and verify supported algorithms. This makes the "
+                    "operation take longer."
+                  : "The selected algorithm does not support post-wipe verification.");
+}
+
 void MainWindowContent::on_disk_selected(Gtk::ListBoxRow* row) {
     if (!view_model_)
         return;
@@ -358,6 +547,12 @@ void MainWindowContent::on_wipe_clicked() {
 void MainWindowContent::on_cancel_clicked() {
     if (view_model_ && view_model_->cancel_command) {
         view_model_->cancel_command->execute();
+    }
+}
+
+void MainWindowContent::on_verification_toggled() {
+    if (view_model_ && verification_check_) {
+        view_model_->verification_enabled.set(verification_check_->get_active());
     }
 }
 

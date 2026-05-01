@@ -69,15 +69,21 @@ private:
 
     // Adwaita widgets (C API)
     GtkWidget* header_bar_ = nullptr;
+    GtkWidget* refresh_button_ = nullptr;
 
     // Message binding subscription
     size_t message_subscription_id_ = 0;
+    size_t refresh_connected_subscription_id_ = 0;
+    size_t refresh_wipe_subscription_id_ = 0;
+    size_t refresh_pending_subscription_id_ = 0;
 
     // UI creation methods
     void create_header_bar();
 
     // Message dialog handling (kept as Adwaita for proper styling)
     void bind_messages();
+    void bind_refresh_state();
+    void update_refresh_button_state();
     void show_message(const MessageInfo& message);
     void show_confirmation_dialog(const MessageInfo& message);
     void show_info_dialog(const MessageInfo& message);

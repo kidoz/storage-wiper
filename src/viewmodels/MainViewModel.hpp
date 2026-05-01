@@ -67,6 +67,16 @@ public:
     mvvm::Observable<bool> is_wipe_in_progress{false};
 
     /**
+     * @brief Whether a privileged operation is being prepared before wiping
+     */
+    mvvm::Observable<bool> is_operation_pending{false};
+
+    /**
+     * @brief Whether the disk list is currently being refreshed
+     */
+    mvvm::Observable<bool> is_disk_refreshing{false};
+
+    /**
      * @brief Whether the wipe button should be enabled
      */
     mvvm::Observable<bool> can_wipe{false};
@@ -75,6 +85,21 @@ public:
      * @brief Current wipe progress
      */
     mvvm::Observable<WipeProgress> wipe_progress{{}};
+
+    /**
+     * @brief Whether post-wipe verification is enabled for the next wipe
+     */
+    mvvm::Observable<bool> verification_enabled{false};
+
+    /**
+     * @brief Whether the selected algorithm supports post-wipe verification
+     */
+    mvvm::Observable<bool> verification_available{false};
+
+    /**
+     * @brief Warning text for the selected disk/algorithm combination
+     */
+    mvvm::Observable<std::string> algorithm_warning{""};
 
     /**
      * @brief Message to display to user (info, error, or confirmation)
@@ -166,17 +191,27 @@ private:
 
     // Subscription IDs for cleanup
     size_t selected_disk_subscription_id_ = 0;
+    size_t selected_algorithm_subscription_id_ = 0;
     size_t wipe_in_progress_subscription_id_ = 0;
+    size_t operation_pending_subscription_id_ = 0;
     size_t connection_subscription_id_ = 0;
 
     void load_disks();
     void load_algorithms();
     void update_can_wipe();
+    void update_algorithm_state();
     void start_wipe();
+    void confirm_wipe_for(const std::string& path, WipeAlgorithm algorithm, bool verify);
     void unmount_and_wipe(const std::string& path);
     void handle_wipe_progress(const WipeProgress& progress);
     void handle_wipe_completion(bool success, const std::string& error_message = "");
     void show_message(MessageInfo::Type type, const std::string& title, const std::string& message,
                       std::function<void(bool)> callback = nullptr);
     [[nodiscard]] auto find_disk_info(const std::string& path) const -> std::optional<DiskInfo>;
+    [[nodiscard]] auto build_disk_summary(const std::optional<DiskInfo>& disk_info,
+                                          const std::string& fallback_path) const -> std::string;
+
+    std::string active_wipe_disk_path_;
+    WipeAlgorithm active_wipe_algorithm_ = WipeAlgorithm::ZERO_FILL;
+    bool active_wipe_verification_enabled_ = false;
 };

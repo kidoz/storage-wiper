@@ -66,6 +66,12 @@ private:
     Gtk::Label* progress_label_ = nullptr;
     Gtk::Button* wipe_button_ = nullptr;
     Gtk::Button* cancel_button_ = nullptr;
+    Gtk::CheckButton* verification_check_ = nullptr;
+    Gtk::Box* status_box_ = nullptr;
+    Gtk::Spinner* status_spinner_ = nullptr;
+    Gtk::Label* status_title_label_ = nullptr;
+    Gtk::Label* status_detail_label_ = nullptr;
+    Gtk::Label* algorithm_warning_label_ = nullptr;
 
     // Algorithm radio button group
     std::vector<AlgorithmRow*> algorithm_rows_;
@@ -96,15 +102,23 @@ private:
     void bind_algorithms();
     void bind_progress();
     void bind_can_wipe();
+    void bind_status();
+    void bind_operation_state();
+    void bind_verification();
+    void bind_algorithm_warning();
 
     // UI update methods (called from bindings via dispatcher)
     void update_disk_list(const std::vector<DiskInfo>& disks);
     void update_algorithm_list(const std::vector<AlgorithmInfo>& algorithms);
     void update_progress(const WipeProgress& progress);
     void update_progress_visibility(bool visible);
+    void update_status_message();
+    void update_operation_controls();
+    void update_verification_control();
 
     // Signal handlers
     void on_disk_selected(Gtk::ListBoxRow* row);
     void on_wipe_clicked();
     void on_cancel_clicked();
+    void on_verification_toggled();
 };
