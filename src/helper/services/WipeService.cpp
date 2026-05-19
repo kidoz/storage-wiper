@@ -293,8 +293,15 @@ auto WipeService::execute_wipe_on_device(
                                         state->cancel_requested);
 
         if (fsync(fd.get()) != 0) {
-            // Log sync error but don't fail the operation
-            LOG_WARNING("WipeService", std::format("fsync failed: {}", strerror(errno)));
+            const int err = errno;
+            LOG_ERROR("WipeService", std::format("fsync failed: {}", strerror(err)));
+            WipeProgress progress{};
+            progress.has_error = true;
+            progress.error_message = "Failed to flush data to disk: " + std::string(strerror(err));
+            progress.is_complete = true;
+            tracked_callback(progress);
+            state->operation_in_progress.store(false);
+            return {.success = false, .device_size = 0};
         }
         // fd automatically closed by RAII
     }
