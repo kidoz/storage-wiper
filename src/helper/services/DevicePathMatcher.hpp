@@ -19,7 +19,7 @@ constexpr auto is_all_digits(std::string_view s) noexcept -> bool {
         return false;
     }
     for (const char c : s) {
-        if (std::isdigit(static_cast<unsigned char>(c)) == 0) {
+        if (c < '0' || c > '9') {
             return false;
         }
     }
