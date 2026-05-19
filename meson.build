@@ -24,6 +24,7 @@ cpp = meson.get_compiler('cpp')
 add_project_arguments(
   cpp.get_supported_arguments([
     '-Wpedantic',
+    '-Wno-c2y-extensions',
   ]),
   language: 'cpp'
 )
