@@ -257,22 +257,47 @@ auto WipeService::execute_wipe_on_device(
 
     // Some algorithms (like ATA Secure Erase) need device-level access
     if (requires_device_access) {
-        // Get device size first
-        util::FileDescriptor probe_fd(open(disk_path.c_str(), O_RDONLY));
-        if (probe_fd) {
+        // O_EXCL gate before the destructive firmware command: fails with EBUSY
+        // if the device or a partition is mounted/claimed (TOCTOU guard). Scoped
+        // so the exclusive claim is released before the algorithm reopens.
+        {
+            util::FileDescriptor probe_fd(open(disk_path.c_str(), O_RDONLY | O_EXCL));
+            if (!probe_fd) {
+                const int err = errno;
+                WipeProgress progress{};
+                progress.has_error = true;
+                progress.error_message =
+                    err == EBUSY
+                        ? "Device is in use (mounted or held by another process); "
+                          "aborting to prevent data corruption"
+                        : "Failed to open device: " + std::string(strerror(err));
+                progress.is_complete = true;
+                tracked_callback(progress);
+                state->operation_in_progress.store(false);
+                return {.success = false, .device_size = 0};
+            }
             ioctl(probe_fd.get(), BLKGETSIZE64, &device_size);
-        }
-        // probe_fd closed automatically
+        }  // probe_fd closed here, exclusive claim released
 
         // Use execute_on_device which handles the device internally
         result = algorithm_ptr->execute_on_device(disk_path, device_size, tracked_callback,
                                                   state->cancel_requested);
     } else {
-        util::FileDescriptor fd(open(disk_path.c_str(), O_WRONLY | O_SYNC));
+        // O_EXCL on a block device fails with EBUSY if the device or any of its
+        // partitions is mounted or otherwise claimed. This closes the TOCTOU
+        // window between validate_wipe_target() and the destructive write: if
+        // anything mounted the device after validation, the open fails here
+        // instead of overwriting a live filesystem.
+        util::FileDescriptor fd(open(disk_path.c_str(), O_WRONLY | O_SYNC | O_EXCL));
         if (!fd) {
+            const int err = errno;
             WipeProgress progress{};
             progress.has_error = true;
-            progress.error_message = "Failed to open device: " + std::string(strerror(errno));
+            progress.error_message =
+                err == EBUSY
+                    ? "Device is in use (mounted or held by another process); "
+                      "aborting to prevent data corruption"
+                    : "Failed to open device: " + std::string(strerror(err));
             progress.is_complete = true;
             tracked_callback(progress);
             state->operation_in_progress.store(false);
@@ -439,12 +464,17 @@ auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorith
 
                 // Perform verification if requested, wipe succeeded, and not cancelled
                 if (do_verify && wipe_result && !state->cancel_requested.load()) {
-                    // Reopen device for reading
-                    util::FileDescriptor verify_fd(open(disk_path.c_str(), O_RDONLY));
+                    // Reopen device for reading. O_EXCL ensures nothing mounted
+                    // or claimed the device between the wipe and verification.
+                    util::FileDescriptor verify_fd(open(disk_path.c_str(), O_RDONLY | O_EXCL));
                     if (!verify_fd) {
+                        const int err = errno;
                         WipeProgress progress{};
                         progress.has_error = true;
-                        progress.error_message = "Failed to open device for verification";
+                        progress.error_message =
+                            err == EBUSY
+                                ? "Device became busy before verification; cannot confirm wipe"
+                                : "Failed to open device for verification";
                         progress.is_complete = true;
                         tracked_callback(progress);
                         state->operation_in_progress.store(false);
