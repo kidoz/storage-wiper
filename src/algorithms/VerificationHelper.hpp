@@ -37,20 +37,6 @@ namespace verification {
                                   const std::atomic<bool>& cancel_flag) -> bool;
 
 /**
- * @brief Statistical verification that data appears random (high entropy)
- * @param fd File descriptor (opened for reading)
- * @param size Device size in bytes
- * @param callback Progress callback
- * @param cancel_flag Cancellation flag
- * @return true if data passes entropy checks
- *
- * Uses chi-squared test on byte distribution. A truly random fill should
- * have roughly equal distribution of all byte values.
- */
-[[nodiscard]] auto verify_random(int fd, uint64_t size, ProgressCallback callback,
-                                 const std::atomic<bool>& cancel_flag) -> bool;
-
-/**
  * @brief Verify using a pre-generated pattern buffer
  * @param fd File descriptor (opened for reading)
  * @param size Device size in bytes
