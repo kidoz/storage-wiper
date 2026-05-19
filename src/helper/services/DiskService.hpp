@@ -69,7 +69,7 @@ public:
     /**
      * @brief Clear the disk list cache (call when devices change)
      */
-    void invalidate_cache();
+    void invalidate_cache() override;
 
 private:
     /**

@@ -16,6 +16,7 @@ public:
                 (override));
     MOCK_METHOD((std::expected<std::vector<DiskInfo>, util::Error>), get_available_disks_blocking,
                 (), (override));
+    MOCK_METHOD(void, invalidate_cache, (), (override));
     MOCK_METHOD((std::expected<void, util::Error>), unmount_disk, (const std::string& path),
                 (override));
     MOCK_METHOD(bool, is_disk_writable, (const std::string& path), (override));

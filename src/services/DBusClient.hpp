@@ -104,6 +104,7 @@ public:
         -> std::expected<uint64_t, util::Error> override;
     [[nodiscard]] auto unmount_disk(const std::string& path)
         -> std::expected<void, util::Error> override;
+    void invalidate_cache() override;
 
     /**
      * @brief Get detailed SMART data for a disk

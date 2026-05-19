@@ -914,3 +914,8 @@ auto DBusClient::get_smart_data(const std::string& path) -> SmartData {
 
     return smart;
 }
+
+void DBusClient::invalidate_cache() {
+    // DBusClient is stateless regarding disks, it fetches fresh data from helper
+    // No local cache to invalidate
+}

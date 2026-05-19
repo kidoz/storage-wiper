@@ -16,6 +16,8 @@ inline auto validate_wipe_target(IDiskService& disk_service, const std::string& 
         return std::unexpected(valid.error());
     }
 
+    // Bypass cache to get fresh mount status for validation
+    disk_service.invalidate_cache();
     auto disks_res = disk_service.get_available_disks_blocking();
     if (!disks_res) {
         return std::unexpected(disks_res.error());

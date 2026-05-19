@@ -45,6 +45,11 @@ public:
         -> std::expected<std::vector<DiskInfo>, util::Error> = 0;
 
     /**
+     * @brief Invalidate the disk cache
+     */
+    virtual void invalidate_cache() = 0;
+
+    /**
      * @brief Safely unmount a disk
      * @param path Device path to unmount
      * @return True if successful, false otherwise
