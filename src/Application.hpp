@@ -67,4 +67,4 @@ private:
     std::shared_ptr<DBusClient> dbus_client_;
 };
 
-#endif // STORAGE_WIPER_APPLICATION_HPP
+#endif  // STORAGE_WIPER_APPLICATION_HPP

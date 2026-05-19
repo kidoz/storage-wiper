@@ -267,10 +267,9 @@ auto WipeService::execute_wipe_on_device(
                 WipeProgress progress{};
                 progress.has_error = true;
                 progress.error_message =
-                    err == EBUSY
-                        ? "Device is in use (mounted or held by another process); "
-                          "aborting to prevent data corruption"
-                        : "Failed to open device: " + std::string(strerror(err));
+                    err == EBUSY ? "Device is in use (mounted or held by another process); "
+                                   "aborting to prevent data corruption"
+                                 : "Failed to open device: " + std::string(strerror(err));
                 progress.is_complete = true;
                 tracked_callback(progress);
                 state->operation_in_progress.store(false);
@@ -293,11 +292,10 @@ auto WipeService::execute_wipe_on_device(
             const int err = errno;
             WipeProgress progress{};
             progress.has_error = true;
-            progress.error_message =
-                err == EBUSY
-                    ? "Device is in use (mounted or held by another process); "
-                      "aborting to prevent data corruption"
-                    : "Failed to open device: " + std::string(strerror(err));
+            progress.error_message = err == EBUSY
+                                         ? "Device is in use (mounted or held by another process); "
+                                           "aborting to prevent data corruption"
+                                         : "Failed to open device: " + std::string(strerror(err));
             progress.is_complete = true;
             tracked_callback(progress);
             state->operation_in_progress.store(false);

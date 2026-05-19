@@ -37,8 +37,9 @@ public:
         ON_CALL(*mock, is_disk_writable(testing::_)).WillByDefault(testing::Return(true));
 
         // Default: empty disk list
-        ON_CALL(*mock, get_available_disks(testing::_))
-            .WillByDefault([](auto callback) { callback(std::vector<DiskInfo>{}); });
+        ON_CALL(*mock, get_available_disks(testing::_)).WillByDefault([](auto callback) {
+            callback(std::vector<DiskInfo>{});
+        });
         ON_CALL(*mock, get_available_disks_blocking())
             .WillByDefault(testing::Return(std::vector<DiskInfo>{}));
 

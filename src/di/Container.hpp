@@ -266,4 +266,4 @@ public:
 
 }  // namespace di
 
-#endif // STORAGE_WIPER_DI_CONTAINER_HPP
+#endif  // STORAGE_WIPER_DI_CONTAINER_HPP

@@ -136,8 +136,7 @@ private:
     /**
      * @brief Helper to get disks synchronously by pumping the main loop
      */
-    [[nodiscard]] auto get_disks_blocking()
-        -> std::expected<std::vector<DiskInfo>, util::Error>;
+    [[nodiscard]] auto get_disks_blocking() -> std::expected<std::vector<DiskInfo>, util::Error>;
 
     std::unique_ptr<DBusClient> client_;
 };

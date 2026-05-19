@@ -2,14 +2,14 @@
 
 #include "util/Logger.hpp"
 
+#include <fcntl.h>
+#include <sys/random.h>
+#include <unistd.h>
+
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <format>
-
-#include <fcntl.h>
-#include <sys/random.h>
-#include <unistd.h>
 
 namespace util {
 

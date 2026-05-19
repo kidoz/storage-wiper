@@ -102,16 +102,16 @@ void StorageWiperApp::setup_main_window() {
     // Set up connection state callback
     // Use weak_ptr to avoid preventing ViewModel destruction
     std::weak_ptr<MainViewModel> weak_vm = view_model_;
-    dbus_client_->set_connection_state_callback([weak_vm](ConnectionState state,
-                                                          const std::string& error) {
-        Glib::signal_idle().connect([weak_vm, state, error]() {
-            if (auto vm = weak_vm.lock()) {
-                bool connected = (state == ConnectionState::CONNECTED);
-                vm->set_connection_state(connected, error);
-            }
-            return false; // G_SOURCE_REMOVE
+    dbus_client_->set_connection_state_callback(
+        [weak_vm](ConnectionState state, const std::string& error) {
+            Glib::signal_idle().connect([weak_vm, state, error]() {
+                if (auto vm = weak_vm.lock()) {
+                    bool connected = (state == ConnectionState::CONNECTED);
+                    vm->set_connection_state(connected, error);
+                }
+                return false;  // G_SOURCE_REMOVE
+            });
         });
-    });
 
     // Set initial connection state
     bool initial_connected = (dbus_client_->get_connection_state() == ConnectionState::CONNECTED);

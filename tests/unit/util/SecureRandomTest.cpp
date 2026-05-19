@@ -76,12 +76,11 @@ TEST(SecureRandom, LargeFill_PassesChiSquared) {
 
 TEST(SecureRandom, OddSize_FillsExactly) {
     // Force the loop to handle a non-power-of-two length.
-    std::vector<std::byte> buf(4096 + 17, std::byte{0xAB});
+    std::vector<std::byte> buf(4'096 + 17, std::byte{0xAB});
     secure_random_fill(buf);
 
     // Sentinel at end was overwritten - extremely high probability that
     // not every byte equals the original 0xAB sentinel.
-    const auto unchanged =
-        std::ranges::count(buf, std::byte{0xAB});
+    const auto unchanged = std::ranges::count(buf, std::byte{0xAB});
     EXPECT_LT(unchanged, static_cast<std::ptrdiff_t>(buf.size()));
 }

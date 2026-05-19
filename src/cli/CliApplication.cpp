@@ -6,7 +6,6 @@
 #include "cli/CliApplication.hpp"
 
 #include "cli/ProgressDisplay.hpp"
-#include "config.h"
 #include "services/DBusClient.hpp"
 #include "util/JsonEscape.hpp"
 #include "util/Logger.hpp"
@@ -22,6 +21,7 @@
 #include <iostream>
 #include <thread>
 
+#include "config.h"
 #include <getopt.h>
 
 namespace cli {
