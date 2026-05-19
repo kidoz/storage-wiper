@@ -1,6 +1,7 @@
 #include "algorithms/VSITRAlgorithm.hpp"
 
 #include "models/WipeTypes.hpp"
+#include "util/RandomBuffer.hpp"
 #include "util/WriteHelpers.hpp"
 
 #include <unistd.h>
