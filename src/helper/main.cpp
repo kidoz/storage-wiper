@@ -266,6 +266,10 @@ void handle_get_disk_smart(GDBusMethodInvocation* invocation, GVariant* paramete
  * Handle ValidateDevicePath method call
  */
 void handle_validate_device_path(GDBusMethodInvocation* invocation, GVariant* parameters) {
+    if (!check_authorization(invocation, POLKIT_ACTION_LIST_DISKS)) {
+        return;
+    }
+
     const char* path = nullptr;
     g_variant_get(parameters, "(&s)", &path);
 
