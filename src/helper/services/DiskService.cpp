@@ -327,14 +327,11 @@ auto DiskService::unmount_disk(const std::string& path) -> std::expected<void, u
     int last_errno = 0;
 
     for (const auto& mount_point : mount_points) {
-        // Try lazy unmount (MNT_DETACH) - most reliable for busy filesystems
-        if (::umount2(mount_point.c_str(), MNT_DETACH) != 0) {
-            // Try force unmount as fallback
-            if (::umount2(mount_point.c_str(), MNT_FORCE) != 0) {
-                last_errno = errno;
-                failed_mount = mount_point;
-                // Continue trying other mount points
-            }
+        // Use normal umount and fail if busy to ensure data consistency
+        if (::umount(mount_point.c_str()) != 0) {
+            last_errno = errno;
+            failed_mount = mount_point;
+            // Continue trying other mount points, but we will likely fail later
         }
     }
 
