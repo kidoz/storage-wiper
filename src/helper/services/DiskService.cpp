@@ -158,43 +158,38 @@ auto DiskService::get_available_disks_sync() -> std::vector<DiskInfo> {
         }
     }
 
-    // OPTIMIZATION 3: Parallel SMART collection using std::async
+    // OPTIMIZATION 3: Parallel SMART collection using std::thread with timeout
     if (!smart_eligible_paths.empty() && smart_service_) {
-        // Launch async SMART queries
-        // Capture raw pointer to SmartService since:
-        // 1. SmartService lifetime is tied to DiskService lifetime (owned by unique_ptr)
-        // 2. DiskService waits for all futures before returning from this method
-        // 3. DiskService will not be destroyed during get_available_disks() call
         std::vector<std::future<std::pair<std::string, SmartData>>> smart_futures;
         smart_futures.reserve(smart_eligible_paths.size());
 
         SmartService* smart_service_ptr = smart_service_.get();
         for (const auto& path : smart_eligible_paths) {
-            smart_futures.push_back(std::async(std::launch::async, [smart_service_ptr, path]() {
-                return std::make_pair(path, smart_service_ptr->get_smart_data(path));
-            }));
+            auto task = std::make_shared<std::packaged_task<std::pair<std::string, SmartData>()>>(
+                [smart_service_ptr, path]() {
+                    return std::make_pair(path, smart_service_ptr->get_smart_data(path));
+                });
+            smart_futures.push_back(task->get_future());
+            std::thread([task]() { (*task)(); }).detach();
         }
 
-        // Collect results and merge into disk info
+        // Collect results with a strict timeout to prevent hanging on slow drives
         std::unordered_map<std::string, SmartData> smart_results;
         for (auto& future : smart_futures) {
-            std::string current_path;
             try {
-                auto [path, data] = future.get();
-                current_path = path;
-                smart_results[path] = std::move(data);
+                // Wait max 250ms per drive (parallelized, so total max ~250ms)
+                if (future.wait_for(std::chrono::milliseconds(250)) == std::future_status::ready) {
+                    auto [path, data] = future.get();
+                    smart_results[path] = std::move(data);
+                } else {
+                    LOG_WARNING("DiskService", "SMART data query timed out for a device");
+                }
             } catch (const std::system_error& e) {
-                // System-level error (file access, ioctl, etc.)
-                LOG_WARNING("DiskService", std::format("System error reading SMART for {}: {}",
-                                                       current_path, e.what()));
+                LOG_WARNING("DiskService", std::format("System error reading SMART: {}", e.what()));
             } catch (const std::exception& e) {
-                // General exception
-                LOG_WARNING("DiskService",
-                            std::format("Failed to read SMART for {}: {}", current_path, e.what()));
+                LOG_WARNING("DiskService", std::format("Failed to read SMART: {}", e.what()));
             } catch (...) {
-                // Unknown exception - disk will show unknown health
-                LOG_WARNING("DiskService",
-                            std::format("Unknown error reading SMART for {}", current_path));
+                LOG_WARNING("DiskService", "Unknown error reading SMART");
             }
         }
 
