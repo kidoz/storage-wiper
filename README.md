@@ -41,7 +41,7 @@ A modern, secure disk wiping application built with GTK4 and libadwaita for Linu
 
 ## Screenshots
 
-[![Storage Wiper Main Interface](docs/images/screenshot-main.png)](docs/images/screenshot-main.png)
+[![Storage Wiper Main Interface](docs/images/main.png)](docs/images/main.png)
 
 *Storage Wiper showing disk selection with NVMe drives and wiping algorithm options*
 
