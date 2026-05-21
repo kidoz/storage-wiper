@@ -6,7 +6,6 @@
 #include <array>
 #include <cstdint>
 #include <format>
-#include <sstream>
 #include <thread>
 #include <utility>
 

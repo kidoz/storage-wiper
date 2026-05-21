@@ -5,7 +5,6 @@
 
 #include <cstdint>
 #include <format>
-#include <sstream>
 
 namespace {
 

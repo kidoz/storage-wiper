@@ -8,9 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <format>
-#include <iomanip>
 #include <iostream>
-#include <sstream>
 
 namespace util {
 
@@ -184,11 +182,10 @@ auto Logger::get_timestamp() -> std::string {
     std::tm tm_buf{};
     gmtime_r(&time_t_now, &tm_buf);
 
-    std::ostringstream oss;
-    oss << std::put_time(&tm_buf, "%Y-%m-%dT%H:%M:%S") << '.' << std::setfill('0') << std::setw(3)
-        << ms.count() << "Z ";
-
-    return oss.str();
+    return std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z ", 
+                       tm_buf.tm_year + 1900, tm_buf.tm_mon + 1, tm_buf.tm_mday,
+                       tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec,
+                       ms.count());
 }
 
 auto Logger::level_to_string(LogLevel level) -> std::string_view {
