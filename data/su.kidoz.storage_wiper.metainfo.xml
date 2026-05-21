@@ -92,6 +92,17 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="1.4.1" date="2026-05-21">
+      <description>
+        <p>Bug fix and internal cleanup release:</p>
+        <ul>
+          <li>Fixed missing warning and error icons in the disk row by using the actual Adwaita icon names</li>
+          <li>Migrated wipe and verification helpers to std::span buffers</li>
+          <li>Marked IWipeAlgorithm virtual methods nodiscard</li>
+          <li>Replaced ostringstream/put_time pipeline in log timestamps with std::format</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.4.0" date="2026-05-21">
       <description>
         <p>New features, hardening, and reliability fixes:</p>
