@@ -92,6 +92,26 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="1.4.0" date="2026-05-21">
+      <description>
+        <p>New features, hardening, and reliability fixes:</p>
+        <ul>
+          <li>Added ATA Secure Erase support in the privileged helper</li>
+          <li>Added wipe verification with a dedicated status panel and algorithm warnings</li>
+          <li>Show SSD compatibility hint and improved disk row presentation</li>
+          <li>Require polkit authorization for device path validation</li>
+          <li>Open wipe target with O_EXCL to close mount-race window</li>
+          <li>Switched random wipe buffers to the kernel CSPRNG</li>
+          <li>Fail the wipe when fsync fails and use plain umount to preserve data consistency</li>
+          <li>Fixed sibling device unmount mismatch and disk cache invalidation before verification</li>
+          <li>Time out slow SMART queries during disk scan</li>
+          <li>Made the CLI cancel signal handler async-safe and escape JSON in CLI disk listing</li>
+          <li>Hold D-Bus proxy reference across sync calls; fall back to local algorithm metadata when the service is unreachable</li>
+          <li>Avoid locale-dependent isdigit in path matcher</li>
+          <li>Applied a clang-format pass and suppressed C2Y extension build warnings</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.3.3" date="2026-02-20">
       <description>
         <p>API improvements and code modernization:</p>
