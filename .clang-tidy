@@ -1,6 +1,5 @@
----
 # clang-tidy configuration for Storage Wiper
-# Modern C++20 with CppCoreGuidelines, security, and performance focus
+# Modern C++23 with CppCoreGuidelines, security, and performance focus
 
 Checks: >
   -*,
@@ -9,12 +8,13 @@ Checks: >
   clang-analyzer-*,
   concurrency-*,
   cppcoreguidelines-*,
+  misc-*,
   modernize-*,
   performance-*,
   portability-*,
   readability-*,
   security-*,
-  -modernize-use-trailing-return-type,
+  -misc-non-private-member-variables-in-classes,
   -readability-identifier-length,
   -readability-magic-numbers,
   -cppcoreguidelines-avoid-magic-numbers,
@@ -24,7 +24,7 @@ Checks: >
   -readability-function-cognitive-complexity,
   -bugprone-easily-swappable-parameters
 
-WarningsAsErrors: ''
+WarningsAsErrors: 'cert-*,security-*,bugprone-*'
 
 CheckOptions:
   # Naming conventions
@@ -37,6 +37,8 @@ CheckOptions:
   - key: readability-identifier-naming.EnumCase
     value: CamelCase
   - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.MethodCase
     value: lower_case
   - key: readability-identifier-naming.VariableCase
     value: lower_case
@@ -88,6 +90,3 @@ CheckOptions:
     value: true
   - key: readability-implicit-bool-conversion.AllowIntegerConditions
     value: false
-
-HeaderFilterRegex: '.*'
-FormatStyle: file
