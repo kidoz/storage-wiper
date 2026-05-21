@@ -30,7 +30,7 @@ public:
      * @param cancel_flag Reference to cancellation flag
      * @return true if successful, false otherwise
      */
-    virtual bool execute(int fd, uint64_t size, ProgressCallback callback,
+    [[nodiscard]] virtual bool execute(int fd, uint64_t size, ProgressCallback callback,
                          const std::atomic<bool>& cancel_flag) = 0;
 
     /**
@@ -46,7 +46,7 @@ public:
      * @param cancel_flag Reference to cancellation flag
      * @return true if successful, false otherwise
      */
-    virtual bool execute_on_device(const std::string& device_path, uint64_t size,
+    [[nodiscard]] virtual bool execute_on_device(const std::string& device_path, uint64_t size,
                                    ProgressCallback callback,
                                    const std::atomic<bool>& cancel_flag) {
         int fd = open(device_path.c_str(), O_WRONLY | O_SYNC);
@@ -75,37 +75,37 @@ public:
      *
      * @return true if device-level access is required
      */
-    virtual bool requires_device_access() const { return false; }
+    [[nodiscard]] virtual bool requires_device_access() const { return false; }
 
     /**
      * @brief Get the name of this algorithm
      * @return Algorithm name
      */
-    virtual std::string get_name() const = 0;
+    [[nodiscard]] virtual std::string get_name() const = 0;
 
     /**
      * @brief Get a description of this algorithm
      * @return Algorithm description
      */
-    virtual std::string get_description() const = 0;
+    [[nodiscard]] virtual std::string get_description() const = 0;
 
     /**
      * @brief Get the number of passes this algorithm performs
      * @return Number of passes
      */
-    virtual int get_pass_count() const = 0;
+    [[nodiscard]] virtual int get_pass_count() const = 0;
 
     /**
      * @brief Check if this algorithm is compatible with SSDs
      * @return true if SSD compatible, false otherwise
      */
-    virtual bool is_ssd_compatible() const = 0;
+    [[nodiscard]] virtual bool is_ssd_compatible() const = 0;
 
     /**
      * @brief Check if this algorithm supports post-wipe verification
      * @return true if verify() can be called after execute()
      */
-    virtual bool supports_verification() const { return false; }
+    [[nodiscard]] virtual bool supports_verification() const { return false; }
 
     /**
      * @brief Verify the wipe operation by reading back and checking patterns
@@ -120,7 +120,7 @@ public:
      * - RandomFill: statistical check for entropy
      * - Multi-pass algorithms: verify final pattern
      */
-    virtual bool verify(int fd, uint64_t size, ProgressCallback callback,
+    [[nodiscard]] virtual bool verify(int fd, uint64_t size, ProgressCallback callback,
                         const std::atomic<bool>& cancel_flag) {
         // Default implementation: verification not supported
         (void)fd;
