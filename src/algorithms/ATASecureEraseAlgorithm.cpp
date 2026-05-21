@@ -15,29 +15,6 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
-#include <thread>
-
-#include <scsi/sg.h>
-
-// ATA pass-through command structure for SG_IO
-struct ata_passthrough_cmd {
-    uint8_t opcode;    // 0x85 for ATA PASS-THROUGH (16)
-    uint8_t protocol;  // Protocol field
-    uint8_t flags;     // t_length, t_dir, t_type, byt_block
-    uint8_t features_high;
-    uint8_t features_low;
-    uint8_t sector_count_high;
-    uint8_t sector_count_low;
-    uint8_t lba_low_high;
-    uint8_t lba_low_low;
-    uint8_t lba_mid_high;
-    uint8_t lba_mid_low;
-    uint8_t lba_high_high;
-    uint8_t lba_high_low;
-    uint8_t device;
-    uint8_t command;
-    uint8_t control;
-};
 
 bool ATASecureEraseAlgorithm::execute([[maybe_unused]] int fd, [[maybe_unused]] uint64_t size,
                                       ProgressCallback callback,
@@ -272,34 +249,6 @@ ATASecurityInfo ATASecureEraseAlgorithm::get_security_info(const std::string& de
 bool ATASecureEraseAlgorithm::is_device_frozen(const std::string& device_path) {
     ATASecurityInfo info = get_security_info(device_path);
     return info.frozen;
-}
-
-bool ATASecureEraseAlgorithm::send_ata_command(int fd, uint8_t command, const void* data,
-                                               size_t data_size, bool data_out) {
-    // Use HDIO_DRIVE_CMD for simple commands
-    uint8_t cmd_buf[4 + 512];
-    std::memset(cmd_buf, 0, sizeof(cmd_buf));
-
-    cmd_buf[0] = command;
-    cmd_buf[1] = 0;  // sector count (for commands that need it)
-    cmd_buf[2] = 0;  // features
-    cmd_buf[3] = 0;  // sector number
-
-    if (data_out && data && data_size > 0) {
-        size_t copy_size = std::min(data_size, size_t(512));
-        std::memcpy(&cmd_buf[4], data, copy_size);
-    }
-
-    if (ioctl(fd, HDIO_DRIVE_CMD, cmd_buf) != 0) {
-        return false;
-    }
-
-    return true;
-}
-
-bool ATASecureEraseAlgorithm::read_identify_data(int fd, uint16_t* identify_data) {
-    struct hd_driveid* drive_id = reinterpret_cast<struct hd_driveid*>(identify_data);
-    return ioctl(fd, HDIO_GET_IDENTITY, drive_id) == 0;
 }
 
 bool ATASecureEraseAlgorithm::set_security_password(int fd, const char* password, bool master) {

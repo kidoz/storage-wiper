@@ -104,10 +104,8 @@ private:
     // ATA command codes
     static constexpr uint8_t ATA_OP_IDENTIFY = 0xEC;
     static constexpr uint8_t ATA_OP_SECURITY_SET_PASSWORD = 0xF1;
-    static constexpr uint8_t ATA_OP_SECURITY_UNLOCK = 0xF2;
     static constexpr uint8_t ATA_OP_SECURITY_ERASE_PREPARE = 0xF3;
     static constexpr uint8_t ATA_OP_SECURITY_ERASE_UNIT = 0xF4;
-    static constexpr uint8_t ATA_OP_SECURITY_FREEZE_LOCK = 0xF5;
     static constexpr uint8_t ATA_OP_SECURITY_DISABLE_PASSWORD = 0xF6;
 
     // Security word offsets in IDENTIFY data
@@ -126,17 +124,6 @@ private:
 
     // Temporary password for secure erase
     static constexpr char TEMP_PASSWORD[] = "StorageWiper";
-
-    /**
-     * @brief Send ATA command via ioctl
-     */
-    bool send_ata_command(int fd, uint8_t command, const void* data = nullptr, size_t data_size = 0,
-                          bool data_out = false);
-
-    /**
-     * @brief Read IDENTIFY DEVICE data
-     */
-    bool read_identify_data(int fd, uint16_t* identify_data);
 
     /**
      * @brief Set ATA security password
