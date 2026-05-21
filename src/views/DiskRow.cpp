@@ -125,7 +125,7 @@ void DiskRow::setup_health_indicator() {
             break;
 
         case SmartData::HealthStatus::WARNING:
-            health_icon_->set_from_icon_name("warning-symbolic");
+            health_icon_->set_from_icon_name("dialog-warning-symbolic");
             health_label_->set_text("Warning");
             health_label_->remove_css_class("success");
             health_label_->remove_css_class("error");
@@ -133,7 +133,7 @@ void DiskRow::setup_health_indicator() {
             break;
 
         case SmartData::HealthStatus::CRITICAL:
-            health_icon_->set_from_icon_name("error-symbolic");
+            health_icon_->set_from_icon_name("dialog-error-symbolic");
             health_label_->set_text("Critical");
             health_label_->remove_css_class("success");
             health_label_->remove_css_class("warning");
