@@ -96,47 +96,4 @@ auto verify_pattern(int fd, uint64_t size, uint8_t pattern, ProgressCallback cal
     return !mismatch_found && !cancel_flag.load();
 }
 
-auto verify_buffer_pattern(int fd, uint64_t size, const std::vector<uint8_t>& expected_pattern,
-                           ProgressCallback callback, const std::atomic<bool>& cancel_flag)
-    -> bool {
-    if (size == 0 || expected_pattern.empty())
-        return true;
-
-    // Seek to beginning
-    if (lseek(fd, 0, SEEK_SET) != 0) {
-        return false;
-    }
-
-    std::vector<uint8_t> buffer(VERIFY_BUFFER_SIZE);
-    uint64_t verified = 0;
-    bool mismatch_found = false;
-
-    while (verified < size && !cancel_flag.load()) {
-        size_t to_read = std::min(static_cast<uint64_t>(buffer.size()), size - verified);
-        ssize_t bytes_read = read_with_retry(fd, buffer.data(), to_read);
-
-        if (bytes_read <= 0) {
-            return false;  // Read error
-        }
-
-        // Check bytes match expected pattern (repeating)
-        for (ssize_t i = 0; i < bytes_read; ++i) {
-            size_t pattern_idx = (verified + static_cast<uint64_t>(i)) % expected_pattern.size();
-            if (buffer[static_cast<size_t>(i)] != expected_pattern[pattern_idx]) {
-                mismatch_found = true;
-                break;
-            }
-        }
-
-        if (mismatch_found) {
-            break;
-        }
-
-        verified += static_cast<uint64_t>(bytes_read);
-        emit_progress(callback, verified, size);
-    }
-
-    return !mismatch_found && !cancel_flag.load();
-}
-
 }  // namespace verification

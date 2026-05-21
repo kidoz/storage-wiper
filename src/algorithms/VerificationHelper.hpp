@@ -9,7 +9,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <vector>
 
 namespace verification {
 
@@ -35,19 +34,5 @@ namespace verification {
  */
 [[nodiscard]] auto verify_pattern(int fd, uint64_t size, uint8_t pattern, ProgressCallback callback,
                                   const std::atomic<bool>& cancel_flag) -> bool;
-
-/**
- * @brief Verify using a pre-generated pattern buffer
- * @param fd File descriptor (opened for reading)
- * @param size Device size in bytes
- * @param expected_pattern Pattern that should repeat
- * @param callback Progress callback
- * @param cancel_flag Cancellation flag
- * @return true if device matches the pattern
- */
-[[nodiscard]] auto verify_buffer_pattern(int fd, uint64_t size,
-                                         const std::vector<uint8_t>& expected_pattern,
-                                         ProgressCallback callback,
-                                         const std::atomic<bool>& cancel_flag) -> bool;
 
 }  // namespace verification
