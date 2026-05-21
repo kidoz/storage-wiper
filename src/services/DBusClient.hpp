@@ -106,13 +106,6 @@ public:
         -> std::expected<void, util::Error> override;
     void invalidate_cache() override;
 
-    /**
-     * @brief Get detailed SMART data for a disk
-     * @param path Device path
-     * @return SmartData with all available attributes
-     */
-    [[nodiscard]] auto get_smart_data(const std::string& path) -> SmartData;
-
     // IWipeService interface
     auto wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm, ProgressCallback callback)
         -> bool override;

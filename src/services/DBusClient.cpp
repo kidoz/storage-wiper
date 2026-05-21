@@ -867,54 +867,6 @@ auto DBusClient::cancel_current_operation() -> bool {
     return cancelled != FALSE;
 }
 
-auto DBusClient::get_smart_data(const std::string& path) -> SmartData {
-    SmartData smart;
-
-    GDBusProxy* proxy_copy = nullptr;
-    {
-        std::lock_guard lock(proxy_mutex_);
-        if (!proxy_)
-            return smart;
-        proxy_copy = proxy_;
-        g_object_ref(proxy_copy);
-    }
-    ProxyRefGuard proxy_guard{proxy_copy};
-
-    GError* error = nullptr;
-    GVariant* result =
-        g_dbus_proxy_call_sync(proxy_copy, "GetDiskSMART", g_variant_new("(s)", path.c_str()),
-                               G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
-
-    if (!result) {
-        g_clear_error(&error);
-        return smart;
-    }
-
-    gboolean available = FALSE;
-    gboolean healthy = FALSE;
-    gint64 power_on_hours = -1;
-    gint32 reallocated_sectors = -1;
-    gint32 pending_sectors = -1;
-    gint32 temperature_celsius = -1;
-    gint32 uncorrectable_errors = -1;
-    guint32 status = 0;
-
-    g_variant_get(result, "(bbxiiiiu)", &available, &healthy, &power_on_hours, &reallocated_sectors,
-                  &pending_sectors, &temperature_celsius, &uncorrectable_errors, &status);
-    g_variant_unref(result);
-
-    smart.available = available != FALSE;
-    smart.healthy = healthy != FALSE;
-    smart.power_on_hours = power_on_hours;
-    smart.reallocated_sectors = reallocated_sectors;
-    smart.pending_sectors = pending_sectors;
-    smart.temperature_celsius = temperature_celsius;
-    smart.uncorrectable_errors = uncorrectable_errors;
-    smart.status = static_cast<SmartData::HealthStatus>(status);
-
-    return smart;
-}
-
 void DBusClient::invalidate_cache() {
     // DBusClient is stateless regarding disks, it fetches fresh data from helper
     // No local cache to invalidate
