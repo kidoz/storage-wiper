@@ -24,7 +24,7 @@ bool GOSTAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
 
     // Pass 1: Zero fill
     std::vector<uint8_t> zeros(BUFFER_SIZE, 0x00);
-    if (!write_pattern(fd, size, zeros.data(), zeros.size(), callback, 1, 2, cancel_flag)) {
+    if (!write_pattern(fd, size, zeros, callback, 1, 2, cancel_flag)) {
         return false;
     }
     if (lseek(fd, 0, SEEK_SET) == -1)
@@ -45,7 +45,7 @@ bool GOSTAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
         }
 
         size_t to_write = std::min(static_cast<uint64_t>(BUFFER_SIZE), size - written);
-        ssize_t result = util::write_with_retry(fd, random_buffer.data(), to_write);
+        ssize_t result = util::write_with_retry(fd, std::span<const uint8_t>(random_buffer.data(), to_write));
 
         if (result <= 0) {
             return false;
@@ -69,14 +69,14 @@ bool GOSTAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
     return !cancel_flag.load();
 }
 
-bool GOSTAlgorithm::write_pattern(int fd, uint64_t size, const uint8_t* pattern,
-                                  size_t pattern_size, ProgressCallback callback, int pass,
+bool GOSTAlgorithm::write_pattern(int fd, uint64_t size, std::span<const uint8_t> pattern,
+                                  ProgressCallback callback, int pass,
                                   int total_passes, const std::atomic<bool>& cancel_flag) {
     uint64_t written = 0;
 
     while (written < size && !cancel_flag.load()) {
-        size_t to_write = std::min(pattern_size, size - written);
-        ssize_t result = util::write_with_retry(fd, pattern, to_write);
+        size_t to_write = std::min(pattern.size(), size - written);
+        ssize_t result = util::write_with_retry(fd, std::span<const uint8_t>(pattern.data(), to_write));
 
         if (result <= 0) {
             return false;

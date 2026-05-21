@@ -11,6 +11,7 @@
 #include <array>
 #include <cmath>
 #include <numeric>
+#include <span>
 
 namespace verification {
 
@@ -20,9 +21,9 @@ constexpr size_t VERIFY_BUFFER_SIZE = 1'024 * 1'024;  // 1MB buffer
 /**
  * @brief Read with retry on EINTR
  */
-auto read_with_retry(int fd, void* buf, size_t count) -> ssize_t {
+auto read_with_retry(int fd, std::span<uint8_t> buf) -> ssize_t {
     while (true) {
-        ssize_t result = ::read(fd, buf, count);
+        ssize_t result = ::read(fd, buf.data(), buf.size());
         if (result >= 0 || errno != EINTR) {
             return result;
         }
@@ -71,7 +72,7 @@ auto verify_pattern(int fd, uint64_t size, uint8_t pattern, ProgressCallback cal
 
     while (verified < size && !cancel_flag.load()) {
         size_t to_read = std::min(static_cast<uint64_t>(buffer.size()), size - verified);
-        ssize_t bytes_read = read_with_retry(fd, buffer.data(), to_read);
+        ssize_t bytes_read = read_with_retry(fd, std::span<uint8_t>(buffer.data(), to_read));
 
         if (bytes_read <= 0) {
             return false;  // Read error
