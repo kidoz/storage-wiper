@@ -203,6 +203,11 @@ install_data(
   install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps'
 )
 
+install_data(
+  'data/resources/icons/hicolor/symbolic/apps/storage-wiper-symbolic.svg',
+  install_dir: get_option('datadir') / 'icons/hicolor/symbolic/apps'
+)
+
 # PolicyKit policy installation (for D-Bus helper authorization)
 install_data(
   'data/su.kidoz.storage_wiper.policy',

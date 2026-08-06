@@ -1,41 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="baseGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f0f0f0"/>
-      <stop offset="1" stop-color="#cfcfcf"/>
-    </linearGradient>
-    <linearGradient id="platterGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#bdbdbd"/>
-      <stop offset="1" stop-color="#9e9e9e"/>
-    </linearGradient>
-    <linearGradient id="shineGrad" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="eraserGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f6ad55"/>
-      <stop offset="1" stop-color="#ed8936"/>
-    </linearGradient>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- A compact hard-drive and eraser metaphor using the GNOME palette. -->
+  <rect x="12" y="18" width="104" height="88" rx="18" fill="#3584e4"/>
+  <path d="M12 88h104v2c0 10-8 18-18 18H30c-10 0-18-8-18-18z" fill="#1c71d8"/>
 
-  <ellipse cx="64" cy="104" rx="40" ry="8" fill="#000000" opacity="0.12"/>
+  <g transform="translate(0 2)">
+    <rect x="24" y="30" width="80" height="60" rx="12" fill="#f6f5f4"/>
+    <path d="M24 78h80v4c0 4-4 8-8 8H32c-4 0-8-4-8-8z" fill="#deddda"/>
 
-  <rect x="18" y="26" width="92" height="70" rx="12" fill="url(#baseGrad)"/>
-  <rect x="22" y="30" width="84" height="10" rx="5" fill="url(#shineGrad)"/>
+    <circle cx="52" cy="58" r="20" fill="#c0bfbc"/>
+    <circle cx="52" cy="58" r="13" fill="#f6f5f4"/>
+    <circle cx="52" cy="58" r="5" fill="#77767b"/>
+    <path d="M52 58l31-10" fill="none" stroke="#77767b" stroke-width="4"
+          stroke-linecap="round"/>
+    <circle cx="83" cy="48" r="5" fill="#9a9996"/>
+    <circle cx="94" cy="80" r="4" fill="#33d17a"/>
 
-  <circle cx="52" cy="60" r="22" fill="url(#platterGrad)"/>
-  <circle cx="52" cy="60" r="14" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2"/>
-  <circle cx="52" cy="60" r="4" fill="#7a7a7a"/>
-
-  <path d="M 52 60 L 88 52" stroke="#9a9a9a" stroke-width="3" stroke-linecap="round"/>
-  <circle cx="88" cy="52" r="4" fill="#cfcfcf"/>
-
-  <rect x="92" y="80" width="12" height="6" rx="3" fill="#6fcf97"/>
-
-  <g transform="translate(68 62) rotate(-18 18 10)">
-    <rect x="0" y="0" width="36" height="20" rx="4" fill="url(#eraserGrad)"/>
-    <rect x="0" y="12" width="36" height="8" rx="4" fill="#e6e6e6"/>
-    <rect x="0" y="10" width="36" height="2" fill="#d18b2c" opacity="0.6"/>
+    <g transform="rotate(-18 82 75)">
+      <rect x="59" y="64" width="48" height="24" rx="7" fill="#ff7800"/>
+      <path d="M94 64h6c4 0 7 3 7 7v10c0 4-3 7-7 7h-6z" fill="#f6f5f4"/>
+      <path d="M92 64h4v24h-4z" fill="#e66100"/>
+    </g>
   </g>
 </svg>
