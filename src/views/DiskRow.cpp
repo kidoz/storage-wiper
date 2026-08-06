@@ -47,17 +47,25 @@ void DiskRow::setup_from_builder() {
     disk_icon_ = builder->get_widget<Gtk::Image>("disk_icon");
     name_label_ = builder->get_widget<Gtk::Label>("name_label");
     info_label_ = builder->get_widget<Gtk::Label>("info_label");
-    mounted_label_ = builder->get_widget<Gtk::Label>("mounted_label");
+    mounted_box_ = builder->get_widget<Gtk::Box>("mounted_box");
     health_box_ = builder->get_widget<Gtk::Box>("health_box");
     health_icon_ = builder->get_widget<Gtk::Image>("health_icon");
     health_label_ = builder->get_widget<Gtk::Label>("health_label");
 
-    if (!disk_icon_ || !name_label_ || !info_label_ || !mounted_label_) {
+    if (!disk_icon_ || !name_label_ || !info_label_ || !mounted_box_) {
         throw std::runtime_error("Failed to load disk-row.ui: required widgets not found");
     }
 }
 
 void DiskRow::populate_from_disk_info() {
+    if (disk_.is_removable) {
+        disk_icon_->set_from_icon_name("drive-removable-media-symbolic");
+    } else if (disk_.is_ssd) {
+        disk_icon_->set_from_icon_name("drive-harddisk-solidstate-symbolic");
+    } else {
+        disk_icon_->set_from_icon_name("drive-harddisk-symbolic");
+    }
+
     // Set disk name with model (using markup for bold path)
     const auto escaped_path = Glib::Markup::escape_text(disk_.path).raw();
     const auto model = disk_.model.empty() ? std::string{"Unknown model"} : disk_.model;
@@ -97,7 +105,7 @@ void DiskRow::populate_from_disk_info() {
     setup_health_indicator();
 
     // Show/hide mounted indicator (also show if LVM volume is mounted)
-    mounted_label_->set_visible(disk_.is_mounted);
+    mounted_box_->set_visible(disk_.is_mounted);
 }
 
 void DiskRow::setup_health_indicator() {
@@ -122,6 +130,9 @@ void DiskRow::setup_health_indicator() {
             health_label_->remove_css_class("warning");
             health_label_->remove_css_class("error");
             health_label_->add_css_class("success");
+            health_icon_->remove_css_class("warning");
+            health_icon_->remove_css_class("error");
+            health_icon_->add_css_class("success");
             break;
 
         case SmartData::HealthStatus::WARNING:
@@ -130,6 +141,9 @@ void DiskRow::setup_health_indicator() {
             health_label_->remove_css_class("success");
             health_label_->remove_css_class("error");
             health_label_->add_css_class("warning");
+            health_icon_->remove_css_class("success");
+            health_icon_->remove_css_class("error");
+            health_icon_->add_css_class("warning");
             break;
 
         case SmartData::HealthStatus::CRITICAL:
@@ -138,6 +152,9 @@ void DiskRow::setup_health_indicator() {
             health_label_->remove_css_class("success");
             health_label_->remove_css_class("warning");
             health_label_->add_css_class("error");
+            health_icon_->remove_css_class("success");
+            health_icon_->remove_css_class("warning");
+            health_icon_->add_css_class("error");
             break;
 
         case SmartData::HealthStatus::UNKNOWN:

@@ -8,11 +8,11 @@
     <property name="margin-top">8</property>
     <property name="margin-bottom">8</property>
 
-    <!-- Disk icon -->
     <child>
       <object class="GtkImage" id="disk_icon">
         <property name="icon-name">drive-harddisk-symbolic</property>
         <property name="pixel-size">32</property>
+        <property name="valign">center</property>
       </object>
     </child>
 
@@ -71,16 +71,30 @@
       </object>
     </child>
 
-    <!-- Mounted indicator -->
     <child>
-          <object class="GtkLabel" id="mounted_label">
-            <property name="label">MOUNTED</property>
-            <property name="visible">false</property>
-            <property name="valign">center</property>
+      <object class="GtkBox" id="mounted_box">
+        <property name="orientation">horizontal</property>
+        <property name="spacing">4</property>
+        <property name="visible">false</property>
+        <property name="valign">center</property>
+        <child>
+          <object class="GtkImage">
+            <property name="icon-name">dialog-warning-symbolic</property>
             <style>
               <class name="warning"/>
             </style>
           </object>
         </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="label">Mounted</property>
+            <style>
+              <class name="warning"/>
+              <class name="caption"/>
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
   </object>
 </interface>
