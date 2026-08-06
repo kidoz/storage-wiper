@@ -101,7 +101,7 @@ void MainWindow::create_header_bar() {
     header_bar_ = adw_header_bar_new();
     adw_header_bar_set_title_widget(
         ADW_HEADER_BAR(header_bar_),
-        adw_window_title_new("Storage Wiper", "Secure Disk Wiping Tool"));
+        adw_window_title_new("Storage Wiper", "Securely Erase Storage Devices"));
 
     // Refresh button
     refresh_button_ = gtk_button_new_from_icon_name("view-refresh-symbolic");
@@ -109,11 +109,24 @@ void MainWindow::create_header_bar() {
     g_signal_connect(refresh_button_, "clicked", G_CALLBACK(on_refresh_clicked), this);
     adw_header_bar_pack_start(ADW_HEADER_BAR(header_bar_), refresh_button_);
 
-    // About button
-    auto* about_button = gtk_button_new_from_icon_name("help-about-symbolic");
-    gtk_widget_set_tooltip_text(about_button, "About");
-    g_signal_connect(about_button, "clicked", G_CALLBACK(on_about_clicked), this);
-    adw_header_bar_pack_end(ADW_HEADER_BAR(header_bar_), about_button);
+    // Primary menu
+    auto* action_group = g_simple_action_group_new();
+    auto* about_action = g_simple_action_new("about", nullptr);
+    g_signal_connect(about_action, "activate", G_CALLBACK(on_about_action), this);
+    g_action_map_add_action(G_ACTION_MAP(action_group), G_ACTION(about_action));
+    gtk_widget_insert_action_group(GTK_WIDGET(window_), "win", G_ACTION_GROUP(action_group));
+    g_object_unref(about_action);
+    g_object_unref(action_group);
+
+    auto* menu_model = g_menu_new();
+    g_menu_append(menu_model, "About Storage Wiper", "win.about");
+
+    auto* menu_button = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button), "open-menu-symbolic");
+    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menu_button), G_MENU_MODEL(menu_model));
+    gtk_widget_set_tooltip_text(menu_button, "Main Menu");
+    adw_header_bar_pack_end(ADW_HEADER_BAR(header_bar_), menu_button);
+    g_object_unref(menu_model);
 }
 
 void MainWindow::bind_messages() {
@@ -245,7 +258,7 @@ void MainWindow::on_refresh_clicked(GtkWidget*, gpointer user_data) {
     }
 }
 
-void MainWindow::on_about_clicked(GtkWidget*, gpointer user_data) {
+void MainWindow::on_about_action(GSimpleAction*, GVariant*, gpointer user_data) {
     auto* self = static_cast<MainWindow*>(user_data);
     self->show_about_dialog();
 }
@@ -254,6 +267,7 @@ void MainWindow::show_about_dialog() {
     auto* about = ADW_ABOUT_DIALOG(adw_about_dialog_new());
 
     adw_about_dialog_set_application_name(about, "Storage Wiper");
+    adw_about_dialog_set_application_icon(about, "storage-wiper");
     adw_about_dialog_set_version(about, PROJECT_VERSION);
     adw_about_dialog_set_developer_name(about, "Aleksandr Pavlov");
     adw_about_dialog_set_comments(

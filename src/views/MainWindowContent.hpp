@@ -69,8 +69,10 @@ private:
     Gtk::CheckButton* verification_check_ = nullptr;
     Gtk::Box* status_box_ = nullptr;
     Gtk::Spinner* status_spinner_ = nullptr;
+    Gtk::Image* status_icon_ = nullptr;
     Gtk::Label* status_title_label_ = nullptr;
     Gtk::Label* status_detail_label_ = nullptr;
+    Gtk::Box* algorithm_warning_box_ = nullptr;
     Gtk::Label* algorithm_warning_label_ = nullptr;
 
     // Algorithm radio button group

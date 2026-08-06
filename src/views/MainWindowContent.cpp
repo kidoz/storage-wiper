@@ -89,13 +89,16 @@ void MainWindowContent::setup_from_builder() {
     verification_check_ = builder->get_widget<Gtk::CheckButton>("verification_check");
     status_box_ = builder->get_widget<Gtk::Box>("status_box");
     status_spinner_ = builder->get_widget<Gtk::Spinner>("status_spinner");
+    status_icon_ = builder->get_widget<Gtk::Image>("status_icon");
     status_title_label_ = builder->get_widget<Gtk::Label>("status_title_label");
     status_detail_label_ = builder->get_widget<Gtk::Label>("status_detail_label");
+    algorithm_warning_box_ = builder->get_widget<Gtk::Box>("algorithm_warning_box");
     algorithm_warning_label_ = builder->get_widget<Gtk::Label>("algorithm_warning_label");
 
     if (!disk_list_ || !options_box_ || !progress_bar_ || !progress_label_ || !wipe_button_ ||
         !cancel_button_ || !verification_check_ || !status_box_ || !status_spinner_ ||
-        !status_title_label_ || !status_detail_label_ || !algorithm_warning_label_) {
+        !status_icon_ || !status_title_label_ || !status_detail_label_ || !algorithm_warning_box_ ||
+        !algorithm_warning_label_) {
         throw std::runtime_error("Failed to load main-window.ui: required widgets not found");
     }
 }
@@ -283,7 +286,7 @@ void MainWindowContent::bind_algorithm_warning() {
         post_ui_update([this, warning]() {
             if (algorithm_warning_label_) {
                 algorithm_warning_label_->set_text(warning);
-                algorithm_warning_label_->set_visible(!warning.empty());
+                algorithm_warning_box_->set_visible(!warning.empty());
             }
         });
     });
@@ -291,7 +294,7 @@ void MainWindowContent::bind_algorithm_warning() {
 
     const auto warning = view_model_->algorithm_warning.get();
     algorithm_warning_label_->set_text(warning);
-    algorithm_warning_label_->set_visible(!warning.empty());
+    algorithm_warning_box_->set_visible(!warning.empty());
 }
 
 void MainWindowContent::update_disk_list(const std::vector<DiskInfo>& disks) {
@@ -437,7 +440,7 @@ void MainWindowContent::update_progress_visibility(bool visible) {
 }
 
 void MainWindowContent::update_status_message() {
-    if (!view_model_ || !status_box_ || !status_spinner_ || !status_title_label_ ||
+    if (!view_model_ || !status_box_ || !status_spinner_ || !status_icon_ || !status_title_label_ ||
         !status_detail_label_) {
         return;
     }
@@ -446,23 +449,28 @@ void MainWindowContent::update_status_message() {
     bool spinning = false;
     std::string title;
     std::string detail;
+    std::string icon_name;
 
     if (!view_model_->is_connected.get()) {
         title = "Helper service unavailable";
+        icon_name = "dialog-error-symbolic";
         detail = view_model_->connection_error.get();
         if (detail.empty()) {
             detail = "Install and start the privileged helper, then refresh the disk list.";
         }
     } else if (view_model_->is_operation_pending.get()) {
         title = "Preparing wipe operation";
+        icon_name = "security-high-symbolic";
         detail = "Waiting for the privileged helper to finish the requested operation.";
         spinning = true;
     } else if (view_model_->is_disk_refreshing.get()) {
         title = "Loading storage devices";
+        icon_name = "view-refresh-symbolic";
         detail = "Reading block devices and SMART health information.";
         spinning = true;
     } else if (view_model_->disks.get().empty()) {
         title = "No storage devices found";
+        icon_name = "drive-harddisk-symbolic";
         detail = "Attach a supported disk or refresh after installing the helper service.";
     } else {
         visible = false;
@@ -470,6 +478,10 @@ void MainWindowContent::update_status_message() {
 
     status_box_->set_visible(visible);
     status_spinner_->set_visible(spinning);
+    status_icon_->set_visible(!spinning);
+    if (!icon_name.empty()) {
+        status_icon_->set_from_icon_name(icon_name);
+    }
     if (spinning) {
         status_spinner_->start();
     } else {

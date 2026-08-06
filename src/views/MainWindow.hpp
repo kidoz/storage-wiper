@@ -90,7 +90,7 @@ private:
 
     // Event handlers for header bar (Adwaita widgets use C callbacks)
     static void on_refresh_clicked(GtkWidget* widget, gpointer user_data);
-    static void on_about_clicked(GtkWidget* widget, gpointer user_data);
+    static void on_about_action(GSimpleAction* action, GVariant* parameter, gpointer user_data);
 
     // About dialog
     void show_about_dialog();
