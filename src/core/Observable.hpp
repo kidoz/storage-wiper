@@ -136,9 +136,12 @@ public:
     explicit Observable(T initial_value = T{}) : value_(std::move(initial_value)) {}
 
     /**
-     * @brief Get the current value
+     * @brief Get a snapshot of the current value
+     *
+     * Returns by value: handing out a reference would leave the caller reading
+     * value_ after the lock is released, racing concurrent set() calls.
      */
-    [[nodiscard]] auto get() const -> const T& {
+    [[nodiscard]] auto get() const -> T {
         std::lock_guard lock(mutex_);
         return value_;
     }
@@ -183,9 +186,9 @@ public:
 
     /**
      * @brief Explicit conversion to underlying type
-     * @note Made explicit to prevent unintended copies. Use get() for direct access.
+     * @note Explicit to keep copies visible. Returns a snapshot like get().
      */
-    explicit operator const T&() const { return get(); }
+    explicit operator T() const { return get(); }
 
 private:
     void notify_subscribers() {
