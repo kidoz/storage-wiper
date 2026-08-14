@@ -23,7 +23,8 @@ bool RandomFillAlgorithm::execute(int fd, uint64_t size, ProgressCallback callba
         util::RandomBufferGenerator::fill(buffer);
 
         size_t to_write = std::min(static_cast<uint64_t>(BUFFER_SIZE), size - written);
-        ssize_t result = util::write_with_retry(fd, std::span<const uint8_t>(buffer.data(), to_write));
+        ssize_t result =
+            util::write_with_retry(fd, std::span<const uint8_t>(buffer.data(), to_write));
 
         if (result <= 0) {
             return false;
@@ -45,4 +46,9 @@ bool RandomFillAlgorithm::execute(int fd, uint64_t size, ProgressCallback callba
     }
 
     return !cancel_flag.load();
+}
+
+bool RandomFillAlgorithm::verify(int fd, uint64_t size, ProgressCallback callback,
+                                 const std::atomic<bool>& cancel_flag) {
+    return verification::verify_random(fd, size, std::move(callback), cancel_flag);
 }

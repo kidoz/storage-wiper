@@ -308,6 +308,7 @@ if get_option('enable_tests')
     'tests/unit/algorithms/GOSTAlgorithmTest.cpp',
     'tests/unit/algorithms/GutmannAlgorithmTest.cpp',
     'tests/unit/algorithms/ATASecureEraseAlgorithmTest.cpp',
+    'tests/unit/algorithms/VerificationHelperTest.cpp',
     'tests/unit/services/WipeServiceTest.cpp',
     'tests/unit/services/DiskServiceTest.cpp',
     'tests/unit/services/DevicePathMatcherTest.cpp',

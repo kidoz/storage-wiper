@@ -97,4 +97,51 @@ auto verify_pattern(int fd, uint64_t size, uint8_t pattern, ProgressCallback cal
     return !mismatch_found && !cancel_flag.load();
 }
 
+auto verify_random(int fd, uint64_t size, ProgressCallback callback,
+                   const std::atomic<bool>& cancel_flag) -> bool {
+    // Chi-squared critical value for 255 degrees of freedom at p = 0.001.
+    // SecureRandomTest mirrors this threshold; keep the two in sync.
+    constexpr double CHI_SQUARED_CRITICAL = 310.5;
+
+    if (size == 0)
+        return true;
+
+    if (lseek(fd, 0, SEEK_SET) != 0) {
+        return false;
+    }
+
+    std::vector<uint8_t> buffer(VERIFY_BUFFER_SIZE);
+    std::array<uint64_t, 256> counts{};
+    uint64_t verified = 0;
+
+    while (verified < size && !cancel_flag.load()) {
+        size_t to_read = std::min(static_cast<uint64_t>(buffer.size()), size - verified);
+        ssize_t bytes_read = read_with_retry(fd, std::span<uint8_t>(buffer.data(), to_read));
+
+        if (bytes_read <= 0) {
+            return false;  // Read error
+        }
+
+        for (ssize_t i = 0; i < bytes_read; ++i) {
+            ++counts[buffer[static_cast<size_t>(i)]];
+        }
+
+        verified += static_cast<uint64_t>(bytes_read);
+        emit_progress(callback, verified, size);
+    }
+
+    if (cancel_flag.load()) {
+        return false;
+    }
+
+    const double expected = static_cast<double>(verified) / 256.0;
+    double chi_squared = 0.0;
+    for (const auto count : counts) {
+        const double diff = static_cast<double>(count) - expected;
+        chi_squared += (diff * diff) / expected;
+    }
+
+    return chi_squared < CHI_SQUARED_CRITICAL;
+}
+
 }  // namespace verification

@@ -44,7 +44,8 @@ bool DoD522022MAlgorithm::execute(int fd, uint64_t size, ProgressCallback callba
         util::RandomBufferGenerator::fill(random_buffer);
 
         size_t to_write = std::min(static_cast<uint64_t>(BUFFER_SIZE), size - written);
-        ssize_t result = util::write_with_retry(fd, std::span<const uint8_t>(random_buffer.data(), to_write));
+        ssize_t result =
+            util::write_with_retry(fd, std::span<const uint8_t>(random_buffer.data(), to_write));
 
         if (result <= 0) {
             return false;
@@ -68,14 +69,22 @@ bool DoD522022MAlgorithm::execute(int fd, uint64_t size, ProgressCallback callba
     return !cancel_flag.load();
 }
 
+bool DoD522022MAlgorithm::verify(int fd, uint64_t size, ProgressCallback callback,
+                                 const std::atomic<bool>& cancel_flag) {
+    // The final DoD pass writes CSPRNG data, so verification is the same
+    // statistical uniformity check used by RandomFill.
+    return verification::verify_random(fd, size, std::move(callback), cancel_flag);
+}
+
 bool DoD522022MAlgorithm::write_pattern(int fd, uint64_t size, std::span<const uint8_t> pattern,
-                                        ProgressCallback callback, int pass,
-                                        int total_passes, const std::atomic<bool>& cancel_flag) {
+                                        ProgressCallback callback, int pass, int total_passes,
+                                        const std::atomic<bool>& cancel_flag) {
     uint64_t written = 0;
 
     while (written < size && !cancel_flag.load()) {
         size_t to_write = std::min(pattern.size(), size - written);
-        ssize_t result = util::write_with_retry(fd, std::span<const uint8_t>(pattern.data(), to_write));
+        ssize_t result =
+            util::write_with_retry(fd, std::span<const uint8_t>(pattern.data(), to_write));
 
         if (result <= 0) {
             return false;
