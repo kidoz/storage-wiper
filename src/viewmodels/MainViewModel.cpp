@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <format>
 #include <thread>
@@ -464,10 +465,14 @@ void MainViewModel::handle_wipe_completion(bool success, const std::string& erro
 
 void MainViewModel::show_message(MessageInfo::Type type, const std::string& title,
                                  const std::string& message, std::function<void(bool)> callback) {
+    // The sequence makes consecutive identical dialogs compare unequal so
+    // Observable::set() never swallows the notification (see MessageInfo).
+    static std::atomic<uint64_t> next_sequence{1};
     current_message.set(MessageInfo{.type = type,
                                     .title = title,
                                     .message = message,
-                                    .confirmation_callback = std::move(callback)});
+                                    .confirmation_callback = std::move(callback),
+                                    .sequence = next_sequence.fetch_add(1)});
 }
 
 auto MainViewModel::find_disk_info(const std::string& path) const -> std::optional<DiskInfo> {

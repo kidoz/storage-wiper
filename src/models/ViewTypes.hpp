@@ -7,6 +7,7 @@
 
 #include "models/WipeTypes.hpp"
 
+#include <cstdint>
 #include <functional>
 #include <string>
 
@@ -39,8 +40,14 @@ struct MessageInfo {
     std::string message;
     std::function<void(bool)> confirmation_callback;
 
-    // Note: Comparing callbacks is not possible, so we compare by content only
+    // Monotonic per-message id. Observable::set() skips notification when the
+    // new value compares equal, which would silently drop a repeated dialog
+    // with identical text (and its callback); the sequence keeps each
+    // show_message() distinct. Callbacks themselves are not comparable.
+    uint64_t sequence = 0;
+
     auto operator==(const MessageInfo& other) const -> bool {
-        return type == other.type && title == other.title && message == other.message;
+        return type == other.type && title == other.title && message == other.message &&
+               sequence == other.sequence;
     }
 };
