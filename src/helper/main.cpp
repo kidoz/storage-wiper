@@ -320,6 +320,10 @@ void handle_unmount_device(GDBusMethodInvocation* invocation, GVariant* paramete
  * Handle GetAlgorithms method call
  */
 void handle_get_algorithms(GDBusMethodInvocation* invocation) {
+    if (!check_authorization(invocation, POLKIT_ACTION_LIST_DISKS)) {
+        return;
+    }
+
     GVariantBuilder builder;
     g_variant_builder_init(&builder, G_VARIANT_TYPE("a(ussi)"));
 
