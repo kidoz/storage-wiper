@@ -7,7 +7,6 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <random>
 #include <string>
 #include <vector>
 
@@ -25,8 +24,7 @@ bool VSITRAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
     // Passes 1-6: Alternating patterns
     for (int pass = 1; pass <= 6; ++pass) {
         std::fill(buffer.begin(), buffer.end(), patterns[pass - 1]);
-        if (!write_pattern(fd, size, buffer, callback, pass, 7,
-                           cancel_flag)) {
+        if (!write_pattern(fd, size, buffer, callback, pass, 7, cancel_flag)) {
             return false;
         }
         if (lseek(fd, 0, SEEK_SET) == -1)
@@ -34,20 +32,15 @@ bool VSITRAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
     }
 
     // Pass 7: Random data
-    std::random_device random_device;
-    std::mt19937 random_generator(random_device());
-    std::uniform_int_distribution<uint8_t> byte_distribution(0, 255);
-
     uint64_t written = 0;
 
     while (written < size && !cancel_flag.load()) {
         // Generate fresh random data for each buffer
-        for (auto& byte : buffer) {
-            byte = byte_distribution(random_generator);
-        }
+        util::RandomBufferGenerator::fill(buffer);
 
         size_t to_write = std::min(static_cast<uint64_t>(BUFFER_SIZE), size - written);
-        ssize_t result = util::write_with_retry(fd, std::span<const uint8_t>(buffer.data(), to_write));
+        ssize_t result =
+            util::write_with_retry(fd, std::span<const uint8_t>(buffer.data(), to_write));
 
         if (result <= 0) {
             return false;
@@ -72,13 +65,14 @@ bool VSITRAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
 }
 
 bool VSITRAlgorithm::write_pattern(int fd, uint64_t size, std::span<const uint8_t> pattern,
-                                   ProgressCallback callback, int pass,
-                                   int total_passes, const std::atomic<bool>& cancel_flag) {
+                                   ProgressCallback callback, int pass, int total_passes,
+                                   const std::atomic<bool>& cancel_flag) {
     uint64_t written = 0;
 
     while (written < size && !cancel_flag.load()) {
         size_t to_write = std::min(pattern.size(), size - written);
-        ssize_t result = util::write_with_retry(fd, std::span<const uint8_t>(pattern.data(), to_write));
+        ssize_t result =
+            util::write_with_retry(fd, std::span<const uint8_t>(pattern.data(), to_write));
 
         if (result <= 0) {
             return false;

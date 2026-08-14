@@ -7,7 +7,6 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <random>
 #include <string>
 #include <vector>
 
@@ -31,21 +30,16 @@ bool GOSTAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
         return false;
 
     // Pass 2: Random data
-    std::random_device random_device;
-    std::mt19937 random_generator(random_device());
-    std::uniform_int_distribution<uint8_t> byte_distribution(0, 255);
-
     std::vector<uint8_t> random_buffer(BUFFER_SIZE);
     uint64_t written = 0;
 
     while (written < size && !cancel_flag.load()) {
         // Generate fresh random data for each buffer
-        for (auto& byte : random_buffer) {
-            byte = byte_distribution(random_generator);
-        }
+        util::RandomBufferGenerator::fill(random_buffer);
 
         size_t to_write = std::min(static_cast<uint64_t>(BUFFER_SIZE), size - written);
-        ssize_t result = util::write_with_retry(fd, std::span<const uint8_t>(random_buffer.data(), to_write));
+        ssize_t result =
+            util::write_with_retry(fd, std::span<const uint8_t>(random_buffer.data(), to_write));
 
         if (result <= 0) {
             return false;
@@ -70,13 +64,14 @@ bool GOSTAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
 }
 
 bool GOSTAlgorithm::write_pattern(int fd, uint64_t size, std::span<const uint8_t> pattern,
-                                  ProgressCallback callback, int pass,
-                                  int total_passes, const std::atomic<bool>& cancel_flag) {
+                                  ProgressCallback callback, int pass, int total_passes,
+                                  const std::atomic<bool>& cancel_flag) {
     uint64_t written = 0;
 
     while (written < size && !cancel_flag.load()) {
         size_t to_write = std::min(pattern.size(), size - written);
-        ssize_t result = util::write_with_retry(fd, std::span<const uint8_t>(pattern.data(), to_write));
+        ssize_t result =
+            util::write_with_retry(fd, std::span<const uint8_t>(pattern.data(), to_write));
 
         if (result <= 0) {
             return false;
