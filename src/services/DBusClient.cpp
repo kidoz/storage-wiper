@@ -113,17 +113,21 @@ void DBusClient::set_connection_state_callback(ConnectionStateCallback callback)
 }
 
 auto DBusClient::request_reconnect() -> bool {
-    std::lock_guard lock(state_mutex_);
+    {
+        std::lock_guard lock(state_mutex_);
 
-    // Only allow reconnect if disconnected or failed
-    if (connection_state_ == ConnectionState::CONNECTED ||
-        connection_state_ == ConnectionState::CONNECTING ||
-        connection_state_ == ConnectionState::RECONNECTING) {
-        return false;
+        // Only allow reconnect if disconnected or failed
+        if (connection_state_ == ConnectionState::CONNECTED ||
+            connection_state_ == ConnectionState::CONNECTING ||
+            connection_state_ == ConnectionState::RECONNECTING) {
+            return false;
+        }
+
+        reconnect_attempts_ = 0;
     }
 
-    // Reset reconnect state and try again
-    reconnect_attempts_ = 0;
+    // schedule_reconnect() calls set_state(), which takes state_mutex_ itself,
+    // so it must run outside the guard above (the mutex is non-recursive).
     schedule_reconnect();
     return true;
 }
