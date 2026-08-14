@@ -25,6 +25,16 @@ A modern, secure disk wiping application built with GTK4 and libadwaita for Linu
   - Mount status warnings
   - LVM Physical Volume support (with logical volume exclusion)
   - Size and model information display
+  - SMART health status (reallocated/pending sectors, temperature, power-on hours)
+
+- ✅ **Post-Wipe Verification** (optional)
+  - Zero Fill: reads back and checks all zeros
+  - Random Fill and DoD: chi-squared entropy test on the final pass
+
+- ⌨️ **Command-Line Interface** (`storage-wiper-cli`)
+  - List disks (plain or JSON output)
+  - Scripted wiping with any algorithm, optional verification
+  - Terminal progress bar with speed and ETA
 
 - 🎨 **Modern GTK4/Adwaita Interface**
   - Native GNOME integration
@@ -154,9 +164,26 @@ just test-filter "Pattern"  # Run specific tests
 just valgrind     # Check for memory leaks
 ```
 
-### Command-Line Options
+### Command-Line Interface
 
-Currently, Storage Wiper is a GUI-only application and does not support command-line options.
+The `storage-wiper-cli` executable provides scripted access to all wiping functionality:
+
+```bash
+# List available disks
+storage-wiper-cli --list
+storage-wiper-cli --list --json
+
+# Wipe a disk
+storage-wiper-cli --wipe /dev/sdb --algorithm dod-5220-22-m
+storage-wiper-cli --wipe /dev/sdb --verify          # With post-wipe verification
+storage-wiper-cli --wipe /dev/sdb --force-unmount   # Unmount before wiping
+storage-wiper-cli --wipe /dev/sdb --yes             # Skip confirmation
+
+# Help
+storage-wiper-cli --help
+```
+
+Algorithm names: `zero-fill` (default), `random-fill`, `dod-5220-22-m`, `schneier`, `vsitr`, `gost`, `gutmann`, `ata-secure-erase`.
 
 ## LVM and Device-Mapper Handling
 
@@ -255,6 +282,7 @@ storage-wiper/
 │   ├── Application.hpp/cpp
 │   ├── main.cpp
 │   ├── algorithms/       # Wiping algorithms (IWipeAlgorithm implementations)
+│   ├── cli/              # Command-line interface (storage-wiper-cli)
 │   ├── core/             # Observable, Command infrastructure
 │   ├── di/               # Dependency injection container
 │   ├── helper/           # Privileged D-Bus helper daemon
@@ -274,10 +302,11 @@ storage-wiper/
 └── meson.build           # Build configuration
 ```
 
-### Two Executables
+### Three Executables
 
 1. **storage_wiper** - Main GUI application (runs unprivileged)
-2. **storage-wiper-helper** - Privileged D-Bus helper for disk access (installed to libdir)
+2. **storage-wiper-cli** - Command-line interface (runs unprivileged, same D-Bus backend)
+3. **storage-wiper-helper** - Privileged D-Bus helper for disk access (installed to libdir)
 
 ### Code Quality
 
@@ -295,13 +324,17 @@ Static analysis available via:
 
 ## Project Status
 
-**Current Version**: 1.3.2
+**Current Version**: 1.4.1
 
 ### Completed Features
 - ✅ Core disk detection and enumeration
 - ✅ SSD/HDD/NVMe detection
 - ✅ 8 wiping algorithms implemented
 - ✅ GTK4/Adwaita UI
+- ✅ Command-line interface (`storage-wiper-cli` with JSON output)
+- ✅ Post-wipe verification (Zero Fill, Random Fill, DoD 5220.22-M)
+- ✅ SMART health monitoring (ATA and NVMe)
+- ✅ Structured file logging with rotation
 - ✅ MVVM architecture with observable data binding
 - ✅ Progress reporting with ETA and speed display
 - ✅ Desktop notifications on completion
@@ -314,7 +347,7 @@ Static analysis available via:
 - ✅ Exception-safe progress callbacks
 - ✅ Desktop integration (polkit, .desktop file, icon, AppStream metainfo)
 - ✅ Arch Linux packaging
-- ✅ Comprehensive unit tests (~139 tests with Google Test/Mock)
+- ✅ Comprehensive unit tests (Google Test/Mock)
 - ✅ Memory leak checking with valgrind
 - ✅ D-Bus privilege separation architecture
 - ✅ D-Bus reconnection logic
@@ -323,17 +356,12 @@ Static analysis available via:
 ### Planned Features
 - [ ] Multi-disk parallel wiping
 - [ ] Partition-level wiping (currently whole disks only)
-- [ ] Wiping verification
-- [ ] Command-line interface
 - [ ] Wiping profiles/presets
-- [ ] Detailed logging
 - [ ] Bad sector handling
-- [ ] SMART data display
 
 ### Known Limitations
-- GUI only (no CLI yet)
 - Whole disk wiping only (no partition support)
-- No verification mode
+- SMART data unavailable on most USB enclosures and SD cards
 - ATA Secure Erase requires hardware support and may not work on all drives
 - D-Bus helper requires proper polkit configuration for privilege escalation
 
