@@ -99,7 +99,9 @@ private:
                                                  const std::string& device_name)
         -> std::vector<std::string>;
 
-    std::unique_ptr<SmartService> smart_service_;
+    // shared_ptr: detached SMART query threads that outlive their 250ms timeout
+    // window capture this pointer, so it must survive DiskService destruction.
+    std::shared_ptr<SmartService> smart_service_;
 
     // Result cache with TTL
     mutable std::mutex cache_mutex_;

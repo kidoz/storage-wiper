@@ -41,12 +41,13 @@ namespace rng = std::ranges;
 namespace {
 constexpr auto BYTES_PER_SECTOR = uint64_t{512};
 
-// Virtual device patterns to skip
-constexpr std::array VIRTUAL_PATTERNS{"loop", "ram", "dm-"};
+// Virtual device name prefixes to skip. Matched with starts_with: substring
+// matching would silently drop any future device name embedding these tokens.
+constexpr std::array VIRTUAL_PREFIXES{"loop", "ram", "dm-", "zram", "md", "nbd"};
 
 auto is_virtual_device(std::string_view name) noexcept -> bool {
-    return rng::any_of(VIRTUAL_PATTERNS,
-                       [name](const char* pattern) { return name.contains(pattern); });
+    return rng::any_of(VIRTUAL_PREFIXES,
+                       [name](const char* prefix) { return name.starts_with(prefix); });
 }
 
 }  // namespace
@@ -98,7 +99,7 @@ auto MountCache::find_mount_for_device(const std::string& device_path,
 // DiskService implementation
 // ============================================================================
 
-DiskService::DiskService() : smart_service_(std::make_unique<SmartService>()) {}
+DiskService::DiskService() : smart_service_(std::make_shared<SmartService>()) {}
 
 auto DiskService::get_smart_data(const std::string& device_path) -> SmartData {
     if (!smart_service_) {
@@ -163,7 +164,9 @@ auto DiskService::get_available_disks_sync() -> std::vector<DiskInfo> {
         std::vector<std::future<std::pair<std::string, SmartData>>> smart_futures;
         smart_futures.reserve(smart_eligible_paths.size());
 
-        SmartService* smart_service_ptr = smart_service_.get();
+        // Capture the shared_ptr by value: a query thread that overruns the
+        // 250ms timeout below is detached and may outlive this DiskService.
+        std::shared_ptr<SmartService> smart_service_ptr = smart_service_;
         for (const auto& path : smart_eligible_paths) {
             auto task = std::make_shared<std::packaged_task<std::pair<std::string, SmartData>()>>(
                 [smart_service_ptr, path]() {
@@ -311,7 +314,9 @@ auto DiskService::unmount_disk(const std::string& path) -> std::expected<void, u
     }
 
     if (mount_points.empty()) {
-        // Nothing mounted - success
+        // Nothing mounted - success. Still invalidate: the cache may hold a
+        // stale mounted=true entry from before an external unmount.
+        invalidate_cache();
         return {};
     }
 
@@ -342,12 +347,14 @@ auto DiskService::unmount_disk(const std::string& path) -> std::expected<void, u
             const std::string_view mount_device{entry->mnt_fsname};
 
             if (device_path_matcher::is_device_or_partition_of(path, mount_device)) {
-                // Still mounted
+                // Still mounted. Report the mount point whose umount() actually
+                // failed, so the errno matches the path in the message.
                 const std::string error_str =
                     last_errno ? std::strerror(last_errno) : "Device busy";
-                return std::unexpected(
-                    util::Error{std::format("Failed to unmount {}: {}", entry->mnt_dir, error_str),
-                                last_errno});
+                const std::string mount_point =
+                    failed_mount.empty() ? std::string{entry->mnt_dir} : failed_mount;
+                return std::unexpected(util::Error{
+                    std::format("Failed to unmount {}: {}", mount_point, error_str), last_errno});
             }
         }
     }
@@ -398,20 +405,34 @@ auto DiskService::validate_device_path(const std::string& path)
         std::string_view{"/dev/vd"}       // Virtual disks (VMs)
     };
 
-    const std::string_view path_view{path};
-
-    const auto has_valid_prefix =
-        rng::any_of(allowed_prefixes, [path_view](std::string_view prefix) noexcept {
-            return path_view.starts_with(prefix);
+    const auto has_allowed_prefix = [&allowed_prefixes](std::string_view candidate) noexcept {
+        return rng::any_of(allowed_prefixes, [candidate](std::string_view prefix) noexcept {
+            return candidate.starts_with(prefix);
         });
+    };
 
-    if (!has_valid_prefix) {
+    if (!has_allowed_prefix(path)) {
         return std::unexpected(util::Error{"Device path prefix not allowed"});
+    }
+
+    // Re-check the resolved target: stat() follows symlinks, so a link with an
+    // allowed name (/dev/sdx -> /dev/dm-0) would otherwise smuggle an excluded
+    // device-mapper node past the prefix filter.
+    std::error_code ec;
+    const auto canonical = fs::canonical(path, ec);
+    if (ec) {
+        return std::unexpected(util::Error{
+            std::format("Failed to canonicalize device path: {}", ec.message()), ec.value()});
+    }
+
+    const std::string canonical_path = canonical.string();
+    if (!has_allowed_prefix(canonical_path)) {
+        return std::unexpected(util::Error{"Device path resolves to a disallowed device"});
     }
 
     // Verify it's actually a block device
     struct stat st{};
-    if (::stat(path.c_str(), &st) != 0) {
+    if (::stat(canonical_path.c_str(), &st) != 0) {
         return std::unexpected(util::Error{
             std::format("Failed to stat device path: {}", std::strerror(errno)), errno});
     }
@@ -473,6 +494,13 @@ auto DiskService::parse_disk_info(const std::string& device_path, const MountCac
         std::getline(model_file, info.model);
         info.model = std::string{
             std::string_view{info.model}.substr(0, info.model.find_last_not_of(" \n\r\t") + 1)};
+    }
+
+    // Get serial number (exposed by NVMe and some SATA/USB bridges; best-effort)
+    if (std::ifstream serial_file{sys_path + "/device/serial"}) {
+        std::getline(serial_file, info.serial);
+        info.serial = std::string{
+            std::string_view{info.serial}.substr(0, info.serial.find_last_not_of(" \n\r\t") + 1)};
     }
 
     // Check if removable
