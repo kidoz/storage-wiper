@@ -324,7 +324,7 @@ Static analysis available via:
 
 ## Project Status
 
-**Current Version**: 1.4.1
+**Current Version**: 1.4.2
 
 ### Completed Features
 - ✅ Core disk detection and enumeration

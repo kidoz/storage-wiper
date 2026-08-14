@@ -92,6 +92,21 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="1.4.2" date="2026-08-14">
+      <description>
+        <p>Security hardening and bug fix release:</p>
+        <ul>
+          <li>Post-wipe verification implemented for Random Fill and DoD 5220.22-M via a chi-squared entropy check</li>
+          <li>Schneier, VSITR and GOST random passes now use the kernel CSPRNG</li>
+          <li>Fixed partition matching that could unmount an unrelated sibling partition</li>
+          <li>Device paths are canonicalized so symlinks cannot bypass the device whitelist</li>
+          <li>Read the ATA SMART overall-health verdict instead of assuming the drive is healthy</li>
+          <li>Show disk serial numbers when the device exposes them</li>
+          <li>Fixed a reconnect deadlock in the D-Bus client and several thread-safety issues</li>
+          <li>GetAlgorithms now requires polkit authorization like all other helper methods</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.4.1" date="2026-05-21">
       <description>
         <p>Bug fix and internal cleanup release:</p>

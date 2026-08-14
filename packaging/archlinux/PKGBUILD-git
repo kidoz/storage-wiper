@@ -2,7 +2,7 @@
 
 pkgname=storage-wiper-git
 _pkgname=storage-wiper
-pkgver=1.4.1.r79.b439fc2
+pkgver=1.4.2.r93.343ab5e
 pkgrel=1
 pkgdesc='Secure disk wiping tool with GTK4/libadwaita interface and DoD-compliant algorithms (git version)'
 arch=('x86_64')
@@ -28,7 +28,7 @@ sha256sums=('SKIP')
 pkgver() {
   cd "$_pkgname"
   # Format: {base_version}.r{commits}.{short_hash}
-  local base_ver="1.4.1"
+  local base_ver="1.4.2"
   local commits=$(git rev-list --count HEAD 2>/dev/null || echo 0)
   local hash=$(git rev-parse --short=7 HEAD 2>/dev/null || echo unknown)
   printf "%s.r%s.%s" "$base_ver" "$commits" "$hash"
