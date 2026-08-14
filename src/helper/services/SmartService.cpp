@@ -138,15 +138,20 @@ auto SmartService::read_ata_smart(const std::string& device_path) -> SmartData {
     result.pending_sectors = parse_ata_attribute(smart_data, ATTR_CURRENT_PENDING_SECTORS);
     result.uncorrectable_errors = parse_ata_attribute(smart_data, ATTR_UNCORRECTABLE_ERRORS);
 
-    // Check SMART return status for overall health
-    std::array<uint8_t, 4> status_cmd{};
-    status_cmd[0] = ATA_SMART_CMD;
-    status_cmd[2] = ATA_SMART_RETURN_STATUS;
+    // Check SMART RETURN STATUS for the drive's overall-health verdict.
+    // HDIO_DRIVE_TASK is required (not HDIO_DRIVE_CMD): the verdict comes back
+    // in the LBA mid/high output registers - 0x4F/0xC2 = PASSED, 0xF4/0x2C =
+    // FAILED. Layout: [command, feature, nsector, sector, lcyl, hcyl, select].
+    std::array<uint8_t, 7> status_cmd{};
+    status_cmd[0] = ATA_SMART_CMD;            // Command register
+    status_cmd[1] = ATA_SMART_RETURN_STATUS;  // Feature register
+    status_cmd[4] = 0x4F;                     // LBA mid (SMART magic value)
+    status_cmd[5] = 0xC2;                     // LBA high (SMART magic value)
 
-    if (ioctl(fd, HDIO_DRIVE_CMD, status_cmd.data()) == 0) {
-        // Check LBA mid/high for threshold exceeded status
-        // 0x4F/0xC2 = PASSED, 0xF4/0x2C = FAILED
-        // These are in the returned data after the command
+    if (ioctl(fd, HDIO_DRIVE_TASK, status_cmd.data()) == 0) {
+        if (status_cmd[4] == 0xF4 && status_cmd[5] == 0x2C) {
+            result.healthy = false;  // Drive reports threshold-exceeded failure
+        }
     }
 
     close(fd);
