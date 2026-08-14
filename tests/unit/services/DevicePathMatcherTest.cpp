@@ -107,6 +107,22 @@ TEST(DevicePathMatcher, MmcblkSiblings_DoNotMatch) {
     EXPECT_FALSE(is_device_or_partition_of("/dev/mmcblk0", "/dev/mmcblk1p1"));
 }
 
+// ========== is_device_or_partition_of: partition as parent ==========
+
+TEST(DevicePathMatcher, PartitionParentIdentity_Matches) {
+    EXPECT_TRUE(is_device_or_partition_of("/dev/sda1", "/dev/sda1"));
+}
+
+TEST(DevicePathMatcher, PartitionParentSiblings_DoNotMatch) {
+    // The bug: "/dev/sda1" must NOT match "/dev/sda11" - appending digits to a
+    // partition node names a sibling partition, never a child.
+    EXPECT_FALSE(is_device_or_partition_of("/dev/sda1", "/dev/sda11"));
+    EXPECT_FALSE(is_device_or_partition_of("/dev/sda1", "/dev/sda10"));
+    EXPECT_FALSE(is_device_or_partition_of("/dev/sda1", "/dev/sda128"));
+    EXPECT_FALSE(is_device_or_partition_of("/dev/vda1", "/dev/vda12"));
+    EXPECT_FALSE(is_device_or_partition_of("/dev/nvme0n1p1", "/dev/nvme0n1p11"));
+}
+
 // ========== Edge cases ==========
 
 TEST(DevicePathMatcher, EmptyInputs_DoNotMatch) {

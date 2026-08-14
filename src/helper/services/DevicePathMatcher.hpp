@@ -63,6 +63,11 @@ constexpr auto is_device_or_partition_of(std::string_view parent,
             return false;
         }
         suffix.remove_prefix(1);
+    } else if (parent.back() >= '0' && parent.back() <= '9') {
+        // Parent already ends in a digit, so it is itself a partition node
+        // (/dev/sda1). Appending more digits names a sibling (/dev/sda11),
+        // never a child - partitions have no sub-partitions in this scheme.
+        return false;
     }
     return detail::is_all_digits(suffix);
 }
