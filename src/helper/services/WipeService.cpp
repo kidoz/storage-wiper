@@ -47,8 +47,8 @@ namespace {
 class ProgressTracker {
 public:
     explicit ProgressTracker(ProgressCallback callback)
-        : callback_(std::move(callback)), start_time_(std::chrono::steady_clock::now()),
-          last_update_time_(start_time_), last_bytes_written_(0) {}
+        : callback_(std::move(callback)), last_update_time_(std::chrono::steady_clock::now()),
+          last_bytes_written_(0) {}
 
     void report(WipeProgress progress) {
         if (!callback_)
@@ -127,7 +127,6 @@ private:
     static constexpr int64_t MIN_UPDATE_INTERVAL_MS = 100;  // Minimum ms between speed calculations
 
     ProgressCallback callback_;
-    std::chrono::steady_clock::time_point start_time_;
     std::chrono::steady_clock::time_point last_update_time_;
     uint64_t last_bytes_written_;
     std::deque<uint64_t> speed_samples_;
@@ -195,11 +194,16 @@ auto WipeService::get_algorithm(WipeAlgorithm algo) const -> std::shared_ptr<IWi
 
 auto WipeService::prepare_wipe(const std::string& disk_path, WipeAlgorithm algorithm,
                                const ProgressCallback& callback) -> std::optional<WipePreparation> {
-    if (state_->operation_in_progress.load()) {
+    // Atomically claim the operation slot: with a separate load/store, two
+    // concurrent calls could both pass the guard, and the loser would hit
+    // std::terminate when assigning over a joinable wipe_thread_.
+    bool expected = false;
+    if (!state_->operation_in_progress.compare_exchange_strong(expected, true)) {
         return std::nullopt;  // Operation already in progress
     }
 
     if (!disk_service_) {
+        state_->operation_in_progress.store(false);
         if (callback) {
             WipeProgress progress{};
             progress.has_error = true;
@@ -211,6 +215,7 @@ auto WipeService::prepare_wipe(const std::string& disk_path, WipeAlgorithm algor
     }
 
     if (auto eligible = device_policy::validate_wipe_target(*disk_service_, disk_path); !eligible) {
+        state_->operation_in_progress.store(false);
         if (callback) {
             WipeProgress progress{};
             progress.has_error = true;
@@ -230,7 +235,6 @@ auto WipeService::prepare_wipe(const std::string& disk_path, WipeAlgorithm algor
     }
 
     state_->cancel_requested.store(false);
-    state_->operation_in_progress.store(true);
 
     auto algorithm_ptr = get_algorithm(algorithm);
     if (!algorithm_ptr) {
@@ -275,7 +279,15 @@ auto WipeService::execute_wipe_on_device(
                 state->operation_in_progress.store(false);
                 return {.success = false, .device_size = 0};
             }
-            ioctl(probe_fd.get(), BLKGETSIZE64, &device_size);
+            if (ioctl(probe_fd.get(), BLKGETSIZE64, &device_size) == -1) {
+                WipeProgress progress{};
+                progress.has_error = true;
+                progress.error_message = "Failed to get device size";
+                progress.is_complete = true;
+                tracked_callback(progress);
+                state->operation_in_progress.store(false);
+                return {.success = false, .device_size = 0};
+            }
         }  // probe_fd closed here, exclusive claim released
 
         // Use execute_on_device which handles the device internally
