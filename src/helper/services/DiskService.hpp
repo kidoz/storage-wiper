@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 /**
@@ -31,6 +32,52 @@ struct MountCache {
     [[nodiscard]] auto find_mount_for_device(const std::string& device_path,
                                              const std::vector<std::string>& dm_holders) const
         -> std::optional<MountEntry>;
+};
+
+/**
+ * @brief Health data collected by SMART queries that outran their caller
+ *
+ * A query against a sleeping drive can take far longer than a disk enumeration
+ * is willing to wait. Rather than discard that work, the query thread deposits
+ * its result here and the next enumeration picks it up. The state also tracks
+ * which devices have a query in flight so repeated refreshes do not pile up
+ * threads on a device that is not answering.
+ *
+ * Shared by detached threads, so every member is guarded by the mutex and the
+ * object is owned through a shared_ptr that outlives the service.
+ */
+struct SmartQueryState {
+    /**
+     * @brief Claim a device for querying
+     * @param device_path Device to query
+     * @return true if the caller should start a query, false if one is already running
+     */
+    [[nodiscard]] auto try_begin_query(const std::string& device_path) -> bool;
+
+    /**
+     * @brief Record a completed query result and release the device
+     * @param device_path Device that was queried
+     * @param data Result to cache
+     */
+    void finish_query(const std::string& device_path, SmartData data);
+
+    /**
+     * @brief Look up the most recent result for a device
+     * @param device_path Device to look up
+     * @return Cached data, or nullopt if no query has completed yet
+     */
+    [[nodiscard]] auto lookup(const std::string& device_path) const -> std::optional<SmartData>;
+
+    /**
+     * @brief Drop cached results for devices that are no longer present
+     * @param present_paths Device paths seen by the current enumeration
+     */
+    void retain(const std::vector<std::string>& present_paths);
+
+private:
+    mutable std::mutex mutex_;
+    std::unordered_map<std::string, SmartData> results_;
+    std::unordered_set<std::string> in_flight_;
 };
 
 class DiskService : public IDiskService {
@@ -99,9 +146,10 @@ private:
                                                  const std::string& device_name)
         -> std::vector<std::string>;
 
-    // shared_ptr: detached SMART query threads that outlive their 250ms timeout
-    // window capture this pointer, so it must survive DiskService destruction.
+    // shared_ptr: detached SMART query threads that outlive the collection
+    // budget capture these, so they must survive DiskService destruction.
     std::shared_ptr<SmartService> smart_service_;
+    std::shared_ptr<SmartQueryState> smart_state_;
 
     // Result cache with TTL
     mutable std::mutex cache_mutex_;

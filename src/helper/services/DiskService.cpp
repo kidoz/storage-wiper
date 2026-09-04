@@ -10,6 +10,7 @@
 #include <array>
 #include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <expected>
 #include <filesystem>
@@ -44,6 +45,12 @@ constexpr auto BYTES_PER_SECTOR = uint64_t{512};
 // Virtual device name prefixes to skip. Matched with starts_with: substring
 // matching would silently drop any future device name embedding these tokens.
 constexpr std::array VIRTUAL_PREFIXES{"loop", "ram", "dm-", "zram", "md", "nbd"};
+
+/// How long one enumeration waits for SMART results before returning without
+/// them. It deliberately does not cover a sleeping drive's spin-up: a query
+/// that runs past this point is not lost, it deposits its result in the shared
+/// SmartQueryState and the next enumeration picks it up.
+constexpr auto SMART_COLLECTION_BUDGET = std::chrono::seconds{2};
 
 auto is_virtual_device(std::string_view name) noexcept -> bool {
     return rng::any_of(VIRTUAL_PREFIXES,
@@ -99,7 +106,36 @@ auto MountCache::find_mount_for_device(const std::string& device_path,
 // DiskService implementation
 // ============================================================================
 
-DiskService::DiskService() : smart_service_(std::make_shared<SmartService>()) {}
+DiskService::DiskService()
+    : smart_service_(std::make_shared<SmartService>()),
+      smart_state_(std::make_shared<SmartQueryState>()) {}
+
+auto SmartQueryState::try_begin_query(const std::string& device_path) -> bool {
+    std::lock_guard lock{mutex_};
+    return in_flight_.insert(device_path).second;
+}
+
+void SmartQueryState::finish_query(const std::string& device_path, SmartData data) {
+    std::lock_guard lock{mutex_};
+    results_[device_path] = std::move(data);
+    in_flight_.erase(device_path);
+}
+
+auto SmartQueryState::lookup(const std::string& device_path) const -> std::optional<SmartData> {
+    std::lock_guard lock{mutex_};
+    if (const auto it = results_.find(device_path); it != results_.end()) {
+        return it->second;
+    }
+    return std::nullopt;
+}
+
+void SmartQueryState::retain(const std::vector<std::string>& present_paths) {
+    const std::unordered_set<std::string> present{present_paths.begin(), present_paths.end()};
+
+    std::lock_guard lock{mutex_};
+    std::erase_if(results_,
+                  [&present](const auto& entry) { return !present.contains(entry.first); });
+}
 
 auto DiskService::get_smart_data(const std::string& device_path) -> SmartData {
     if (!smart_service_) {
@@ -164,28 +200,42 @@ auto DiskService::get_available_disks_sync() -> std::vector<DiskInfo> {
         std::vector<std::future<std::pair<std::string, SmartData>>> smart_futures;
         smart_futures.reserve(smart_eligible_paths.size());
 
-        // Capture the shared_ptr by value: a query thread that overruns the
-        // 250ms timeout below is detached and may outlive this DiskService.
+        // Capture the shared_ptrs by value: a query thread that overruns the
+        // collection budget below is detached and may outlive this DiskService.
         std::shared_ptr<SmartService> smart_service_ptr = smart_service_;
+        std::shared_ptr<SmartQueryState> smart_state_ptr = smart_state_;
         for (const auto& path : smart_eligible_paths) {
+            // A device that is still being queried from an earlier enumeration
+            // is left alone; its cached result is used below once it lands.
+            if (!smart_state_ptr->try_begin_query(path)) {
+                continue;
+            }
+
             auto task = std::make_shared<std::packaged_task<std::pair<std::string, SmartData>()>>(
-                [smart_service_ptr, path]() {
-                    return std::make_pair(path, smart_service_ptr->get_smart_data(path));
+                [smart_service_ptr, smart_state_ptr, path]() {
+                    auto data = smart_service_ptr->get_smart_data(path);
+                    smart_state_ptr->finish_query(path, data);
+                    return std::make_pair(path, std::move(data));
                 });
             smart_futures.push_back(task->get_future());
             std::thread([task]() { (*task)(); }).detach();
         }
 
-        // Collect results with a strict timeout to prevent hanging on slow drives
+        // Collect results against a single deadline shared by every query. The
+        // queries run in parallel, so waiting per-future would let several slow
+        // devices add up their timeouts instead of overlapping them.
+        const auto deadline = std::chrono::steady_clock::now() + SMART_COLLECTION_BUDGET;
+
         std::unordered_map<std::string, SmartData> smart_results;
         for (auto& future : smart_futures) {
             try {
-                // Wait max 250ms per drive (parallelized, so total max ~250ms)
-                if (future.wait_for(std::chrono::milliseconds(250)) == std::future_status::ready) {
+                if (future.wait_until(deadline) == std::future_status::ready) {
                     auto [path, data] = future.get();
                     smart_results[path] = std::move(data);
                 } else {
-                    LOG_WARNING("DiskService", "SMART data query timed out for a device");
+                    LOG_INFO("DiskService",
+                             "SMART query still running past the collection budget; its result "
+                             "will be used by the next refresh");
                 }
             } catch (const std::system_error& e) {
                 LOG_WARNING("DiskService", std::format("System error reading SMART: {}", e.what()));
@@ -196,12 +246,17 @@ auto DiskService::get_available_disks_sync() -> std::vector<DiskInfo> {
             }
         }
 
-        // Apply SMART data to disks
+        // Apply SMART data to disks, falling back to the result of an earlier
+        // query that finished after the enumeration that started it gave up.
         for (auto& disk : disks) {
             if (auto it = smart_results.find(disk.path); it != smart_results.end()) {
                 disk.smart = std::move(it->second);
+            } else if (auto cached = smart_state_->lookup(disk.path)) {
+                disk.smart = std::move(*cached);
             }
         }
+
+        smart_state_->retain(smart_eligible_paths);
     }
 
     // Update cache
