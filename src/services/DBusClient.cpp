@@ -540,14 +540,36 @@ void DBusClient::get_available_disks(
                 gboolean is_mounted = FALSE;
                 const gchar* mount_point = nullptr;
                 guint32 smart_status = 0;
+                gboolean smart_available = FALSE;
+                gboolean smart_healthy = TRUE;
+                gint64 power_on_hours = -1;
+                gint32 reallocated_sectors = -1;
+                gint32 pending_sectors = -1;
+                gint32 temperature_celsius = -1;
+                gint32 uncorrectable_errors = -1;
+                gint32 percentage_used = -1;
+                gint32 available_spare = -1;
+                gint32 available_spare_threshold = -1;
 
-                while (g_variant_iter_next(&iter, "(&s&s&sxbb&sb&su)", &path, &model, &serial,
-                                           &size_bytes, &is_removable, &is_ssd, &filesystem,
-                                           &is_mounted, &mount_point, &smart_status)) {
+                while (g_variant_iter_next(
+                    &iter, "(&s&s&sxbb&sb&subbxiiiiiii)", &path, &model, &serial, &size_bytes,
+                    &is_removable, &is_ssd, &filesystem, &is_mounted, &mount_point, &smart_status,
+                    &smart_available, &smart_healthy, &power_on_hours, &reallocated_sectors,
+                    &pending_sectors, &temperature_celsius, &uncorrectable_errors, &percentage_used,
+                    &available_spare, &available_spare_threshold)) {
                     if (path) {
                         SmartData smart;
                         smart.status = static_cast<SmartData::HealthStatus>(smart_status);
-                        smart.available = (smart_status != 0);
+                        smart.available = smart_available != FALSE;
+                        smart.healthy = smart_healthy != FALSE;
+                        smart.power_on_hours = power_on_hours;
+                        smart.reallocated_sectors = reallocated_sectors;
+                        smart.pending_sectors = pending_sectors;
+                        smart.temperature_celsius = temperature_celsius;
+                        smart.uncorrectable_errors = uncorrectable_errors;
+                        smart.percentage_used = percentage_used;
+                        smart.available_spare_percent = available_spare;
+                        smart.available_spare_threshold_percent = available_spare_threshold;
 
                         disks.push_back(DiskInfo{.path = path,
                                                  .model = model ? model : "",

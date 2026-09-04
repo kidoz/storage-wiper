@@ -46,15 +46,19 @@ std::string g_current_wipe_device;
 std::atomic<bool> g_wipe_in_progress{false};
 
 // D-Bus introspection XML
-// GetDisks return type: a(sssxbbsbsu)
+// GetDisks return type: a(sssxbbsbsubbxiiiiiii)
 //   s=path, s=model, s=serial, x=size_bytes, b=is_removable, b=is_ssd,
 //   s=filesystem, b=is_mounted, s=mount_point, u=smart_status
-//   (0=unknown,1=good,2=warning,3=critical)
+//   (0=unknown,1=good,2=warning,3=critical),
+//   b=smart_available, b=smart_healthy, x=power_on_hours,
+//   i=reallocated_sectors, i=pending_sectors, i=temperature_celsius,
+//   i=uncorrectable_errors, i=percentage_used, i=available_spare_percent,
+//   i=available_spare_threshold_percent (-1 means unknown)
 const char* introspection_xml = R"XML(
 <node>
   <interface name="su.kidoz.storage_wiper.Helper">
     <method name="GetDisks">
-      <arg name="disks" type="a(sssxbbsbsu)" direction="out"/>
+      <arg name="disks" type="a(sssxbbsbsubbxiiiiiii)" direction="out"/>
     </method>
     <method name="GetDiskSMART">
       <arg name="path" type="s" direction="in"/>
@@ -65,6 +69,9 @@ const char* introspection_xml = R"XML(
       <arg name="pending_sectors" type="i" direction="out"/>
       <arg name="temperature_celsius" type="i" direction="out"/>
       <arg name="uncorrectable_errors" type="i" direction="out"/>
+      <arg name="percentage_used" type="i" direction="out"/>
+      <arg name="available_spare_percent" type="i" direction="out"/>
+      <arg name="available_spare_threshold_percent" type="i" direction="out"/>
       <arg name="status" type="u" direction="out"/>
     </method>
     <method name="ValidateDevicePath">
@@ -226,19 +233,25 @@ void handle_get_disks(GDBusMethodInvocation* invocation) {
     auto disks = g_disk_service->get_available_disks_sync();
 
     GVariantBuilder builder;
-    g_variant_builder_init(&builder, G_VARIANT_TYPE("a(sssxbbsbsu)"));
+    g_variant_builder_init(&builder, G_VARIANT_TYPE("a(sssxbbsbsubbxiiiiiii)"));
 
     for (const auto& disk : disks) {
         // Convert SmartData::HealthStatus to uint32
         auto smart_status = static_cast<guint32>(disk.smart.status);
-        g_variant_builder_add(&builder, "(sssxbbsbsu)", disk.path.c_str(), disk.model.c_str(),
-                              disk.serial.c_str(), static_cast<gint64>(disk.size_bytes),
-                              disk.is_removable ? TRUE : FALSE, disk.is_ssd ? TRUE : FALSE,
-                              disk.filesystem.c_str(), disk.is_mounted ? TRUE : FALSE,
-                              disk.mount_point.c_str(), smart_status);
+        g_variant_builder_add(
+            &builder, "(sssxbbsbsubbxiiiiiii)", disk.path.c_str(), disk.model.c_str(),
+            disk.serial.c_str(), static_cast<gint64>(disk.size_bytes),
+            disk.is_removable ? TRUE : FALSE, disk.is_ssd ? TRUE : FALSE, disk.filesystem.c_str(),
+            disk.is_mounted ? TRUE : FALSE, disk.mount_point.c_str(), smart_status,
+            disk.smart.available ? TRUE : FALSE, disk.smart.healthy ? TRUE : FALSE,
+            static_cast<gint64>(disk.smart.power_on_hours), disk.smart.reallocated_sectors,
+            disk.smart.pending_sectors, disk.smart.temperature_celsius,
+            disk.smart.uncorrectable_errors, disk.smart.percentage_used,
+            disk.smart.available_spare_percent, disk.smart.available_spare_threshold_percent);
     }
 
-    g_dbus_method_invocation_return_value(invocation, g_variant_new("(a(sssxbbsbsu))", &builder));
+    g_dbus_method_invocation_return_value(invocation,
+                                          g_variant_new("(a(sssxbbsbsubbxiiiiiii))", &builder));
 }
 
 /**
@@ -256,10 +269,11 @@ void handle_get_disk_smart(GDBusMethodInvocation* invocation, GVariant* paramete
 
     g_dbus_method_invocation_return_value(
         invocation,
-        g_variant_new("(bbxiiiiu)", smart.available ? TRUE : FALSE, smart.healthy ? TRUE : FALSE,
+        g_variant_new("(bbxiiiiiiiu)", smart.available ? TRUE : FALSE, smart.healthy ? TRUE : FALSE,
                       static_cast<gint64>(smart.power_on_hours), smart.reallocated_sectors,
                       smart.pending_sectors, smart.temperature_celsius, smart.uncorrectable_errors,
-                      static_cast<guint32>(smart.status)));
+                      smart.percentage_used, smart.available_spare_percent,
+                      smart.available_spare_threshold_percent, static_cast<guint32>(smart.status)));
 }
 
 /**

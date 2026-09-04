@@ -10,7 +10,7 @@
       Authorization: su.kidoz.storage_wiper.list-disks
     -->
     <method name="GetDisks">
-      <arg name="disks" type="a(sssxbbsbs)" direction="out"/>
+      <arg name="disks" type="a(sssxbbsbsubbxiiiiiii)" direction="out"/>
       <!-- Array of structs:
            s: path (/dev/sda)
            s: model
@@ -21,7 +21,39 @@
            s: filesystem
            b: is_mounted
            s: mount_point
+           u: smart_status (0=unknown, 1=good, 2=warning, 3=critical)
+           b: smart_available
+           b: smart_healthy
+           x: power_on_hours (-1 if unknown)
+           i: reallocated_sectors (-1 if unknown)
+           i: pending_sectors (-1 if unknown)
+           i: temperature_celsius (-1 if unknown)
+           i: uncorrectable_errors (-1 if unknown)
+           i: percentage_used (-1 if unknown)
+           i: available_spare_percent (NVMe only, -1 if unknown)
+           i: available_spare_threshold_percent (NVMe only, -1 if unknown)
       -->
+    </method>
+
+    <!--
+      GetDiskSMART:
+      Returns the full SMART health record for a single device.
+
+      Authorization: su.kidoz.storage_wiper.list-disks
+    -->
+    <method name="GetDiskSMART">
+      <arg name="path" type="s" direction="in"/>
+      <arg name="available" type="b" direction="out"/>
+      <arg name="healthy" type="b" direction="out"/>
+      <arg name="power_on_hours" type="x" direction="out"/>
+      <arg name="reallocated_sectors" type="i" direction="out"/>
+      <arg name="pending_sectors" type="i" direction="out"/>
+      <arg name="temperature_celsius" type="i" direction="out"/>
+      <arg name="uncorrectable_errors" type="i" direction="out"/>
+      <arg name="percentage_used" type="i" direction="out"/>
+      <arg name="available_spare_percent" type="i" direction="out"/>
+      <arg name="available_spare_threshold_percent" type="i" direction="out"/>
+      <arg name="status" type="u" direction="out"/>
     </method>
 
     <!--
