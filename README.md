@@ -26,6 +26,8 @@ A modern, secure disk wiping application built with GTK4 and libadwaita for Linu
   - LVM Physical Volume support (with logical volume exclusion)
   - Size and model information display
   - SMART health status (reallocated/pending sectors, temperature, power-on hours)
+  - SSD and NVMe wear level, plus NVMe spare capacity
+  - eMMC life-time estimate from the EXT_CSD registers
 
 - ✅ **Post-Wipe Verification** (optional)
   - Zero Fill: reads back and checks all zeros
@@ -333,7 +335,7 @@ Static analysis available via:
 - ✅ GTK4/Adwaita UI
 - ✅ Command-line interface (`storage-wiper-cli` with JSON output)
 - ✅ Post-wipe verification (Zero Fill, Random Fill, DoD 5220.22-M)
-- ✅ SMART health monitoring (ATA and NVMe)
+- ✅ SMART health monitoring (ATA/SATA, SCSI/USB via SAT pass-through, NVMe, eMMC)
 - ✅ Structured file logging with rotation
 - ✅ MVVM architecture with observable data binding
 - ✅ Progress reporting with ETA and speed display
@@ -361,7 +363,8 @@ Static analysis available via:
 
 ### Known Limitations
 - Whole disk wiping only (no partition support)
-- SMART data unavailable on most USB enclosures and SD cards
+- SMART data unavailable on SD cards and on USB enclosures that do not implement
+  SCSI/ATA translation (the SAT pass-through fallback covers the ones that do)
 - ATA Secure Erase requires hardware support and may not work on all drives
 - D-Bus helper requires proper polkit configuration for privilege escalation
 
