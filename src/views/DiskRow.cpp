@@ -177,6 +177,15 @@ void DiskRow::setup_health_indicator() {
     if (disk_.smart.pending_sectors >= 0) {
         tooltip += std::format("Pending sectors: {}\n", disk_.smart.pending_sectors);
     }
+    if (disk_.smart.uncorrectable_errors > 0) {
+        tooltip += std::format("Uncorrectable errors: {}\n", disk_.smart.uncorrectable_errors);
+    }
+    if (disk_.smart.percentage_used >= 0) {
+        tooltip += std::format("Life used: {}%\n", disk_.smart.percentage_used);
+    }
+    if (disk_.smart.available_spare_percent >= 0) {
+        tooltip += std::format("Spare capacity: {}%\n", disk_.smart.available_spare_percent);
+    }
 
     if (!tooltip.empty()) {
         // Remove trailing newline

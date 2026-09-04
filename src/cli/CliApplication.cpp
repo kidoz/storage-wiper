@@ -432,7 +432,32 @@ void CliApplication::print_disks_json(const std::vector<DiskInfo>& disks) {
         std::cout << "    \"mount_point\": \"" << util::json_escape(disk.mount_point) << "\",\n";
         std::cout << "    \"filesystem\": \"" << util::json_escape(disk.filesystem) << "\",\n";
         std::cout << "    \"smart_status\": \"" << util::json_escape(disk.smart.status_string())
-                  << "\"\n";
+                  << "\",\n";
+        std::cout << "    \"smart\": {\n";
+        std::cout << "      \"available\": " << (disk.smart.available ? "true" : "false") << ",\n";
+        std::cout << "      \"healthy\": " << (disk.smart.healthy ? "true" : "false") << ",\n";
+
+        // Unknown attributes are reported as null rather than the -1 sentinel
+        auto print_attribute = [](const char* name, int64_t value, bool last) {
+            std::cout << "      \"" << name << "\": ";
+            if (value < 0) {
+                std::cout << "null";
+            } else {
+                std::cout << value;
+            }
+            std::cout << (last ? "\n" : ",\n");
+        };
+
+        print_attribute("power_on_hours", disk.smart.power_on_hours, false);
+        print_attribute("temperature_celsius", disk.smart.temperature_celsius, false);
+        print_attribute("reallocated_sectors", disk.smart.reallocated_sectors, false);
+        print_attribute("pending_sectors", disk.smart.pending_sectors, false);
+        print_attribute("uncorrectable_errors", disk.smart.uncorrectable_errors, false);
+        print_attribute("percentage_used", disk.smart.percentage_used, false);
+        print_attribute("available_spare_percent", disk.smart.available_spare_percent, false);
+        print_attribute("available_spare_threshold_percent",
+                        disk.smart.available_spare_threshold_percent, true);
+        std::cout << "    }\n";
         std::cout << "  }" << (i < disks.size() - 1 ? "," : "") << "\n";
     }
     std::cout << "]\n";
