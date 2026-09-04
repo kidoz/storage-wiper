@@ -31,6 +31,19 @@ struct SmartData {
     int pending_sectors = -1;       ///< Current pending sector count (-1 if unknown)
     int temperature_celsius = -1;   ///< Current temperature in Celsius (-1 if unknown)
     int uncorrectable_errors = -1;  ///< Uncorrectable error count (-1 if unknown)
+
+    /// Estimated share of rated write endurance consumed, in percent (-1 if unknown).
+    /// NVMe: "Percentage Used" from the SMART/Health log. SATA SSD: derived from the
+    /// normalised wear attribute. eMMC: derived from the EXT_CSD life-time registers.
+    int percentage_used = -1;
+
+    /// Remaining spare capacity in percent, NVMe only (-1 if unknown)
+    int available_spare_percent = -1;
+
+    /// Vendor threshold below which the spare capacity is considered exhausted,
+    /// NVMe only (-1 if unknown)
+    int available_spare_threshold_percent = -1;
+
     HealthStatus status = HealthStatus::UNKNOWN;  ///< Derived health status
 
     auto operator==(const SmartData&) const -> bool = default;
