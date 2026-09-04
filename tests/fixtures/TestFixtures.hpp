@@ -57,9 +57,9 @@ protected:
 
     virtual void SetupDefaultExpectations() {
         // Default: empty disk list
+        // Callables are converted to actions implicitly; testing::Invoke is deprecated
         ON_CALL(*mock_disk_service, get_available_disks(testing::_))
-            .WillByDefault(
-                testing::Invoke([](auto callback) { callback(std::vector<DiskInfo>{}); }));
+            .WillByDefault([](auto callback) { callback(std::vector<DiskInfo>{}); });
 
         // Default: validation passes
         ON_CALL(*mock_disk_service, validate_device_path(testing::_))
