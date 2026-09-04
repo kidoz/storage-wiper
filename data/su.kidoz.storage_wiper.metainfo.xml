@@ -92,6 +92,20 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="1.4.3" date="2026-09-04">
+      <description>
+        <p>SMART health monitoring fix and expansion release:</p>
+        <ul>
+          <li>Fixed the ATA SMART read that returned no data, so SATA drives no longer report health derived from an empty structure</li>
+          <li>SMART structures that carry no attributes or fail their checksum are discarded instead of reported as healthy</li>
+          <li>Added SCSI/ATA translation fallback so drives behind USB bridges and SAS controllers report SMART</li>
+          <li>Report wear level for SATA SSDs, NVMe drives and eMMC devices, plus NVMe spare capacity</li>
+          <li>Fixed temperature parsing that read vendor minimum and maximum bytes as part of the reading</li>
+          <li>Send the full SMART record over D-Bus so attributes reach the disk tooltip and the CLI JSON output</li>
+          <li>Slow SMART queries are no longer discarded; their result is used by the next disk refresh</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.4.2" date="2026-08-14">
       <description>
         <p>Security hardening and bug fix release:</p>
