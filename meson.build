@@ -124,6 +124,7 @@ headers = files(
   'src/helper/services/DiskService.hpp',
   'src/helper/services/WipeService.hpp',
   'src/services/DBusClient.hpp',
+  'src/services/DBusSignatures.hpp',
   # ViewModels
   'src/viewmodels/MainViewModel.hpp',
   # Views
@@ -385,6 +386,8 @@ if get_option('enable_tests')
     util_sources,
     include_directories: test_inc,
     dependencies: [gtest_dep, gmock_dep, gio_dep],
+    # Lets the test compare the shipped interface description with the code
+    cpp_args: ['-DSOURCE_ROOT="' + meson.project_source_root() + '"'],
     install: false
   )
   test('dbus_client_tests', dbus_test_exe, timeout: 60)

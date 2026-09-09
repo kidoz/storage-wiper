@@ -10,7 +10,7 @@
       Authorization: su.kidoz.storage_wiper.list-disks
     -->
     <method name="GetDisks">
-      <arg name="disks" type="a(sssxbbsbsubbxiiiiiiibsb)" direction="out"/>
+      <arg name="disks" type="a(sssxbbsbsubbxiiiiiiibs)" direction="out"/>
       <!-- Array of structs:
            s: path (/dev/sda or /dev/sda1)
            s: model

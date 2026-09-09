@@ -12,6 +12,7 @@
 
 #include "helper/services/DiskService.hpp"
 #include "helper/services/WipeService.hpp"
+#include "services/DBusSignatures.hpp"
 #include "services/DevicePolicy.hpp"
 #include "util/Logger.hpp"
 
@@ -20,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <format>
 #include <memory>
 #include <string>
@@ -44,7 +46,7 @@ std::shared_ptr<DiskService> g_disk_service;
 std::unique_ptr<WipeService> g_wipe_service;
 
 // D-Bus introspection XML
-// GetDisks return type: a(sssxbbsbsubbxiiiiiiibsb)
+// GetDisks return type: dbus_signatures::DISK_ARRAY (see DBusSignatures.hpp)
 //   s=path, s=model, s=serial, x=size_bytes, b=is_removable, b=is_ssd,
 //   s=filesystem, b=is_mounted, s=mount_point, u=smart_status
 //   (0=unknown,1=good,2=warning,3=critical),
@@ -53,11 +55,27 @@ std::unique_ptr<WipeService> g_wipe_service;
 //   i=uncorrectable_errors, i=percentage_used, i=available_spare_percent,
 //   i=available_spare_threshold_percent (-1 means unknown),
 //   b=is_partition, s=parent_disk (empty for whole disks)
-const char* introspection_xml = R"XML(
+namespace {
+
+/// Join NUL-terminated literals at compile time (no static initialiser can throw)
+template <std::size_t... N>
+consteval auto concat_literals(const char (&... parts)[N]) {
+    std::array<char, (0 + ... + (N - 1)) + 1> out{};
+    std::size_t pos = 0;
+    ((std::copy_n(parts, N - 1, out.begin() + static_cast<std::ptrdiff_t>(pos)), pos += N - 1),
+     ...);
+    out[pos] = '\0';
+    return out;
+}
+
+// The GetDisks array type is spliced in from DBusSignatures.hpp so the advertised
+// interface can never drift from the format strings the code actually uses.
+constexpr char INTROSPECTION_HEAD[] = R"XML(
 <node>
   <interface name="su.kidoz.storage_wiper.Helper">
     <method name="GetDisks">
-      <arg name="disks" type="a(sssxbbsbsubbxiiiiiiibsb)" direction="out"/>
+      <arg name="disks" type=")XML";
+constexpr char INTROSPECTION_TAIL[] = R"XML(" direction="out"/>
     </method>
     <method name="GetDiskSMART">
       <arg name="path" type="s" direction="in"/>
@@ -123,6 +141,11 @@ const char* introspection_xml = R"XML(
   </interface>
 </node>
 )XML";
+
+}  // namespace
+
+constexpr auto introspection_xml =
+    concat_literals(INTROSPECTION_HEAD, dbus_signatures::DISK_ARRAY, INTROSPECTION_TAIL);
 
 auto is_supported_algorithm(WipeAlgorithm algorithm) -> bool {
     constexpr std::array supported_algorithms = {
@@ -204,7 +227,7 @@ void emit_wipe_progress(const std::string& device_path, const WipeProgress& prog
         g_connection,
         nullptr,  // broadcast to all
         DBUS_PATH, DBUS_INTERFACE, "WipeProgress",
-        g_variant_new("(sdiisbbstttxbbbdt)", device_path.c_str(), progress.percentage,
+        g_variant_new(dbus_signatures::WIPE_PROGRESS, device_path.c_str(), progress.percentage,
                       progress.current_pass, progress.total_passes, progress.status.c_str(),
                       progress.is_complete ? TRUE : FALSE, progress.has_error ? TRUE : FALSE,
                       progress.error_message.c_str(), static_cast<guint64>(progress.bytes_written),
@@ -234,13 +257,13 @@ void handle_get_disks(GDBusMethodInvocation* invocation) {
     auto disks = g_disk_service->get_available_disks_sync();
 
     GVariantBuilder builder;
-    g_variant_builder_init(&builder, G_VARIANT_TYPE("a(sssxbbsbsubbxiiiiiiibsb)"));
+    g_variant_builder_init(&builder, G_VARIANT_TYPE(dbus_signatures::DISK_ARRAY));
 
     for (const auto& disk : disks) {
         // Convert SmartData::HealthStatus to uint32
         auto smart_status = static_cast<guint32>(disk.smart.status);
         g_variant_builder_add(
-            &builder, "(sssxbbsbsubbxiiiiiiibsb)", disk.path.c_str(), disk.model.c_str(),
+            &builder, dbus_signatures::DISK_RECORD, disk.path.c_str(), disk.model.c_str(),
             disk.serial.c_str(), static_cast<gint64>(disk.size_bytes),
             disk.is_removable ? TRUE : FALSE, disk.is_ssd ? TRUE : FALSE, disk.filesystem.c_str(),
             disk.is_mounted ? TRUE : FALSE, disk.mount_point.c_str(), smart_status,
@@ -252,8 +275,8 @@ void handle_get_disks(GDBusMethodInvocation* invocation) {
             disk.is_partition ? TRUE : FALSE, disk.parent_disk.c_str());
     }
 
-    g_dbus_method_invocation_return_value(invocation,
-                                          g_variant_new("(a(sssxbbsbsubbxiiiiiiibsb))", &builder));
+    g_dbus_method_invocation_return_value(
+        invocation, g_variant_new(dbus_signatures::DISK_LIST_REPLY, &builder));
 }
 
 /**
@@ -271,11 +294,12 @@ void handle_get_disk_smart(GDBusMethodInvocation* invocation, GVariant* paramete
 
     g_dbus_method_invocation_return_value(
         invocation,
-        g_variant_new("(bbxiiiiiiiu)", smart.available ? TRUE : FALSE, smart.healthy ? TRUE : FALSE,
-                      static_cast<gint64>(smart.power_on_hours), smart.reallocated_sectors,
-                      smart.pending_sectors, smart.temperature_celsius, smart.uncorrectable_errors,
-                      smart.percentage_used, smart.available_spare_percent,
-                      smart.available_spare_threshold_percent, static_cast<guint32>(smart.status)));
+        g_variant_new(dbus_signatures::SMART_RECORD, smart.available ? TRUE : FALSE,
+                      smart.healthy ? TRUE : FALSE, static_cast<gint64>(smart.power_on_hours),
+                      smart.reallocated_sectors, smart.pending_sectors, smart.temperature_celsius,
+                      smart.uncorrectable_errors, smart.percentage_used,
+                      smart.available_spare_percent, smart.available_spare_threshold_percent,
+                      static_cast<guint32>(smart.status)));
 }
 
 /**
@@ -486,7 +510,8 @@ void on_name_acquired(GDBusConnection* connection, const gchar* name, gpointer /
 
     // Parse introspection data
     GError* error = nullptr;
-    GDBusNodeInfo* introspection_data = g_dbus_node_info_new_for_xml(introspection_xml, &error);
+    GDBusNodeInfo* introspection_data =
+        g_dbus_node_info_new_for_xml(introspection_xml.data(), &error);
 
     if (!introspection_data) {
         LOG_ERROR("Helper", std::format("Failed to parse introspection XML: {}",

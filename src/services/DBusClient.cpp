@@ -5,6 +5,7 @@
 
 #include "services/DBusClient.hpp"
 
+#include "services/DBusSignatures.hpp"
 #include "util/Logger.hpp"
 
 #include <format>
@@ -484,9 +485,9 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/, const gchar
     gdouble verification_percentage = 0.0;
     guint64 bad_block_count = 0;
 
-    g_variant_get(parameters, "(&sdii&sbb&stttxbbbdt)", &device_path, &percentage, &current_pass,
-                  &total_passes, &status, &is_complete, &has_error, &error_message, &bytes_written,
-                  &total_bytes, &speed_bytes_per_sec, &estimated_seconds_remaining,
+    g_variant_get(parameters, dbus_signatures::WIPE_PROGRESS_PARSE, &device_path, &percentage,
+                  &current_pass, &total_passes, &status, &is_complete, &has_error, &error_message,
+                  &bytes_written, &total_bytes, &speed_bytes_per_sec, &estimated_seconds_remaining,
                   &verification_enabled, &verification_in_progress, &verification_passed,
                   &verification_percentage, &bad_block_count);
 
@@ -586,7 +587,7 @@ void DBusClient::get_available_disks(
                 const gchar* parent_disk = nullptr;
 
                 while (g_variant_iter_next(
-                    &iter, "(&s&s&sxbb&sb&subbxiiiiiiib&s)", &path, &model, &serial, &size_bytes,
+                    &iter, dbus_signatures::DISK_RECORD_PARSE, &path, &model, &serial, &size_bytes,
                     &is_removable, &is_ssd, &filesystem, &is_mounted, &mount_point, &smart_status,
                     &smart_available, &smart_healthy, &power_on_hours, &reallocated_sectors,
                     &pending_sectors, &temperature_celsius, &uncorrectable_errors, &percentage_used,

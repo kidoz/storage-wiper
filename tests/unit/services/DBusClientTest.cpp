@@ -1,23 +1,45 @@
 #include "services/DBusClient.hpp"
 
+#include "services/DBusSignatures.hpp"
+
 #include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>
+#include <fstream>
 #include <future>
+#include <regex>
+#include <sstream>
 #include <thread>
 
 namespace {
 
 constexpr auto NAME = "su.kidoz.storage_wiper.Helper";
 constexpr auto PATH = "/su/kidoz/storage_wiper/Helper";
-constexpr auto XML = R"(<node><interface name="su.kidoz.storage_wiper.Helper">
+// The fake helper advertises GetDisks with the shared array type and answers it
+// with a record built through dbus_signatures::DISK_RECORD, exactly as the real
+// helper does, so the test exercises the build/parse pair end to end.
+const std::string XML = std::string{R"(<node><interface name="su.kidoz.storage_wiper.Helper">
   <method name="StartWipe">
     <arg type="s" direction="in"/><arg type="u" direction="in"/>
     <arg type="b" direction="in"/><arg type="b" direction="out"/>
     <arg type="s" direction="out"/>
   </method>
+  <method name="GetDisks"><arg type=")"} +
+                        std::string{dbus_signatures::DISK_ARRAY} +
+                        R"(" direction="out"/></method>
 </interface></node>)";
+
+/// One fully populated disk record, built the way the privileged helper builds it
+auto make_disk_reply() -> GVariant* {
+    GVariantBuilder builder;
+    g_variant_builder_init(&builder, G_VARIANT_TYPE(dbus_signatures::DISK_ARRAY));
+    g_variant_builder_add(&builder, dbus_signatures::DISK_RECORD, "/dev/sda1", "Model X",
+                          "SERIAL42", gint64{4'096}, TRUE, FALSE, "ext4", TRUE, "/mnt/data",
+                          guint32{2}, TRUE, FALSE, gint64{12'345}, 5, 1, 41, 0, 12, 100, 10, TRUE,
+                          "/dev/sda");
+    return g_variant_new(dbus_signatures::DISK_LIST_REPLY, &builder);
+}
 
 class DBusClientTest : public testing::Test {
 protected:
@@ -38,9 +60,13 @@ protected:
     }
 
     static void method_call(GDBusConnection*, const gchar*, const gchar*, const gchar*,
-                            const gchar*, GVariant*, GDBusMethodInvocation* invocation,
+                            const gchar* method_name, GVariant*, GDBusMethodInvocation* invocation,
                             gpointer data) {
         const auto* self = static_cast<DBusClientTest*>(data);
+        if (std::string_view{method_name} == "GetDisks") {
+            g_dbus_method_invocation_return_value(invocation, make_disk_reply());
+            return;
+        }
         g_dbus_method_invocation_return_value(
             invocation, g_variant_new("(bs)", !self->reject.load(), "test rejection"));
     }
@@ -75,7 +101,7 @@ protected:
                 static_cast<GDBusConnectionFlags>(G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
                                                   G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION),
                 nullptr, nullptr, nullptr);
-            auto* node = g_dbus_node_info_new_for_xml(XML, nullptr);
+            auto* node = g_dbus_node_info_new_for_xml(XML.c_str(), nullptr);
             static const GDBusInterfaceVTable TABLE{method_call, nullptr, nullptr, {nullptr}};
             const auto registration = g_dbus_connection_register_object(
                 helper, PATH, node->interfaces[0], &TABLE, this, nullptr, nullptr);
@@ -106,9 +132,9 @@ protected:
     void emit(const char* path, bool complete, bool failed = false) {
         ASSERT_TRUE(g_dbus_connection_emit_signal(
             helper, nullptr, PATH, NAME, "WipeProgress",
-            g_variant_new("(sdiisbbstttxbbbdt)", path, 50.0, 1, 3, "test", complete, failed,
-                          failed ? "cancelled" : "", guint64{1'024}, guint64{2'048}, guint64{1},
-                          gint64{0}, false, false, false, 0.0, guint64{4}),
+            g_variant_new(dbus_signatures::WIPE_PROGRESS, path, 50.0, 1, 3, "test", complete,
+                          failed, failed ? "cancelled" : "", guint64{1'024}, guint64{2'048},
+                          guint64{1}, gint64{0}, false, false, false, 0.0, guint64{4}),
             nullptr));
         g_dbus_connection_flush_sync(helper, nullptr, nullptr);
     }
@@ -172,3 +198,59 @@ TEST_F(DBusClientTest, RejectedStartDoesNotLeaveCallbackRegistered) {
 }
 
 }  // namespace
+
+// Regression: 1.5.0 shipped a helper format string with one type code more than
+// the values it passed, so every GetDisks record failed to parse and both
+// clients reported "No disks found". The record here is built with the exact
+// string the helper uses and must come back field for field.
+TEST_F(DBusClientTest, GetDisksRecordRoundTripsEveryField) {
+    std::vector<DiskInfo> disks;
+    std::atomic<bool> done{false};
+    client->get_available_disks([&](auto result) {
+        if (result) {
+            disks = std::move(*result);
+        }
+        done.store(true);
+    });
+    ASSERT_TRUE(pump_until([&] { return done.load(); }));
+    ASSERT_EQ(disks.size(), 1u) << "a signature mismatch yields an empty list, not an error";
+
+    const auto& disk = disks.front();
+    EXPECT_EQ(disk.path, "/dev/sda1");
+    EXPECT_EQ(disk.model, "Model X");
+    EXPECT_EQ(disk.serial, "SERIAL42");
+    EXPECT_EQ(disk.size_bytes, 4'096u);
+    EXPECT_TRUE(disk.is_removable);
+    EXPECT_FALSE(disk.is_ssd);
+    EXPECT_EQ(disk.filesystem, "ext4");
+    EXPECT_TRUE(disk.is_mounted);
+    EXPECT_EQ(disk.mount_point, "/mnt/data");
+    EXPECT_EQ(disk.smart.status, SmartData::HealthStatus::WARNING);
+    EXPECT_TRUE(disk.smart.available);
+    EXPECT_FALSE(disk.smart.healthy);
+    EXPECT_EQ(disk.smart.power_on_hours, 12'345);
+    EXPECT_EQ(disk.smart.reallocated_sectors, 5);
+    EXPECT_EQ(disk.smart.pending_sectors, 1);
+    EXPECT_EQ(disk.smart.temperature_celsius, 41);
+    EXPECT_EQ(disk.smart.uncorrectable_errors, 0);
+    EXPECT_EQ(disk.smart.percentage_used, 12);
+    EXPECT_EQ(disk.smart.available_spare_percent, 100);
+    EXPECT_EQ(disk.smart.available_spare_threshold_percent, 10);
+    EXPECT_TRUE(disk.is_partition);
+    EXPECT_EQ(disk.parent_disk, "/dev/sda");
+}
+
+// The shipped interface description must advertise the same GetDisks type the
+// helper and client compile against.
+TEST(DBusSignaturesTest, ShippedInterfaceDescriptionMatchesCode) {
+    std::ifstream xml{std::string{SOURCE_ROOT} + "/data/dbus/su.kidoz.storage_wiper.Helper.xml"};
+    ASSERT_TRUE(xml) << "interface description not found under SOURCE_ROOT";
+    std::stringstream buffer;
+    buffer << xml.rdbuf();
+
+    std::smatch match;
+    const std::regex pattern{R"re(<method name="GetDisks">\s*<arg name="disks" type="([^"]+)")re"};
+    const std::string text = buffer.str();
+    ASSERT_TRUE(std::regex_search(text, match, pattern)) << "GetDisks arg not found";
+    EXPECT_EQ(match[1].str(), std::string{dbus_signatures::DISK_ARRAY});
+}
