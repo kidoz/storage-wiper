@@ -9,6 +9,9 @@
 #include "services/DBusClient.hpp"
 #include "util/JsonEscape.hpp"
 #include "util/Logger.hpp"
+#include "util/WipeCertificate.hpp"
+
+#include <system_error>
 
 #include <algorithm>
 #include <atomic>
@@ -52,6 +55,7 @@ const struct option long_options[] = {
     {       "verify",       no_argument, nullptr, 'v'},
     {"force-unmount",       no_argument, nullptr, 'f'},
     {          "yes",       no_argument, nullptr, 'y'},
+    {  "certificate", required_argument, nullptr, 'c'},
     {        nullptr,                 0, nullptr,   0}
 };
 
@@ -103,7 +107,7 @@ auto CliApplication::parse_args(int argc, char* argv[]) -> CliOptions {
     CliOptions options;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "hVljw:a:vfy", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hVljw:a:vfyc:", long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
                 options.show_help = true;
@@ -133,6 +137,9 @@ auto CliApplication::parse_args(int argc, char* argv[]) -> CliOptions {
             case 'y':
                 options.no_confirm = true;
                 break;
+            case 'c':
+                options.certificate_path = optarg;
+                break;
             default:
                 options.show_help = true;
                 break;
@@ -146,30 +153,37 @@ void CliApplication::print_help() {
     std::cout << "Usage: " << APP_NAME << " [OPTIONS]\n\n"
               << "Secure disk wiping tool\n\n"
               << "Commands:\n"
-              << "  -l, --list              List available disks\n"
-              << "  -w, --wipe <device>     Wipe the specified device\n\n"
+              << "  -l, --list                 List available disks\n"
+              << "  -w, --wipe <device>        Wipe the specified device\n\n"
               << "Options:\n"
-              << "  -h, --help              Show this help message\n"
-              << "  -V, --version           Show version information\n"
-              << "  -j, --json              Output in JSON format (with --list)\n"
-              << "  -a, --algorithm <name>  Wipe algorithm (default: zero-fill)\n"
-              << "  -v, --verify            Verify wipe by reading back data\n"
-              << "  -f, --force-unmount     Unmount device before wiping\n"
-              << "  -y, --yes               Skip confirmation prompt\n\n"
-              << "Algorithms:\n"
-              << "  zero-fill               Single pass with zeros\n"
-              << "  random-fill             Single pass with random data\n"
-              << "  dod-5220-22-m           DoD 5220.22-M 3-pass standard\n"
-              << "  schneier                Bruce Schneier 7-pass method\n"
-              << "  vsitr                   German VSITR 7-pass standard\n"
-              << "  gost                    Russian GOST R 50739-95 2-pass\n"
-              << "  gutmann                 Peter Gutmann 35-pass method\n"
-              << "  ata-secure-erase        Hardware ATA Security Erase (SSD/HDD only)\n\n"
+              << "  -h, --help                 Show this help message\n"
+              << "  -V, --version              Show version information\n"
+              << "  -j, --json                 Output in JSON format (with --list)\n"
+              << "  -a, --algorithm <name>     Wipe algorithm (default: zero-fill)\n"
+              << "  -v, --verify               Verify wipe by reading back data\n"
+              << "  -f, --force-unmount        Unmount device before wiping\n"
+              << "  -y, --yes                  Skip confirmation prompt\n"
+              << "  -c, --certificate <path>   Write a wipe certificate after a successful\n"
+              << "                             wipe: <path>.json and <path>.txt (a directory\n"
+              << "                             receives an auto-named pair)\n\n"
+              << "Algorithms (NIST SP 800-88 category in parentheses):\n"
+              << "  zero-fill                  Single pass with zeros (Clear)\n"
+              << "  random-fill                Single pass with random data (Clear)\n"
+              << "  dod-5220-22-m              DoD 5220.22-M 3-pass standard (Clear)\n"
+              << "  schneier                   Bruce Schneier 7-pass method (Clear)\n"
+              << "  vsitr                      German VSITR 7-pass standard (Clear)\n"
+              << "  gost                       Russian GOST R 50739-95 2-pass (Clear)\n"
+              << "  gutmann                    Peter Gutmann 35-pass method (Clear)\n"
+              << "  ata-secure-erase           Hardware/firmware secure erase (Purge):\n"
+              << "                             ATA Security Erase for SATA, NVMe\n"
+              << "                             Sanitize (crypto/block erase) for NVMe\n\n"
               << "Examples:\n"
               << "  " << APP_NAME << " --list\n"
               << "  " << APP_NAME << " --list --json\n"
               << "  " << APP_NAME << " --wipe /dev/sdb\n"
               << "  " << APP_NAME << " --wipe /dev/sdb --algorithm dod-5220-22-m --verify\n"
+              << "  " << APP_NAME << " --wipe /dev/nvme0n1 --algorithm ata-secure-erase \\\n"
+              << "      --certificate /tmp/wipe-report\n"
               << std::endl;
 }
 
@@ -267,6 +281,34 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
 
     const auto& disk = *disk_it;
 
+    // Scope statement: a partition wipe spares its siblings, a disk wipe
+    // takes every partition and the partition table with it.
+    std::string scope_note;
+    if (disk.is_partition) {
+        if (!disk.parent_disk.empty()) {
+            scope_note = "Scope: only this partition is erased. Other partitions and the "
+                         "partition table on " +
+                         disk.parent_disk + " are not touched.";
+        }
+    } else {
+        std::vector<std::string> children;
+        for (const auto& candidate : disks) {
+            if (candidate.is_partition && candidate.parent_disk == disk.path) {
+                children.push_back(candidate.path);
+            }
+        }
+        if (!children.empty()) {
+            scope_note = "Scope: the whole device is erased, including its partitions (";
+            for (size_t i = 0; i < children.size(); ++i) {
+                scope_note += children[i];
+                if (i + 1 < children.size()) {
+                    scope_note += ", ";
+                }
+            }
+            scope_note += ") and the partition table.";
+        }
+    }
+
     // Check if mounted
     if (disk.is_mounted) {
         if (options.force_unmount) {
@@ -287,10 +329,21 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
 
     // Confirm
     if (!options.no_confirm) {
-        if (!confirm_wipe(options.device_path, options.algorithm)) {
+        if (!confirm_wipe(options.device_path, options.algorithm, scope_note)) {
             std::cout << "Aborted.\n";
             return 1;
         }
+    }
+
+    // Warn early when verification cannot be honored for this algorithm, so
+    // the user is not left assuming a verification step that never runs.
+    if (options.verify && !client_->supports_verification(*algo)) {
+        std::cerr << "Warning: algorithm '" << options.algorithm
+                  << "' does not support post-wipe verification; --verify will be ignored.\n";
+        LOG_WARNING("CLI",
+                    std::format("Verification requested for {} with algorithm {} which does not "
+                                "support it; ignoring",
+                                options.device_path, options.algorithm));
     }
 
     // Set up signal handler for graceful cancellation
@@ -304,13 +357,24 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
     // Track completion
     std::atomic<bool> complete{false};
     std::atomic<bool> success{false};
+    std::atomic<uint64_t> peak_speed{0};
+    std::atomic<bool> verification_enabled_reported{false};
+    std::atomic<bool> verification_passed{false};
+    std::atomic<uint64_t> bad_blocks_total{0};
     std::string final_message;
+
+    const auto start_wall = std::chrono::system_clock::now();
+    const auto start_steady = std::chrono::steady_clock::now();
 
     // Progress callback
     auto callback = [&](const WipeProgress& p) {
+        peak_speed.store(std::max(peak_speed.load(), p.speed_bytes_per_sec));
+        bad_blocks_total.store(p.bad_block_count);
         if (p.is_complete) {
             complete.store(true);
             success.store(!p.has_error);
+            verification_enabled_reported.store(p.verification_enabled);
+            verification_passed.store(p.verification_passed);
             final_message = p.status;
             if (p.has_error && !p.error_message.empty()) {
                 final_message = p.error_message;
@@ -339,13 +403,57 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
                 std::cerr << "\nCancellation requested...\n";
                 cancel_reported = true;
             }
-            client_->cancel_current_operation();
+            client_->cancel_operation(options.device_path);
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds{50});
     }
 
     progress.complete(success.load(), final_message);
+
+    // Write the wipe certificate on success
+    if (success.load() && !options.certificate_path.empty()) {
+        util::WipeCertificateData data{};
+        data.device_path = disk.path;
+        data.model = disk.model;
+        data.serial = disk.serial;
+        data.size_bytes = disk.size_bytes;
+        data.algorithm_name = client_->get_algorithm_name(*algo);
+        data.nist_category = client_->get_nist_category(*algo);
+        data.total_passes = client_->get_pass_count(*algo);
+        data.started_at = util::iso8601_utc(start_wall);
+        data.completed_at = util::iso8601_utc(std::chrono::system_clock::now());
+        data.duration_seconds =
+            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                                      std::chrono::steady_clock::now() - start_steady)
+                                      .count());
+        data.peak_speed_bytes_per_sec = peak_speed.load();
+        data.verification_enabled = verification_enabled_reported.load();
+        data.verification_passed = verification_passed.load();
+        data.is_partition = disk.is_partition;
+        data.parent_disk = disk.parent_disk;
+        data.bad_block_count = bad_blocks_total.load();
+        data.success = true;
+        data.tool_version = PROJECT_VERSION;
+
+        namespace fs = std::filesystem;
+        const fs::path requested{options.certificate_path};
+        // The throwing overload would abort the run after the wipe already
+        // succeeded, for example on a path the process cannot stat.
+        std::error_code ec;
+        const bool to_directory =
+            options.certificate_path.ends_with('/') || fs::is_directory(requested, ec);
+        auto written = to_directory ? util::write_wipe_certificate(requested, data)
+                                    : util::write_certificate_to_base(requested, data);
+
+        if (written) {
+            std::cout << "Certificate written: " << written->string() << ".json, "
+                      << written->string() << ".txt\n";
+        } else {
+            LOG_ERROR("CLI", std::format("Certificate write failed: {}", written.error()));
+            std::cerr << "Warning: certificate could not be written: " << written.error() << "\n";
+        }
+    }
 
     return success.load() ? 0 : 1;
 }
@@ -376,6 +484,9 @@ auto CliApplication::parse_algorithm(const std::string& name) -> std::optional<W
     if (lower == "gutmann") {
         return WipeAlgorithm::GUTMANN;
     }
+    if (lower == "ata-secure-erase" || lower == "hardware-secure-erase") {
+        return WipeAlgorithm::ATA_SECURE_ERASE;
+    }
 
     return std::nullopt;
 }
@@ -402,12 +513,22 @@ auto CliApplication::algorithm_to_string(WipeAlgorithm algo) -> std::string {
     return "unknown";
 }
 
-auto CliApplication::confirm_wipe(const std::string& device_path, const std::string& algorithm)
-    -> bool {
+auto CliApplication::confirm_wipe(const std::string& device_path, const std::string& algorithm,
+                                  const std::string& scope_note) -> bool {
     std::cout << "\n";
     std::cout << "\033[1;31mWARNING: This will PERMANENTLY DESTROY all data on " << device_path
               << "!\033[0m\n";
-    std::cout << "Algorithm: " << algorithm << "\n\n";
+    std::cout << "Algorithm: " << algorithm << "\n";
+    if (algorithm == "ata-secure-erase" && device_path.starts_with("/dev/nvme")) {
+        // Sanitize and Format are controller-scoped, so sibling namespaces go too.
+        std::cout << "\033[1;31mAn NVMe firmware erase is issued to the controller and erases "
+                     "EVERY namespace on it, not only "
+                  << device_path << ".\033[0m\n";
+    }
+    if (!scope_note.empty()) {
+        std::cout << scope_note << "\n";
+    }
+    std::cout << "\n";
     std::cout << "Type 'yes' to confirm: ";
     std::cout.flush();
 
@@ -431,6 +552,8 @@ void CliApplication::print_disks_json(const std::vector<DiskInfo>& disks) {
         std::cout << "    \"is_mounted\": " << (disk.is_mounted ? "true" : "false") << ",\n";
         std::cout << "    \"mount_point\": \"" << util::json_escape(disk.mount_point) << "\",\n";
         std::cout << "    \"filesystem\": \"" << util::json_escape(disk.filesystem) << "\",\n";
+        std::cout << "    \"is_partition\": " << (disk.is_partition ? "true" : "false") << ",\n";
+        std::cout << "    \"parent_disk\": \"" << util::json_escape(disk.parent_disk) << "\",\n";
         std::cout << "    \"smart_status\": \"" << util::json_escape(disk.smart.status_string())
                   << "\",\n";
         std::cout << "    \"smart\": {\n";
@@ -496,6 +619,9 @@ void CliApplication::print_disks_table(const std::vector<DiskInfo>& disks) {
         };
 
         std::string type = disk.is_ssd ? "SSD" : "HDD";
+        if (disk.is_partition) {
+            type += " Part";
+        }
         if (disk.is_removable) {
             type = "Removable";
         }

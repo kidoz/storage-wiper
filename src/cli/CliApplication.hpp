@@ -34,6 +34,7 @@ struct CliOptions {
     bool verify = false;
     bool force_unmount = false;
     bool no_confirm = false;
+    std::string certificate_path;  ///< --certificate: empty = no certificate
 };
 
 /**
@@ -118,10 +119,12 @@ private:
      * @brief Prompt user for confirmation
      * @param device_path Device to wipe
      * @param algorithm Algorithm name
+     * @param scope_note Scope statement (partition vs whole disk), may be empty
      * @return true if user confirms
      */
     [[nodiscard]] static auto confirm_wipe(const std::string& device_path,
-                                           const std::string& algorithm) -> bool;
+                                           const std::string& algorithm,
+                                           const std::string& scope_note) -> bool;
 
     /**
      * @brief Print disk list as JSON

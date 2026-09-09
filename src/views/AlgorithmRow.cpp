@@ -53,8 +53,11 @@ void AlgorithmRow::populate_from_algorithm_info() {
     }
     name_label_->set_text(name_text);
 
-    // Set description
+    // Set description with the NIST SP 800-88 sanitization category
     auto description = algo_.description;
+    if (!algo_.nist_category.empty()) {
+        description += std::format(" [{}]", algo_.nist_category);
+    }
     if (!algo_.is_ssd_compatible) {
         description += " Not recommended for SSDs.";
     }

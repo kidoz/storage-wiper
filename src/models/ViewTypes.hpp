@@ -21,6 +21,7 @@ struct AlgorithmInfo {
     std::string description;
     int pass_count = 0;
     bool is_ssd_compatible = false;
+    std::string nist_category;  ///< NIST SP 800-88 sanitization category label
 
     auto operator==(const AlgorithmInfo&) const -> bool = default;
 };
