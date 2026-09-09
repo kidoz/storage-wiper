@@ -42,13 +42,16 @@ struct ATASecurityInfo {
 
 /**
  * @class ATASecureEraseAlgorithm
- * @brief Hardware-based secure erase for ATA/SATA drives
+ * @brief Hardware/firmware-based secure erase for ATA/SATA and NVMe drives
  *
- * Implements ATA Security feature set commands to perform hardware-level
- * secure erase. This is the most effective way to securely wipe SSDs as
- * it erases all data including wear-leveled blocks.
+ * Dispatches to the firmware erase mechanism of the device transport:
+ * - ATA/SATA: the ATA Security feature set (SECURITY ERASE UNIT, enhanced
+ *   when supported). Erases all data including wear-leveled blocks.
+ * - NVMe: the Sanitize command (crypto erase preferred, then block erase,
+ *   then overwrite) or Format NVM with cryptographic erase when the
+ *   controller lacks Sanitize.
  *
- * The process:
+ * The ATA process:
  * 1. Check if device supports ATA Security
  * 2. Verify device is not frozen
  * 3. Set a temporary password
@@ -59,27 +62,28 @@ struct ATASecurityInfo {
 class ATASecureEraseAlgorithm : public IWipeAlgorithm {
 public:
     /**
-     * @brief Not used - ATA Secure Erase requires device-level access
+     * @brief Not used - hardware secure erase requires device-level access
      */
     bool execute(int fd, uint64_t size, ProgressCallback callback,
                  const std::atomic<bool>& cancel_flag) override;
 
     /**
-     * @brief Execute ATA Secure Erase on the specified device
+     * @brief Execute hardware secure erase on the specified device
      */
     bool execute_on_device(const std::string& device_path, uint64_t size, ProgressCallback callback,
                            const std::atomic<bool>& cancel_flag) override;
 
     /**
-     * @brief ATA Secure Erase requires device-level access
+     * @brief Hardware secure erase requires device-level access
      */
     bool requires_device_access() const override { return true; }
 
-    std::string get_name() const override { return "ATA Secure Erase"; }
+    std::string get_name() const override { return "Hardware Secure Erase"; }
 
     std::string get_description() const override {
-        return "Hardware-based secure erase using ATA Security commands. "
-               "Most effective for SSDs - erases all blocks including wear-leveled areas.";
+        return "Firmware-based secure erase: ATA Security Erase for SATA drives, "
+               "NVMe Sanitize (crypto/block erase) for NVMe drives. Erases all blocks "
+               "including wear-leveled areas - NIST 800-88 Purge.";
     }
 
     int get_pass_count() const override { return 1; }
@@ -145,6 +149,49 @@ private:
      */
     bool security_erase_unit(int fd, const char* password, bool enhanced = false,
                              bool master = false);
+
+    /**
+     * @brief Erase an NVMe drive through its controller (Sanitize or Format)
+     */
+    bool nvme_secure_erase(const std::string& device_path, ProgressCallback& callback,
+                           const std::atomic<bool>& cancel_flag);
+
+    /**
+     * @brief Send an Identify (CNS = controller) admin command
+     */
+    static int nvme_identify_controller(int fd, uint8_t* out);
+
+    /**
+     * @brief Read the Identify Namespace structure for one namespace
+     * @param fd Open controller character device
+     * @param nsid Namespace ID
+     * @param out 4096-byte destination buffer
+     * @return 0 on success, the NVMe status code when positive, -1 on ioctl failure
+     */
+    static int nvme_identify_namespace(int fd, uint32_t nsid, uint8_t* out);
+
+    /**
+     * @brief Describe a failed NVMe passthrough command
+     * @param ioctl_result Return value of the passthrough ioctl
+     * @return The NVMe status code when the ioctl returned one, else strerror(errno)
+     */
+    static std::string nvme_error_text(int ioctl_result);
+
+    /**
+     * @brief Read the 512-byte Sanitize Status log page
+     */
+    static int nvme_get_sanitize_log(int fd, uint8_t* out);
+
+    /**
+     * @brief Run a blocking Format NVM with cryptographic erase on a namespace
+     */
+    bool nvme_format_crypto_erase(const std::string& device_path, int ctrl_fd,
+                                  ProgressCallback& callback);
+
+    /**
+     * @brief Format a seconds count as "1h 05m" / "2m 30s" / "45s"
+     */
+    [[nodiscard]] static std::string format_duration(int64_t seconds);
 
     /**
      * @brief Report progress to callback

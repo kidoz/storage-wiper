@@ -20,13 +20,14 @@ protected:
 };
 
 // Test: algorithm metadata
-TEST_F(ATASecureEraseAlgorithmTest, GetName_ReturnsATASecureErase) {
-    EXPECT_EQ(algorithm.get_name(), "ATA Secure Erase");
+TEST_F(ATASecureEraseAlgorithmTest, GetName_ReturnsHardwareSecureErase) {
+    EXPECT_EQ(algorithm.get_name(), "Hardware Secure Erase");
 }
 
-TEST_F(ATASecureEraseAlgorithmTest, GetDescription_ReturnsNonEmpty) {
+TEST_F(ATASecureEraseAlgorithmTest, GetDescription_MentionsAtaAndNvme) {
     EXPECT_FALSE(algorithm.get_description().empty());
-    EXPECT_NE(algorithm.get_description().find("SSD"), std::string::npos);
+    EXPECT_NE(algorithm.get_description().find("ATA"), std::string::npos);
+    EXPECT_NE(algorithm.get_description().find("NVMe"), std::string::npos);
 }
 
 TEST_F(ATASecureEraseAlgorithmTest, GetPassCount_ReturnsOne) {
