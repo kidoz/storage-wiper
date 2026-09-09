@@ -115,11 +115,13 @@ inline auto write_with_bad_sector_tolerance(int fd, std::span<const uint8_t> dat
 
     // Locate the current device offset so the fallback can address the
     // remaining region explicitly.
-    const off_t base = ::lseek(fd, 0, SEEK_CUR);
-    if (base < 0) {
+    const off_t position = ::lseek(fd, 0, SEEK_CUR);
+    if (position < 0) {
         return done;
     }
 
+    // The current position already includes the successful short writes.
+    const off_t base = position - static_cast<off_t>(done);
     uint64_t skipped = 0;
     done = detail::sector_skipping_write(
         [fd](off_t offset, std::span<const uint8_t> chunk) -> ssize_t {

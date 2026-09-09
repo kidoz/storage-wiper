@@ -362,6 +362,22 @@ if get_option('enable_tests')
     env: ['GTEST_COLOR=1']
   )
 
+  # Run real service/algorithm code against deterministic simulated device I/O.
+  # This binary alone wraps syscalls; it cannot open real block devices.
+  io_test_exe = executable(
+    'storage_wiper_io_tests',
+    files('tests/test_main.cpp', 'tests/fixtures/FakeDeviceIO.cpp',
+          'tests/unit/services/WipeServiceIoTest.cpp',
+          'src/helper/services/WipeService.cpp'),
+    shared_sources, util_sources,
+    include_directories: test_inc,
+    dependencies: [gtest_dep, gmock_dep, gio_dep, gtkmm_dep],
+    link_args: ['-Wl,--wrap=open64,--wrap=close,--wrap=read,--wrap=write',
+                '-Wl,--wrap=pwrite64,--wrap=lseek64,--wrap=fsync,--wrap=ioctl'],
+    install: false
+  )
+  test('device_io_tests', io_test_exe, timeout: 60)
+
   message('  Tests: enabled')
 else
   message('  Tests: disabled (enable with -Denable_tests=true)')
