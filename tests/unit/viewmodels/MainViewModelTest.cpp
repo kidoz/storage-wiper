@@ -471,3 +471,32 @@ TEST_F(MainViewModelTest, CertificateRetainsMultiPassCountAndBadSectors) {
     }
     EXPECT_EQ(certificates, 1);
 }
+
+TEST_F(MainViewModelTest, DisconnectFailureClearsActiveWipeWithoutWritingCertificate) {
+    TempTestFile root;
+    ASSERT_TRUE(root.valid());
+    const auto directory = root.path() + "-failed-certificates";
+    struct Cleanup {
+        std::string path;
+        ~Cleanup() { std::filesystem::remove_all(path); }
+    } cleanup{directory};
+    view_model->set_certificate_directory(directory);
+    SimulateConnected();
+    view_model->select_disk("/dev/sda");
+    EXPECT_CALL(*mock_wipe_service, wipe_disk(_, _, _))
+        .WillOnce([](const auto&, auto, auto callback) {
+            WipeProgress failure{};
+            failure.is_complete = true;
+            failure.has_error = true;
+            failure.error_message = "Helper service stopped; wipe outcome is unknown.";
+            callback(failure);
+            return true;
+        });
+    view_model->confirm_wipe();
+    ASSERT_TRUE(wait_for([&] { return !view_model->is_wipe_in_progress.get(); }));
+    EXPECT_TRUE(view_model->wipe_progresses.get().empty());
+    EXPECT_FALSE(std::filesystem::exists(directory));
+    EXPECT_EQ(view_model->current_message.get().type, MessageInfo::Type::ERROR);
+    view_model->select_disk("/dev/sda");
+    EXPECT_TRUE(view_model->can_wipe.get());
+}

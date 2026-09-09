@@ -378,6 +378,17 @@ if get_option('enable_tests')
   )
   test('device_io_tests', io_test_exe, timeout: 60)
 
+  dbus_test_exe = executable(
+    'storage_wiper_dbus_tests',
+    files('tests/test_main.cpp', 'tests/unit/services/DBusClientTest.cpp',
+          'src/services/DBusClient.cpp'),
+    util_sources,
+    include_directories: test_inc,
+    dependencies: [gtest_dep, gmock_dep, gio_dep],
+    install: false
+  )
+  test('dbus_client_tests', dbus_test_exe, timeout: 60)
+
   message('  Tests: enabled')
 else
   message('  Tests: disabled (enable with -Denable_tests=true)')

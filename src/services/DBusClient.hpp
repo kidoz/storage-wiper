@@ -45,7 +45,7 @@ enum class ConnectionState {
  */
 class DBusClient : public IDiskService, public IWipeService {
 public:
-    DBusClient();
+    explicit DBusClient(GBusType bus_type = G_BUS_TYPE_SYSTEM);
     ~DBusClient() override;
 
     // Prevent copying
@@ -120,6 +120,7 @@ public:
     auto cancel_operation(const std::string& device_path) -> bool override;
 
 private:
+    GBusType bus_type_;
     GDBusConnection* connection_ = nullptr;
     GDBusProxy* proxy_ = nullptr;
     mutable std::mutex proxy_mutex_;  // Protects proxy_ access during reconnection
@@ -127,7 +128,7 @@ private:
 
     // One progress callback per device so several concurrent wipes can be
     // routed to their own caller by the signal's device_path argument.
-    std::map<std::string, ProgressCallback> progress_callbacks_;
+    std::map<std::string, std::shared_ptr<ProgressCallback>> progress_callbacks_;
     mutable std::mutex callback_mutex_;
 
     // Algorithm info cache (fetched once from helper)

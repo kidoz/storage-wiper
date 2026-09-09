@@ -97,7 +97,7 @@ struct ProxyRefGuard {
 };
 }  // namespace
 
-DBusClient::DBusClient() = default;
+DBusClient::DBusClient(GBusType bus_type) : bus_type_(bus_type) {}
 
 DBusClient::~DBusClient() {
     cleanup();
@@ -221,7 +221,7 @@ auto DBusClient::attempt_reconnect() -> bool {
     GError* error = nullptr;
 
     if (!connection_) {
-        connection_ = g_bus_get_sync(G_BUS_TYPE_SYSTEM, nullptr, &error);
+        connection_ = g_bus_get_sync(bus_type_, nullptr, &error);
         if (!connection_) {
             std::string msg = error ? error->message : "unknown error";
             g_clear_error(&error);
@@ -282,7 +282,7 @@ void DBusClient::start_name_watching() {
     if (name_watcher_id_ != 0)
         return;
 
-    name_watcher_id_ = g_bus_watch_name(G_BUS_TYPE_SYSTEM, DBUS_NAME, G_BUS_NAME_WATCHER_FLAGS_NONE,
+    name_watcher_id_ = g_bus_watch_name(bus_type_, DBUS_NAME, G_BUS_NAME_WATCHER_FLAGS_NONE,
                                         on_name_appeared, on_name_vanished, this,
                                         nullptr  // user_data_free_func
     );
@@ -345,11 +345,22 @@ void DBusClient::on_name_vanished(GDBusConnection* /*connection*/, const gchar* 
             }
         }
 
-        // In-flight wipes died with the helper; drop their callbacks so a
-        // restarted helper does not route progress to stale callers.
+        // Finish each caller explicitly. Hardware erases may still be running
+        // in firmware; losing the helper means their outcome is unknown.
+        decltype(self->progress_callbacks_) callbacks;
         {
             std::lock_guard lock(self->callback_mutex_);
-            self->progress_callbacks_.clear();
+            callbacks.swap(self->progress_callbacks_);
+        }
+        WipeProgress failure{};
+        failure.is_complete = true;
+        failure.has_error = true;
+        failure.status = "Helper connection lost";
+        failure.error_message = "Helper service stopped; wipe outcome is unknown.";
+        for (const auto& [path, callback] : callbacks) {
+            if (*callback) {
+                (*callback)(failure);
+            }
         }
 
         self->set_state(ConnectionState::DISCONNECTED, "Helper service stopped");
@@ -391,7 +402,7 @@ auto DBusClient::connect() -> bool {
     GError* error = nullptr;
 
     // Connect to system bus
-    connection_ = g_bus_get_sync(G_BUS_TYPE_SYSTEM, nullptr, &error);
+    connection_ = g_bus_get_sync(bus_type_, nullptr, &error);
     if (!connection_) {
         std::string msg = error ? error->message : "unknown";
         LOG_ERROR("DBusClient", std::format("Failed to connect to system bus: {}", msg));
@@ -504,7 +515,7 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/, const gchar
         std::lock_guard lock(self->callback_mutex_);
         if (const auto it = self->progress_callbacks_.find(std::string{device_path});
             it != self->progress_callbacks_.end()) {
-            callback = it->second;
+            callback = *it->second;
             if (progress.is_complete) {
                 self->progress_callbacks_.erase(it);
             }
@@ -801,20 +812,24 @@ auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm
 auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm,
                            ProgressCallback callback, bool verify) -> bool {
     GDBusProxy* proxy_copy = nullptr;
+    auto registered_callback = std::make_shared<ProgressCallback>(std::move(callback));
     {
-        std::lock_guard lock(proxy_mutex_);
-        if (!proxy_)
+        std::scoped_lock lock(proxy_mutex_, callback_mutex_);
+        if (!proxy_ || progress_callbacks_.contains(disk_path)) {
             return false;
+        }
         proxy_copy = proxy_;
         g_object_ref(proxy_copy);
+        progress_callbacks_.emplace(disk_path, registered_callback);
     }
     ProxyRefGuard proxy_guard{proxy_copy};
-
-    // Store callback for the signal handler, keyed by device
-    {
+    const auto remove_callback = [&]() {
         std::lock_guard lock(callback_mutex_);
-        progress_callbacks_[disk_path] = std::move(callback);
-    }
+        auto it = progress_callbacks_.find(disk_path);
+        if (it != progress_callbacks_.end() && it->second == registered_callback) {
+            progress_callbacks_.erase(it);
+        }
+    };
 
     GError* error = nullptr;
     GVariant* result = g_dbus_proxy_call_sync(
@@ -827,18 +842,20 @@ auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm
         LOG_ERROR("DBusClient",
                   std::format("StartWipe failed: {}", error ? error->message : "unknown"));
         g_clear_error(&error);
+        remove_callback();
         return false;
     }
 
     gboolean started = FALSE;
     const gchar* error_message = nullptr;
     g_variant_get(result, "(b&s)", &started, &error_message);
-    g_variant_unref(result);
 
     if (!started) {
         LOG_ERROR("DBusClient",
                   std::format("Wipe not started: {}", error_message ? error_message : "unknown"));
+        remove_callback();
     }
+    g_variant_unref(result);
 
     return started != FALSE;
 }

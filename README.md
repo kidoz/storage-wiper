@@ -195,6 +195,9 @@ just test         # Run all unit tests
 just test-verbose # Run tests with detailed output
 just test-filter "Pattern"  # Run specific tests
 
+# Device I/O simulations and isolated D-Bus regression tests
+meson test -C build device_io_tests dbus_client_tests
+
 # Memory analysis
 just valgrind     # Check for memory leaks
 ```
