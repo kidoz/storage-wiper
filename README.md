@@ -9,15 +9,25 @@ A modern, secure disk wiping application built with GTK4 and libadwaita for Linu
 
 ## Features
 
-- 🔒 **8 Secure Wiping Algorithms**
-  - Zero Fill (1-pass)
-  - Random Fill (1-pass)
-  - DoD 5220.22-M (3-pass)
-  - Bruce Schneier (7-pass)
-  - VSITR German Standard (7-pass)
-  - GOST R 50739-95 Russian Standard (2-pass)
-  - Peter Gutmann (35-pass)
-  - ATA Secure Erase (hardware-based, for SSDs)
+- 🔒 **8 Secure Wiping Algorithms** (labeled with their NIST SP 800-88 category)
+  - Zero Fill (1-pass, Clear)
+  - Random Fill (1-pass, Clear)
+  - DoD 5220.22-M (3-pass, Clear)
+  - Bruce Schneier (7-pass, Clear)
+  - VSITR German Standard (7-pass, Clear)
+  - GOST R 50739-95 Russian Standard (2-pass, Clear)
+  - Peter Gutmann (35-pass, Clear)
+  - Hardware Secure Erase (firmware-based, NIST 800-88 Purge)
+    - SATA: ATA Security Erase (enhanced erase when supported)
+    - NVMe: Sanitize (crypto erase → block erase → overwrite) or Format NVM
+      with cryptographic erase
+
+- 📜 **Wipe Certificates**
+  - JSON + text certificate after each successful GUI wipe
+    (`~/.local/share/storage-wiper/certificates/`)
+  - CLI: `--certificate <path>` for scripted audit trails
+  - Records device identity (model/serial), algorithm, NIST 800-88 category,
+    timing, throughput, and verification verdict
 
 - 💾 **Smart Disk Detection**
   - Automatic SSD vs HDD detection
@@ -28,6 +38,27 @@ A modern, secure disk wiping application built with GTK4 and libadwaita for Linu
   - SMART health status (reallocated/pending sectors, temperature, power-on hours)
   - SSD and NVMe wear level, plus NVMe spare capacity
   - eMMC life-time estimate from the EXT_CSD registers
+
+- 🧩 **Partition-Level Wiping**
+  - Partitions are listed next to their disk and can be wiped individually
+  - Wiping a partition leaves the partition table and sibling partitions intact
+  - Scope of each wipe is stated in the confirmation dialog
+  - SMART health is inherited from the partition's parent disk
+
+- 🔀 **Multi-Disk Parallel Wiping**
+  - Wipe several devices at the same time from one helper connection
+  - Progress, verification, cancellation, and certificates are per device
+  - The GUI tracks every wipe in flight; the progress area follows the
+    selected disk
+  - CLI users can simply start one process per device
+  - A device can only host one wipe at a time; other devices are unaffected
+
+- 🛠 **Resilient Wipe Engine**
+  - Bad-sector tolerance: failing drives are wiped as far as possible and the
+    number of unwritable sectors is reported at completion and in certificates
+  - Automatic TRIM/discard (BLKDISCARD) after successful SSD wipes to restore
+    performance - issued after verification so it never masks the result
+  - Remembers the last-used algorithm and verification choice for the next start
 
 - ✅ **Post-Wipe Verification** (optional)
   - Zero Fill: reads back and checks all zeros
@@ -180,12 +211,53 @@ storage-wiper-cli --wipe /dev/sdb --algorithm dod-5220-22-m
 storage-wiper-cli --wipe /dev/sdb --verify          # With post-wipe verification
 storage-wiper-cli --wipe /dev/sdb --force-unmount   # Unmount before wiping
 storage-wiper-cli --wipe /dev/sdb --yes             # Skip confirmation
+storage-wiper-cli --wipe /dev/sdb --certificate /tmp/report   # Write report.json/.txt
 
 # Help
 storage-wiper-cli --help
 ```
 
-Algorithm names: `zero-fill` (default), `random-fill`, `dod-5220-22-m`, `schneier`, `vsitr`, `gost`, `gutmann`, `ata-secure-erase`.
+Algorithm names: `zero-fill` (default), `random-fill`, `dod-5220-22-m`, `schneier`, `vsitr`, `gost`, `gutmann`, `ata-secure-erase` (alias: `hardware-secure-erase`).
+
+## Partition Wiping
+
+`storage-wiper-cli --list` (and the GUI disk list) shows the partitions of
+every disk directly after the disk itself, marked as partitions. A partition
+can be wiped like a disk:
+
+```bash
+storage-wiper-cli --wipe /dev/sda1 --force-unmount
+```
+
+Wiping a partition erases only that partition's data area - the partition
+table and sibling partitions are not touched. Wiping the whole disk still
+erases everything, including the partition table. Both CLI and GUI state the
+scope in the confirmation step before anything destructive happens.
+
+## Bad Sectors and SSD TRIM
+
+If a drive refuses writes during a wipe (bad sectors), the wipe does not
+abort: each 512-byte sector is retried, unwritable sectors are skipped and
+counted, and the completion status plus certificate report how many sectors
+could not be overwritten. Data in skipped sectors may survive, which is why
+the count is surfaced rather than hidden.
+
+After a successful wipe of a non-rotational device, the helper issues
+`BLKDISCARD` (TRIM) over the whole device so the SSD can reclaim performance.
+The discard runs after read-back verification, so it can never influence the
+verdict, and it is skipped silently on devices that do not support it.
+
+## Wipe Certificates
+
+Every successful GUI wipe writes a certificate pair to
+`~/.local/share/storage-wiper/certificates/` (`.json` for machines, `.txt` for
+people). The CLI writes one on demand via `--certificate <path>`: if *path* is
+an existing directory (or ends with `/`), an auto-named pair is placed there;
+otherwise `<path>.json` and `<path>.txt` are written.
+
+Certificates include the device identity (path, model, serial, size), the
+algorithm and its NIST SP 800-88 media sanitization category, start/completion
+timestamps, duration, peak throughput, and the verification verdict.
 
 ## LVM and Device-Mapper Handling
 
@@ -223,18 +295,21 @@ sudo pvremove /dev/sda1
 
 ## Algorithm Comparison
 
-| Algorithm         | Passes | Best For              | Speed   |
-|-------------------|--------|-----------------------|---------|
-| Zero Fill         | 1      | Quick wipe, SSDs      | ⚡⚡⚡ |
-| Random Fill       | 1      | Basic security        | ⚡⚡⚡ |
-| GOST R 50739-95   | 2      | Russian compliance    | ⚡⚡   |
-| DoD 5220.22-M     | 3      | Government standard   | ⚡⚡   |
-| Schneier          | 7      | High security         | ⚡     |
-| VSITR             | 7      | German compliance     | ⚡     |
-| Gutmann           | 35     | Maximum paranoia      | 🐌     |
-| ATA Secure Erase  | N/A    | SSDs (hardware-based) | ⚡⚡⚡ |
+| Algorithm                | Passes | Best For                        | Speed   |
+|--------------------------|--------|---------------------------------|---------|
+| Zero Fill                | 1      | Quick wipe, SSDs                | ⚡⚡⚡ |
+| Random Fill              | 1      | Basic security                  | ⚡⚡⚡ |
+| GOST R 50739-95          | 2      | Russian compliance              | ⚡⚡   |
+| DoD 5220.22-M            | 3      | Government standard             | ⚡⚡   |
+| Schneier                 | 7      | High security                   | ⚡     |
+| VSITR                    | 7      | German compliance               | ⚡     |
+| Gutmann                  | 35     | Maximum paranoia                | 🐌     |
+| Hardware Secure Erase    | N/A    | SSDs/NVMe (firmware-based, Purge) | ⚡⚡⚡ |
 
-**Note**: For modern SSDs, ATA Secure Erase or a single-pass wipe (Zero/Random) is generally sufficient due to wear-leveling and internal architecture.
+**Note**: For modern SSDs, Hardware Secure Erase or a single-pass wipe
+(Zero/Random) is generally sufficient due to wear-leveling and internal
+architecture. On NVMe drives, Sanitize crypto erase is instant, causes no
+flash wear, and reaches areas software overwrite cannot.
 
 ## Development
 
@@ -356,16 +431,17 @@ Static analysis available via:
 - ✅ Systemd service file for D-Bus helper
 
 ### Planned Features
-- [ ] Multi-disk parallel wiping
-- [ ] Partition-level wiping (currently whole disks only)
-- [ ] Wiping profiles/presets
-- [ ] Bad sector handling
+- [ ] HPA/DCO (hidden-area) detection
+- [ ] Named wiping profiles (the last-used configuration is already restored automatically)
 
 ### Known Limitations
-- Whole disk wiping only (no partition support)
 - SMART data unavailable on SD cards and on USB enclosures that do not implement
   SCSI/ATA translation (the SAT pass-through fallback covers the ones that do)
-- ATA Secure Erase requires hardware support and may not work on all drives
+- Hardware Secure Erase requires hardware support: SATA drives must not be
+  security-frozen, and NVMe drives without Sanitize or cryptographic Format NVM
+  fall back to software overwrite algorithms
+- Bad sectors that cannot be overwritten may retain their old data; the count
+  is reported at completion so failing drives are visible in the audit trail
 - D-Bus helper requires proper polkit configuration for privilege escalation
 
 ## Contributing

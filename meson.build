@@ -78,6 +78,7 @@ shared_sources = files(
   'src/algorithms/GutmannAlgorithm.cpp',
   'src/algorithms/GOSTAlgorithm.cpp',
   'src/algorithms/ATASecureEraseAlgorithm.cpp',
+  'src/algorithms/NvmeSanitize.cpp',
   'src/algorithms/VerificationHelper.cpp',
 )
 
@@ -85,6 +86,8 @@ shared_sources = files(
 util_sources = files(
   'src/util/Logger.cpp',
   'src/util/SecureRandom.cpp',
+  'src/util/AppSettings.cpp',
+  'src/util/WipeCertificate.cpp',
 )
 
 # Source files for privileged helper
@@ -130,6 +133,7 @@ headers = files(
   'src/views/MainWindowContent.hpp',
   # Algorithms
   'src/algorithms/IWipeAlgorithm.hpp',
+  'src/algorithms/NvmeSanitize.hpp',
   'src/algorithms/ZeroFillAlgorithm.hpp',
   'src/algorithms/RandomFillAlgorithm.hpp',
   'src/algorithms/DoD522022MAlgorithm.hpp',
@@ -139,9 +143,11 @@ headers = files(
   'src/algorithms/GOSTAlgorithm.hpp',
   'src/algorithms/ATASecureEraseAlgorithm.hpp',
   # Utilities
+  'src/util/AppSettings.hpp',
   'src/util/FileDescriptor.hpp',
   'src/util/Result.hpp',
   'src/util/Logger.hpp',
+  'src/util/WipeCertificate.hpp',
   # Helper services
   'src/helper/services/SmartService.hpp',
   # Algorithms
@@ -308,6 +314,7 @@ if get_option('enable_tests')
     'tests/unit/algorithms/GOSTAlgorithmTest.cpp',
     'tests/unit/algorithms/GutmannAlgorithmTest.cpp',
     'tests/unit/algorithms/ATASecureEraseAlgorithmTest.cpp',
+    'tests/unit/algorithms/NvmeSanitizeTest.cpp',
     'tests/unit/algorithms/VerificationHelperTest.cpp',
     'tests/unit/services/WipeServiceTest.cpp',
     'tests/unit/services/DiskServiceTest.cpp',
@@ -315,6 +322,9 @@ if get_option('enable_tests')
     'tests/unit/services/SmartServiceTest.cpp',
     'tests/unit/util/JsonEscapeTest.cpp',
     'tests/unit/util/SecureRandomTest.cpp',
+    'tests/unit/util/AppSettingsTest.cpp',
+    'tests/unit/util/WipeCertificateTest.cpp',
+    'tests/unit/util/WriteHelpersTest.cpp',
     'tests/unit/viewmodels/MainViewModelTest.cpp',
   )
 
@@ -329,6 +339,8 @@ if get_option('enable_tests')
     'src/helper/services/SmartService.cpp',
     'src/util/Logger.cpp',
     'src/util/SecureRandom.cpp',
+    'src/util/AppSettings.cpp',
+    'src/util/WipeCertificate.cpp',
   )
 
   # Build test executable
