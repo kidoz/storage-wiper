@@ -370,3 +370,10 @@ TEST(NvmeSanitizeTest, ControllerPathOf_NonNvmeReturnsNullopt) {
 }
 
 }  // namespace
+
+TEST(NvmeSanitizeSafetyTest, RejectsPartitionAndMalformedNamespacePaths) {
+    for (const auto* path :
+         {"/dev/nvme0n1p1", "/dev/nvme0n", "/dev/nvmen1", "/dev/nvme0n1/../../sda"}) {
+        EXPECT_EQ(nvme_sanitize::controller_path_of(path), std::nullopt);
+    }
+}

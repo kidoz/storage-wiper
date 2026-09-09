@@ -163,17 +163,6 @@ TEST_F(WipeServiceTest, Destructor_CompletesQuickly) {
     EXPECT_LT(duration.count(), 100) << "Destructor should complete quickly";
 }
 
-// Test: wipe_disk starts asynchronously and returns true for valid call
-// Note: Actual file open happens in background thread
-TEST_F(WipeServiceTest, WipeDisk_ReturnsImmediatelyForAsyncOperation) {
-    auto callback = CreateThreadSafeCallback();
-
-    // This test just verifies the service starts the operation
-    // The actual wipe happens asynchronously
-    // We skip testing invalid paths as file validation happens in worker thread
-    SUCCEED();
-}
-
 // Test: algorithm info is thread-safe
 TEST_F(WipeServiceTest, AlgorithmInfo_ThreadSafe) {
     std::vector<std::future<std::string>> futures;

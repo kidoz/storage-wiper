@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <stdexcept>
 #include <utility>
 
 // System headers
@@ -185,14 +186,9 @@ auto is_non_rotational_device(const std::string& device_path) -> bool {
  *
  * @return true when at least the first discard was accepted
  */
-auto issue_trim_if_ssd(const std::string& disk_path, uint64_t device_size) -> bool {
+auto issue_trim_if_ssd(int fd, const std::string& disk_path, uint64_t device_size) -> bool {
     if (device_size == 0 || !is_non_rotational_device(disk_path)) {
         return false;
-    }
-
-    const util::FileDescriptor fd{open(disk_path.c_str(), O_WRONLY | O_EXCL)};
-    if (!fd) {
-        return false;  // something claimed the device between wipe and trim
     }
 
     constexpr uint64_t DISCARD_CHUNK = uint64_t{1} << 30;  // 1 GiB per request
@@ -201,7 +197,7 @@ auto issue_trim_if_ssd(const std::string& disk_path, uint64_t device_size) -> bo
 
     while (offset < device_size) {
         const uint64_t range[2] = {offset, std::min(DISCARD_CHUNK, device_size - offset)};
-        if (ioctl(fd.get(), BLKDISCARD, range) != 0) {
+        if (ioctl(fd, BLKDISCARD, range) != 0) {
             supported = false;
             break;
         }
@@ -341,11 +337,12 @@ auto WipeService::prepare_wipe(const std::string& disk_path, WipeAlgorithm algor
         return std::nullopt;
     }
 
-    if (auto eligible = device_policy::validate_wipe_target(*disk_service_, disk_path); !eligible) {
+    auto targets = device_policy::resolve_wipe_targets(*disk_service_, disk_path, algorithm);
+    if (!targets) {
         if (callback) {
             WipeProgress progress{};
             progress.has_error = true;
-            progress.error_message = eligible.error().message;
+            progress.error_message = targets.error().message;
             progress.is_complete = true;
             callback(progress);
         }
@@ -367,8 +364,24 @@ auto WipeService::prepare_wipe(const std::string& disk_path, WipeAlgorithm algor
     // insert the new one atomically. Joining here is deadlock-free: workers
     // never take operations_mutex_.
     auto operation = std::make_shared<Operation>();
+    operation->targets = std::move(*targets);
     {
         std::lock_guard lock(operations_mutex_);
+        // Reserve the entire affected scope atomically, including overlaps
+        // between a disk and its partitions or controller-wide NVMe erases.
+        for (const auto& [path, active] : operations_) {
+            if (!active->state->operation_in_progress.load()) {
+                continue;
+            }
+            for (const auto& target : operation->targets) {
+                for (const auto& claimed : active->targets) {
+                    if (device_path_matcher::is_device_or_partition_of(target, claimed) ||
+                        device_path_matcher::is_device_or_partition_of(claimed, target)) {
+                        return std::nullopt;
+                    }
+                }
+            }
+        }
         if (const auto it = operations_.find(disk_path); it != operations_.end()) {
             if (it->second->thread.joinable()) {
                 it->second->thread.join();
@@ -382,98 +395,6 @@ auto WipeService::prepare_wipe(const std::string& disk_path, WipeAlgorithm algor
     return WipePreparation{.algorithm = algorithm_ptr,
                            .requires_device_access = algorithm_ptr->requires_device_access(),
                            .operation = std::move(operation)};
-}
-
-auto WipeService::execute_wipe_on_device(
-    const std::string& disk_path, const std::shared_ptr<IWipeAlgorithm>& algorithm_ptr,
-    bool requires_device_access, const std::function<void(const WipeProgress&)>& tracked_callback,
-    std::shared_ptr<ThreadState> state) -> WipeResult {
-    uint64_t device_size = 0;
-    bool result = false;
-
-    // Some algorithms (like ATA Secure Erase) need device-level access
-    if (requires_device_access) {
-        // O_EXCL gate before the destructive firmware command: fails with EBUSY
-        // if the device or a partition is mounted/claimed (TOCTOU guard). Scoped
-        // so the exclusive claim is released before the algorithm reopens.
-        {
-            util::FileDescriptor probe_fd(open(disk_path.c_str(), O_RDONLY | O_EXCL));
-            if (!probe_fd) {
-                const int err = errno;
-                WipeProgress progress{};
-                progress.has_error = true;
-                progress.error_message =
-                    err == EBUSY ? "Device is in use (mounted or held by another process); "
-                                   "aborting to prevent data corruption"
-                                 : "Failed to open device: " + std::string(strerror(err));
-                progress.is_complete = true;
-                tracked_callback(progress);
-                state->operation_in_progress.store(false);
-                return {.success = false, .device_size = 0};
-            }
-            if (ioctl(probe_fd.get(), BLKGETSIZE64, &device_size) == -1) {
-                WipeProgress progress{};
-                progress.has_error = true;
-                progress.error_message = "Failed to get device size";
-                progress.is_complete = true;
-                tracked_callback(progress);
-                state->operation_in_progress.store(false);
-                return {.success = false, .device_size = 0};
-            }
-        }  // probe_fd closed here, exclusive claim released
-
-        // Use execute_on_device which handles the device internally
-        result = algorithm_ptr->execute_on_device(disk_path, device_size, tracked_callback,
-                                                  state->cancel_requested);
-    } else {
-        // O_EXCL on a block device fails with EBUSY if the device or any of its
-        // partitions is mounted or otherwise claimed. This closes the TOCTOU
-        // window between validate_wipe_target() and the destructive write: if
-        // anything mounted the device after validation, the open fails here
-        // instead of overwriting a live filesystem.
-        util::FileDescriptor fd(open(disk_path.c_str(), O_WRONLY | O_SYNC | O_EXCL));
-        if (!fd) {
-            const int err = errno;
-            WipeProgress progress{};
-            progress.has_error = true;
-            progress.error_message = err == EBUSY
-                                         ? "Device is in use (mounted or held by another process); "
-                                           "aborting to prevent data corruption"
-                                         : "Failed to open device: " + std::string(strerror(err));
-            progress.is_complete = true;
-            tracked_callback(progress);
-            state->operation_in_progress.store(false);
-            return {.success = false, .device_size = 0};
-        }
-
-        if (ioctl(fd.get(), BLKGETSIZE64, &device_size) == -1) {
-            WipeProgress progress{};
-            progress.has_error = true;
-            progress.error_message = "Failed to get device size";
-            progress.is_complete = true;
-            tracked_callback(progress);
-            state->operation_in_progress.store(false);
-            return {.success = false, .device_size = 0};
-        }
-
-        result = algorithm_ptr->execute(fd.get(), device_size, tracked_callback,
-                                        state->cancel_requested);
-
-        if (fsync(fd.get()) != 0) {
-            const int err = errno;
-            LOG_ERROR("WipeService", std::format("fsync failed: {}", strerror(err)));
-            WipeProgress progress{};
-            progress.has_error = true;
-            progress.error_message = "Failed to flush data to disk: " + std::string(strerror(err));
-            progress.is_complete = true;
-            tracked_callback(progress);
-            state->operation_in_progress.store(false);
-            return {.success = false, .device_size = 0};
-        }
-        // fd automatically closed by RAII
-    }
-
-    return {.success = result, .device_size = device_size};
 }
 
 auto WipeService::build_completion_status(bool wipe_result, bool do_verify, bool verify_result,
@@ -514,7 +435,7 @@ auto WipeService::build_completion_status(bool wipe_result, bool do_verify, bool
             final_progress.status =
                 "Wipe completed successfully." + success_note() + bad_block_note();
         }
-    } else if (!final_progress.has_error) {
+    } else {
         final_progress.has_error = true;
         final_progress.error_message = "Wipe operation failed";
     }
@@ -587,99 +508,94 @@ auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorith
                                 preparation->algorithm->get_name()));
     }
 
-    // Run wipe operation in its own thread; operations on other devices are
-    // unaffected and may run in parallel.
-    {
-        auto& op_thread = preparation->operation->thread;
-        op_thread = std::thread([disk_path, callback, state = preparation->operation->state,
-                                 algorithm_ptr = preparation->algorithm,
-                                 requires_device_access = preparation->requires_device_access,
-                                 do_verify]() {
-            bool wipe_result = false;
-            bool verify_result = true;
-            bool trim_issued = false;
-            uint64_t device_size = 0;
-            auto bad_blocks_total = std::make_shared<std::atomic<uint64_t>>(0);
+    // Only the service emits a terminal event, after writes, verification and
+    // discard have finished. Algorithm terminal events remain progress updates.
+    auto operation = preparation->operation;
+    operation->thread = std::thread([disk_path, callback = std::move(callback), operation,
+                                     algorithm_ptr = preparation->algorithm,
+                                     requires_device_access = preparation->requires_device_access,
+                                     do_verify]() {
+        const auto& state = operation->state;
+        bool wipe_result = false;
+        bool verify_result = false;
+        bool trim_issued = false;
+        uint64_t device_size = 0;
+        WipeProgress last_write{};
+        std::string error_message;
+        ProgressTracker tracker(callback);
+        auto tracked_callback = [&](const WipeProgress& progress) {
+            WipeProgress p = progress;
+            if (!p.error_message.empty()) {
+                error_message = p.error_message;
+            }
+            if (!p.verification_in_progress && !p.has_error) {
+                last_write = p;
+            }
+            p.is_complete = false;
+            p.verification_enabled = do_verify;
+            p.bad_block_count = last_write.bad_block_count;
+            tracker.report(p);
+        };
 
-            // Create progress tracker to calculate speed and ETA
-            auto tracker = std::make_shared<ProgressTracker>(callback);
-            auto tracked_callback = [tracker, do_verify,
-                                     bad_blocks_total](const WipeProgress& progress) {
-                WipeProgress p = progress;
-                p.verification_enabled = do_verify;
-                bad_blocks_total->store(p.bad_block_count, std::memory_order_relaxed);
-                tracker->report(p);
-            };
-
-            try {
-                // Execute the wipe operation
-                auto result = execute_wipe_on_device(
-                    disk_path, algorithm_ptr, requires_device_access, tracked_callback, state);
-
-                // Check for early exit (device open/size failure already reported)
-                if (!result.success && result.device_size == 0 &&
-                    !state->operation_in_progress.load()) {
-                    return;  // Error already handled and reported
+        // Keep every exclusive claim alive until the operation finishes.
+        // Firmware commands reopen devices internally, but these retained
+        // claims prevent mounts throughout that interval as well.
+        std::vector<util::FileDescriptor> claims;
+        try {
+            for (const auto& target : operation->targets) {
+                claims.emplace_back(open(target.c_str(), O_RDWR | O_SYNC | O_EXCL));
+                if (!claims.back()) {
+                    throw std::runtime_error("Cannot exclusively claim " + target + ": " +
+                                             std::string(strerror(errno)));
                 }
-
-                wipe_result = result.success;
-                device_size = result.device_size;
-
-                // Perform verification if requested, wipe succeeded, and not cancelled
-                if (do_verify && wipe_result && !state->cancel_requested.load()) {
-                    // Reopen device for reading. O_EXCL ensures nothing mounted
-                    // or claimed the device between the wipe and verification.
-                    util::FileDescriptor verify_fd(open(disk_path.c_str(), O_RDONLY | O_EXCL));
-                    if (!verify_fd) {
-                        const int err = errno;
-                        WipeProgress progress{};
-                        progress.has_error = true;
-                        progress.error_message =
-                            err == EBUSY
-                                ? "Device became busy before verification; cannot confirm wipe"
-                                : "Failed to open device for verification";
-                        progress.is_complete = true;
-                        tracked_callback(progress);
-                        state->operation_in_progress.store(false);
-                        return;
-                    }
-
-                    // Create verification progress callback
-                    auto verify_callback = [&tracked_callback](const WipeProgress& progress) {
-                        WipeProgress p = progress;
-                        p.verification_in_progress = true;
-                        p.status = "Verifying wipe...";
-                        tracked_callback(p);
-                    };
-
-                    verify_result = algorithm_ptr->verify(verify_fd.get(), device_size,
-                                                          verify_callback, state->cancel_requested);
+            }
+            const int fd = claims.front().get();
+            if (ioctl(fd, BLKGETSIZE64, &device_size) == -1 || device_size == 0) {
+                throw std::runtime_error("Failed to get a nonzero device size");
+            }
+            if (!state->cancel_requested.load()) {
+                wipe_result =
+                    requires_device_access
+                        ? algorithm_ptr->execute_on_device(disk_path, device_size, tracked_callback,
+                                                           state->cancel_requested)
+                        : algorithm_ptr->execute(fd, device_size, tracked_callback,
+                                                 state->cancel_requested);
+                if (!requires_device_access && fsync(fd) != 0) {
+                    throw std::runtime_error("Failed to flush data to disk: " +
+                                             std::string(strerror(errno)));
                 }
-
-                // Deallocate the media after a successful wipe (and its
-                // read-back) so SSDs reclaim their performance. Skipped when
-                // the operation was cancelled.
-                if (wipe_result && !state->cancel_requested.load()) {
-                    trim_issued = issue_trim_if_ssd(disk_path, device_size);
-                }
-
-            } catch (const std::exception& e) {
-                WipeProgress progress{};
-                progress.has_error = true;
-                progress.error_message = "Wipe operation failed: " + std::string(e.what());
-                tracked_callback(progress);
-                wipe_result = false;
             }
 
-            // Build and send completion status
-            auto final_progress = build_completion_status(wipe_result, do_verify, verify_result,
-                                                          state->cancel_requested.load(),
-                                                          bad_blocks_total->load(), trim_issued);
-            tracked_callback(final_progress);
+            if (do_verify && wipe_result && !state->cancel_requested.load()) {
+                auto verify_callback = [&](const WipeProgress& progress) {
+                    WipeProgress p = progress;
+                    p.verification_in_progress = true;
+                    p.status = "Verifying wipe...";
+                    tracked_callback(p);
+                };
+                verify_result = algorithm_ptr->verify(fd, device_size, verify_callback,
+                                                      state->cancel_requested);
+            }
+            if (wipe_result && (!do_verify || verify_result) && !state->cancel_requested.load()) {
+                trim_issued = issue_trim_if_ssd(fd, disk_path, device_size);
+            }
+        } catch (const std::exception& error) {
+            error_message = error.what();
+            wipe_result = false;
+        }
 
-            state->operation_in_progress.store(false);
-        });
-    }
-
+        auto final_progress = build_completion_status(wipe_result, do_verify, verify_result,
+                                                      state->cancel_requested.load(),
+                                                      last_write.bad_block_count, trim_issued);
+        final_progress.total_bytes = device_size;
+        final_progress.bytes_written = last_write.bytes_written;
+        final_progress.total_passes = algorithm_ptr->get_pass_count();
+        final_progress.current_pass = last_write.current_pass;
+        if (final_progress.has_error && !error_message.empty()) {
+            final_progress.error_message = error_message;
+        }
+        tracker.report(final_progress);
+        state->operation_in_progress.store(false);
+    });
     return true;
 }

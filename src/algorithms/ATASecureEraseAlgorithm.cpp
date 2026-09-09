@@ -96,7 +96,7 @@ bool ATASecureEraseAlgorithm::execute_on_device(const std::string& device_path,
     // Check for cancellation
     if (cancel_flag.load()) {
         close(fd);
-        report_progress(callback, 0, "Cancelled", true, false, "");
+        report_progress(callback, 0, "Cancelled", true, true, "Operation was cancelled by user");
         return false;
     }
 
@@ -133,7 +133,8 @@ bool ATASecureEraseAlgorithm::execute_on_device(const std::string& device_path,
         // Try to disable password before exiting
         disable_security_password(fd, TEMP_PASSWORD, false);
         close(fd);
-        report_progress(callback, 5, "Cancelled - password disabled", true, false, "");
+        report_progress(callback, 5, "Cancelled - password disabled", true, true,
+                        "Operation was cancelled by user");
         return false;
     }
 
@@ -153,7 +154,7 @@ bool ATASecureEraseAlgorithm::execute_on_device(const std::string& device_path,
     if (cancel_flag.load()) {
         disable_security_password(fd, TEMP_PASSWORD, false);
         close(fd);
-        report_progress(callback, 10, "Cancelled", true, false, "");
+        report_progress(callback, 10, "Cancelled", true, true, "Operation was cancelled by user");
         return false;
     }
 
@@ -448,12 +449,14 @@ bool ATASecureEraseAlgorithm::nvme_format_crypto_erase(const std::string& device
         return false;
     }
 
-    uint32_t nsid = 0;
-    if (ioctl(ns_fd.get(), NVME_IOCTL_ID, &nsid) != 0 || nsid == 0) {
+    const int namespace_id = ioctl(ns_fd.get(), NVME_IOCTL_ID);
+    if (namespace_id <= 0) {
         report_progress(callback, 0, "Error", true, true,
                         "Failed to read the NVMe namespace ID of " + device_path);
         return false;
     }
+
+    const auto nsid = static_cast<uint32_t>(namespace_id);
 
     // Read the namespace's current LBA format so the erase preserves it. A
     // Format that changes the LBA size is a different, riskier operation.
@@ -492,7 +495,7 @@ bool ATASecureEraseAlgorithm::nvme_secure_erase(const std::string& device_path,
                                                 ProgressCallback& callback,
                                                 const std::atomic<bool>& cancel_flag) {
     if (cancel_flag.load()) {
-        report_progress(callback, 0, "Cancelled", true, false, "");
+        report_progress(callback, 0, "Cancelled", true, true, "Operation was cancelled by user");
         return false;
     }
 
@@ -552,7 +555,7 @@ bool ATASecureEraseAlgorithm::nvme_secure_erase(const std::string& device_path,
     }
 
     if (cancel_flag.load()) {
-        report_progress(callback, 5, "Cancelled", true, false, "");
+        report_progress(callback, 5, "Cancelled", true, true, "Operation was cancelled by user");
         return false;
     }
 

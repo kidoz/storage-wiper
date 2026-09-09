@@ -157,7 +157,12 @@ auto controller_path_of(std::string_view namespace_path) -> std::optional<std::s
     // The 'n' of "nvme0n1" after the controller index marks a namespace
     // device; its absence means the path is already the controller chardev.
     const auto pos = namespace_path.find('n', PREFIX.size());
-    if (pos == std::string_view::npos) {
+    const auto digits = [](std::string_view value) {
+        return !value.empty() && value.find_first_not_of("0123456789") == std::string_view::npos;
+    };
+    if (pos == std::string_view::npos ||
+        !digits(namespace_path.substr(PREFIX.size(), pos - PREFIX.size())) ||
+        !digits(namespace_path.substr(pos + 1))) {
         return std::nullopt;
     }
 

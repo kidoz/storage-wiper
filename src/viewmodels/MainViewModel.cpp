@@ -265,6 +265,12 @@ void MainViewModel::start_wipe() {
 
     const auto algorithm = selected_algorithm.get();
     const auto verify = verification_enabled.get() && verification_available.get();
+    if (disk_info->is_partition && algorithm == WipeAlgorithm::ATA_SECURE_ERASE) {
+        show_message(MessageInfo::Type::ERROR, "Whole Disk Required",
+                     "Hardware secure erase cannot target a partition. Select a whole disk "
+                     "or use an overwrite algorithm.");
+        return;
+    }
     const auto algorithm_name = wipe_service_->get_algorithm_name(algorithm);
     const auto algorithm_description = wipe_service_->get_algorithm_description(algorithm);
     const auto disk_summary = build_disk_summary(disk_info, path);
@@ -491,14 +497,16 @@ void MainViewModel::unmount_and_wipe(const std::string& path) {
 }
 
 void MainViewModel::handle_wipe_progress(const std::string& path, const WipeProgress& progress) {
-    if (auto it = active_wipes_.find(path); it != active_wipes_.end()) {
-        it->second.peak_speed = std::max(it->second.peak_speed, progress.speed_bytes_per_sec);
-    }
-
     // Schedule UI update on main thread using Glib::signal_idle
     auto weak_self = weak_from_this();
     Glib::signal_idle().connect([weak_self, path, progress]() {
         if (auto vm = weak_self.lock()) {
+            const auto activity = vm->active_wipes_.find(path);
+            if (activity == vm->active_wipes_.end()) {
+                return false;
+            }
+            activity->second.peak_speed =
+                std::max(activity->second.peak_speed, progress.speed_bytes_per_sec);
             auto progresses = vm->wipe_progresses.get();
             progresses[path] = progress;
             vm->wipe_progresses.set(std::move(progresses));
@@ -529,11 +537,7 @@ void MainViewModel::finish_wipe(const std::string& path, const WipeProgress& pro
     update_can_wipe();
     cancel_command->raise_can_execute_changed();
 
-    if (progress.has_error) {
-        handle_wipe_completion(path, activity, progress);
-    } else {
-        handle_wipe_completion(path, activity, progress);
-    }
+    handle_wipe_completion(path, activity, progress);
 }
 
 void MainViewModel::handle_wipe_completion(const std::string& path, const WipeActivity& activity,
@@ -698,7 +702,9 @@ auto MainViewModel::build_certificate_data(const std::string& path, const WipeAc
     data.size_bytes = disk_info ? disk_info->size_bytes : progress.total_bytes;
     data.algorithm_name = wipe_service_->get_algorithm_name(activity.algorithm);
     data.nist_category = wipe_service_->get_nist_category(activity.algorithm);
-    data.total_passes = progress.total_passes > 0 ? progress.total_passes : 1;
+    data.total_passes = progress.total_passes > 0
+                            ? progress.total_passes
+                            : wipe_service_->get_pass_count(activity.algorithm);
     data.started_at = util::iso8601_utc(activity.started_at);
     data.completed_at = util::iso8601_utc(std::chrono::system_clock::now());
     data.duration_seconds = static_cast<uint64_t>(

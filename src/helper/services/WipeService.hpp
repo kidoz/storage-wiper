@@ -11,6 +11,7 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <vector>
 
 // Forward declaration
 class IWipeAlgorithm;
@@ -53,6 +54,7 @@ private:
     struct Operation {
         std::shared_ptr<ThreadState> state = std::make_shared<ThreadState>();
         std::thread thread;
+        std::vector<std::string> targets;
     };
 
     /**
@@ -62,14 +64,6 @@ private:
         std::shared_ptr<IWipeAlgorithm> algorithm;
         bool requires_device_access;
         std::shared_ptr<Operation> operation;
-    };
-
-    /**
-     * @brief Result of wipe execution
-     */
-    struct WipeResult {
-        bool success;
-        uint64_t device_size;
     };
 
     std::shared_ptr<IDiskService> disk_service_;
@@ -102,21 +96,6 @@ private:
     [[nodiscard]] auto prepare_wipe(const std::string& disk_path, WipeAlgorithm algorithm,
                                     const ProgressCallback& callback)
         -> std::optional<WipePreparation>;
-
-    /**
-     * @brief Execute wipe on device (called from worker thread)
-     * @param disk_path Path to the device
-     * @param algorithm_ptr Algorithm to execute
-     * @param requires_device_access Whether algorithm needs device-level access
-     * @param tracked_callback Callback wrapped with progress tracker
-     * @param state Thread state for cancellation
-     * @return WipeResult with success status and device size
-     */
-    [[nodiscard]] static auto execute_wipe_on_device(
-        const std::string& disk_path, const std::shared_ptr<IWipeAlgorithm>& algorithm_ptr,
-        bool requires_device_access,
-        const std::function<void(const WipeProgress&)>& tracked_callback,
-        std::shared_ptr<ThreadState> state) -> WipeResult;
 
     /**
      * @brief Build completion status based on wipe and verification results

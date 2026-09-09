@@ -50,6 +50,163 @@ protected:
     }
 };
 
+TEST_F(WipeServiceIoTest, RejectsHardwareEraseOfPartitionBeforeDeviceAccess) {
+    disk_list[0].path = "/dev/nvme999n1p1";
+    disk_list[0].is_partition = true;
+    disk_list[0].parent_disk = TARGET;
+    EXPECT_FALSE(
+        service->wipe_disk(disk_list[0].path, WipeAlgorithm::ATA_SECURE_ERASE, callback()));
+    ASSERT_EQ(progress.size(), 1u);
+    EXPECT_TRUE(progress.back().has_error);
+    EXPECT_EQ(io.sanitize_commands, 0);
+}
+
+TEST_F(WipeServiceIoTest, SoftwarePartitionWipePreservesParentAndSiblingData) {
+    constexpr auto PARTITION = "/dev/nvme999n1p1";
+    io.devices[TARGET].bytes.assign(2'048, 0xAB);
+    io.devices[SIBLING].bytes.assign(2'048, 0xCD);
+    io.devices[PARTITION].bytes.assign(512, 0xEF);
+    auto partition = MockDiskService::CreateTestDisk(PARTITION, 512);
+    partition.is_partition = true;
+    partition.parent_disk = TARGET;
+    disk_list.push_back(partition);
+    ASSERT_TRUE(service->wipe_disk(PARTITION, WipeAlgorithm::ZERO_FILL, callback(), true));
+    ASSERT_TRUE(ThreadingTestHelper::WaitUntil(
+        [&] { return !service->is_operation_in_progress(PARTITION); }));
+    service.reset();
+    EXPECT_EQ(io.devices[PARTITION].bytes, std::vector<uint8_t>(512, 0));
+    EXPECT_EQ(io.devices[TARGET].bytes, std::vector<uint8_t>(2'048, 0xAB));
+    EXPECT_EQ(io.devices[SIBLING].bytes, std::vector<uint8_t>(2'048, 0xCD));
+    ASSERT_EQ(terminals(), 1u);
+    EXPECT_TRUE(progress.back().verification_passed);
+    EXPECT_FALSE(progress.back().has_error);
+}
+
+TEST_F(WipeServiceIoTest, RejectsMountedSiblingNamespace) {
+    disk_list[1].is_mounted = true;
+    EXPECT_FALSE(service->wipe_disk(TARGET, WipeAlgorithm::ATA_SECURE_ERASE, callback()));
+    EXPECT_EQ(io.sanitize_commands, 0);
+}
+
+TEST_F(WipeServiceIoTest, RejectsMountedPartitionOfSiblingNamespace) {
+    auto partition = MockDiskService::CreateTestDisk("/dev/nvme999n2p1", 512, true);
+    partition.is_partition = true;
+    partition.parent_disk = SIBLING;
+    disk_list.push_back(partition);
+    EXPECT_FALSE(service->wipe_disk(TARGET, WipeAlgorithm::ATA_SECURE_ERASE, callback()));
+    EXPECT_EQ(io.sanitize_commands, 0);
+}
+
+TEST_F(WipeServiceIoTest, BusySiblingAbortsBeforeFirmwareCommandAndReleasesClaims) {
+    io.devices[SIBLING].busy = true;
+    ASSERT_TRUE(service->wipe_disk(TARGET, WipeAlgorithm::ATA_SECURE_ERASE, callback()));
+    wait_for_completion();
+    ASSERT_EQ(terminals(), 1u);
+    EXPECT_TRUE(progress.back().has_error);
+    EXPECT_EQ(io.sanitize_commands, 0);
+    EXPECT_EQ(io.devices[TARGET].claims, 0);
+}
+
+TEST_F(WipeServiceIoTest, HoldsEveryNamespaceClaimUntilFirmwareCompletes) {
+    ASSERT_TRUE(service->wipe_disk(TARGET, WipeAlgorithm::ATA_SECURE_ERASE, callback()));
+    wait_for_completion();
+    EXPECT_EQ(io.sanitize_commands, 1);
+    EXPECT_TRUE(io.all_namespaces_claimed);
+    EXPECT_EQ(terminals(), 1u);
+    EXPECT_FALSE(progress.back().has_error);
+    EXPECT_EQ(progress.back().total_passes, 1);
+    EXPECT_EQ(io.devices[TARGET].claims, 0);
+    EXPECT_EQ(io.devices[SIBLING].claims, 0);
+}
+
+TEST_F(WipeServiceIoTest, FormatFallbackUsesReturnedNamespaceIdAndPreservesLbaFormat) {
+    io.format_only = true;
+    ASSERT_TRUE(service->wipe_disk(TARGET, WipeAlgorithm::ATA_SECURE_ERASE, callback()));
+    wait_for_completion();
+    EXPECT_EQ(io.formatted_namespace, 7u);
+    EXPECT_EQ(io.format_command, 3u | (2u << 9));
+    EXPECT_EQ(io.sanitize_commands, 0);
+    EXPECT_TRUE(io.all_namespaces_claimed);
+    ASSERT_EQ(terminals(), 1u);
+    EXPECT_FALSE(progress.back().has_error);
+}
+
+TEST_F(WipeServiceIoTest, InvalidNamespaceIdDoesNotIssueFormat) {
+    io.format_only = true;
+    io.namespace_id = -1;
+    ASSERT_TRUE(service->wipe_disk(TARGET, WipeAlgorithm::ATA_SECURE_ERASE, callback()));
+    wait_for_completion();
+    EXPECT_EQ(io.formatted_namespace, 0u);
+    EXPECT_EQ(terminals(), 1u);
+    EXPECT_TRUE(progress.back().has_error);
+}
+
+TEST_F(WipeServiceIoTest, CancellationDuringFirmwarePreparationHasOnlyFailedTerminal) {
+    io.before_identify = [this] {
+        EXPECT_TRUE(service->cancel_operation(TARGET));
+    };
+    ASSERT_TRUE(service->wipe_disk(TARGET, WipeAlgorithm::ATA_SECURE_ERASE, callback()));
+    wait_for_completion();
+    EXPECT_EQ(io.sanitize_commands, 0);
+    EXPECT_EQ(terminals(), 1u);
+    EXPECT_TRUE(progress.back().has_error);
+    EXPECT_NE(progress.back().error_message.find("cancel"), std::string::npos);
+}
+
+TEST_F(WipeServiceIoTest, VerificationPreservesUnwritableSectorCount) {
+    // The media already contains zeros, so read-back passes even though every
+    // new write fails. The certificate must still disclose all skipped sectors.
+    io.devices[TARGET].fail_writes = true;
+    ASSERT_TRUE(service->wipe_disk(TARGET, WipeAlgorithm::ZERO_FILL, callback(), true));
+    wait_for_completion();
+    ASSERT_EQ(terminals(), 1u);
+    EXPECT_FALSE(progress.back().has_error);
+    EXPECT_TRUE(progress.back().verification_passed);
+    EXPECT_EQ(progress.back().bad_block_count, 4u);
+    EXPECT_EQ(io.devices[TARGET].flushes, 1);
+}
+
+TEST_F(WipeServiceIoTest, MultiPassCompletionRetainsPassCountAndSize) {
+    ASSERT_TRUE(service->wipe_disk(TARGET, WipeAlgorithm::VSITR, callback()));
+    wait_for_completion();
+    ASSERT_EQ(terminals(), 1u);
+    EXPECT_FALSE(progress.back().has_error);
+    EXPECT_EQ(progress.back().total_passes, 7);
+    EXPECT_EQ(progress.back().current_pass, 7);
+    EXPECT_EQ(progress.back().total_bytes, 2'048u);
+    EXPECT_EQ(progress.back().bytes_written, 2'048u);
+}
+
+TEST_F(WipeServiceIoTest, DifferentDevicesRunTogetherAndControllerEraseCannotOverlap) {
+    std::promise<void> release;
+    auto ready = release.get_future().share();
+    std::atomic<int> writers{0};
+    io.before_write = [&] {
+        ++writers;
+        ready.wait();
+    };
+    const bool first = service->wipe_disk(TARGET, WipeAlgorithm::ZERO_FILL, callback());
+    const bool second = service->wipe_disk(SIBLING, WipeAlgorithm::ZERO_FILL, callback());
+    EXPECT_TRUE(first);
+    EXPECT_TRUE(second);
+    EXPECT_TRUE(ThreadingTestHelper::WaitUntil([&] { return writers.load() == 2; }));
+    EXPECT_FALSE(service->wipe_disk(TARGET, WipeAlgorithm::ZERO_FILL, callback()));
+    // A third namespace is idle but its firmware erase would overlap both writes.
+    disk_list.push_back(MockDiskService::CreateTestDisk("/dev/nvme999n3", 2'048));
+    EXPECT_FALSE(service->wipe_disk("/dev/nvme999n3", WipeAlgorithm::ATA_SECURE_ERASE, callback()));
+    EXPECT_TRUE(service->cancel_operation(TARGET));
+    release.set_value();
+    EXPECT_TRUE(ThreadingTestHelper::WaitUntil([&] {
+        return !service->is_operation_in_progress(TARGET) &&
+               !service->is_operation_in_progress(SIBLING);
+    }));
+    service.reset();
+    EXPECT_EQ(terminals(), 2u);
+    EXPECT_EQ(std::ranges::count_if(progress,
+                                    [](const auto& p) { return p.is_complete && !p.has_error; }),
+              1);
+}
+
 TEST(WriteHelpersIoTest, ShortWriteThenErrorRetriesAtOriginalBufferOffset) {
     FakeDeviceIO io;
     io.devices[TARGET].bytes.assign(2'048, 0xAB);

@@ -44,6 +44,8 @@ A modern, secure disk wiping application built with GTK4 and libadwaita for Linu
   - Wiping a partition leaves the partition table and sibling partitions intact
   - Scope of each wipe is stated in the confirmation dialog
   - SMART health is inherited from the partition's parent disk
+  - Hardware Secure Erase requires a whole disk; NVMe erases also require all
+    namespaces on the controller to be unmounted and free of overlapping wipes
 
 - 🔀 **Multi-Disk Parallel Wiping**
   - Wipe several devices at the same time from one helper connection

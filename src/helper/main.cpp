@@ -381,7 +381,8 @@ void handle_start_wipe(GDBusMethodInvocation* invocation, GVariant* parameters) 
         return;
     }
 
-    if (auto eligible = device_policy::validate_wipe_target(*g_disk_service, device); !eligible) {
+    if (auto eligible = device_policy::resolve_wipe_targets(*g_disk_service, device, algorithm);
+        !eligible) {
         g_dbus_method_invocation_return_value(
             invocation, g_variant_new("(bs)", FALSE, eligible.error().message.c_str()));
         return;

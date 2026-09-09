@@ -280,6 +280,11 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
     }
 
     const auto& disk = *disk_it;
+    if (disk.is_partition && *algo == WipeAlgorithm::ATA_SECURE_ERASE) {
+        std::cerr << "Error: Hardware secure erase cannot target a partition. "
+                     "Select a whole disk or use an overwrite algorithm.\n";
+        return 1;
+    }
 
     // Scope statement: a partition wipe spares its siblings, a disk wipe
     // takes every partition and the partition table with it.

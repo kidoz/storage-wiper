@@ -12,6 +12,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <future>
 #include <thread>
 
@@ -37,6 +39,13 @@ protected:
     void SimulateConnected() {
         view_model->set_connection_state(true, "");
         PumpMainLoop();
+    }
+
+    auto wait_for(const std::function<bool()>& predicate) -> bool {
+        return ThreadingTestHelper::WaitUntil([&] {
+            PumpMainLoop();
+            return predicate();
+        });
     }
 };
 
@@ -409,4 +418,56 @@ TEST(MainViewModelScopeNote, PartitionWithoutParentHasNoNote) {
     disk.is_partition = true;
     const auto note = MainViewModel::build_scope_note(disk, {});
     EXPECT_TRUE(note.empty());
+}
+
+TEST_F(MainViewModelTest, HardwareEraseOfPartitionIsRejectedBeforeConfirmation) {
+    auto partition = MockDiskService::CreateTestDisk("/dev/nvme999n1p1");
+    partition.is_partition = true;
+    partition.parent_disk = "/dev/nvme999n1";
+    SimulateConnected();
+    view_model->disks.set({partition});
+    view_model->select_disk(partition.path);
+    view_model->select_algorithm(WipeAlgorithm::ATA_SECURE_ERASE);
+    EXPECT_CALL(*mock_wipe_service, wipe_disk(_, _, _)).Times(0);
+    view_model->wipe_command->execute();
+    EXPECT_EQ(view_model->current_message.get().type, MessageInfo::Type::ERROR);
+    EXPECT_NE(view_model->current_message.get().message.find("partition"), std::string::npos);
+}
+
+TEST_F(MainViewModelTest, CertificateRetainsMultiPassCountAndBadSectors) {
+    TempTestFile root;
+    ASSERT_TRUE(root.valid());
+    const auto directory = root.path() + "-certificates";
+    struct Cleanup {
+        std::string path;
+        ~Cleanup() { std::filesystem::remove_all(path); }
+    } cleanup{directory};
+    view_model->set_certificate_directory(directory);
+    view_model->disks.set({MockDiskService::CreateTestDisk("/dev/sda")});
+    view_model->select_disk("/dev/sda");
+    view_model->select_algorithm(WipeAlgorithm::VSITR);
+    ON_CALL(*mock_wipe_service, get_pass_count(WipeAlgorithm::VSITR)).WillByDefault(Return(7));
+    EXPECT_CALL(*mock_wipe_service, wipe_disk(_, WipeAlgorithm::VSITR, _))
+        .WillOnce([](const auto&, auto, auto callback) {
+            WipeProgress complete{};
+            complete.is_complete = true;
+            complete.bad_block_count = 4;
+            // Older helpers may omit the count on completion; use algorithm metadata.
+            complete.total_passes = 0;
+            callback(complete);
+            return true;
+        });
+    view_model->confirm_wipe();
+    ASSERT_TRUE(wait_for([&] { return !view_model->is_wipe_in_progress.get(); }));
+    int certificates = 0;
+    for (const auto& file : std::filesystem::directory_iterator(directory)) {
+        if (file.path().extension() == ".json") {
+            ++certificates;
+            std::ifstream input(file.path());
+            std::string json{std::istreambuf_iterator<char>{input}, {}};
+            EXPECT_NE(json.find("\"passes\": 7"), std::string::npos);
+            EXPECT_NE(json.find("\"bad_block_count\": 4"), std::string::npos);
+        }
+    }
+    EXPECT_EQ(certificates, 1);
 }

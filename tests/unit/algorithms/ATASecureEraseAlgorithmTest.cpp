@@ -90,3 +90,20 @@ TEST_F(ATASecureEraseAlgorithmTest, ExecuteOnDevice_InvalidPath_ReportsError) {
     }
     EXPECT_TRUE(found_error);
 }
+
+TEST_F(ATASecureEraseAlgorithmTest, CancelledNvmeEraseNeverReportsSuccessfulCompletion) {
+    cancel_flag.store(true);
+    EXPECT_FALSE(algorithm.execute_on_device("/dev/nvme999n1", 2'048, CreateCapturingCallback(),
+                                             cancel_flag));
+    ASSERT_FALSE(captured_progress.empty());
+    EXPECT_TRUE(captured_progress.back().is_complete);
+    EXPECT_TRUE(captured_progress.back().has_error);
+}
+
+TEST_F(ATASecureEraseAlgorithmTest, NvmePartitionCannotReachController) {
+    EXPECT_FALSE(algorithm.execute_on_device("/dev/nvme999n1p1", 2'048, CreateCapturingCallback(),
+                                             cancel_flag));
+    ASSERT_FALSE(captured_progress.empty());
+    EXPECT_TRUE(captured_progress.back().has_error);
+    EXPECT_NE(captured_progress.back().error_message.find("Cannot determine"), std::string::npos);
+}
