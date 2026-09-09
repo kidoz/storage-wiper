@@ -6,8 +6,8 @@
 #include "util/AppSettings.hpp"
 
 #include <algorithm>
-#include <fstream>
 #include <format>
+#include <fstream>
 #include <map>
 #include <optional>
 #include <sstream>
@@ -18,8 +18,7 @@ namespace {
 
 // Simple "key=value" lines; unknown keys and values are ignored so older or
 // newer files never produce garbage settings.
-auto parse_line(const std::string& line)
-    -> std::optional<std::pair<std::string, std::string>> {
+auto parse_line(const std::string& line) -> std::optional<std::pair<std::string, std::string>> {
     const auto pos = line.find('=');
     if (pos == std::string::npos) {
         return std::nullopt;

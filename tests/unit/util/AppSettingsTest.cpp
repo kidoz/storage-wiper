@@ -20,8 +20,8 @@ class TempConfigHome {
 public:
     TempConfigHome() {
         const char* tmp = std::getenv("TMPDIR");
-        std::string tmpl = std::string{tmp != nullptr ? tmp : "/tmp"} +
-                           "/storage_wiper_settings_XXXXXX";
+        std::string tmpl =
+            std::string{tmp != nullptr ? tmp : "/tmp"} + "/storage_wiper_settings_XXXXXX";
         std::vector<char> buffer{tmpl.begin(), tmpl.end()};
         buffer.push_back('\0');
         if (mkdtemp(buffer.data()) != nullptr) {

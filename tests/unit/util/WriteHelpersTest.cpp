@@ -28,9 +28,8 @@ struct FailingPWrite {
     std::vector<off_t> failing;     ///< absolute offsets of "bad sectors"
 
     auto operator()(off_t offset, std::span<const uint8_t> chunk) -> ssize_t {
-        const bool bad = std::any_of(failing.begin(), failing.end(), [offset](off_t bad_offset) {
-            return bad_offset == offset;
-        });
+        const bool bad = std::any_of(failing.begin(), failing.end(),
+                                     [offset](off_t bad_offset) { return bad_offset == offset; });
         if (bad) {
             return -1;
         }
@@ -50,18 +49,18 @@ TEST(SectorSkippingWriteTest, WritesAllSectorsWhenNoneFail) {
 
     std::vector<uint8_t> data(FOUR_SECTORS, 0xAB);
     uint64_t skipped = 0;
-    const auto consumed = sector_skipping_write(write, 1024, 0, data, skipped);
+    const auto consumed = sector_skipping_write(write, 1'024, 0, data, skipped);
 
     EXPECT_EQ(consumed, FOUR_SECTORS);
     EXPECT_EQ(skipped, 0u);
-    ASSERT_EQ(backing.size(), 1024 + FOUR_SECTORS);
-    EXPECT_EQ(backing[1024], 0xAB);
+    ASSERT_EQ(backing.size(), 1'024 + FOUR_SECTORS);
+    EXPECT_EQ(backing[1'024], 0xAB);
     EXPECT_EQ(backing.back(), 0xAB);
 }
 
 TEST(SectorSkippingWriteTest, SkipsFailingSectorAndContinues) {
     std::vector<uint8_t> backing;
-    const off_t base = 4096;
+    const off_t base = 4'096;
     // Second sector of the region is "bad"
     FailingPWrite write{&backing, {base + 512}};
 
@@ -98,7 +97,7 @@ TEST(SectorSkippingWriteTest, ContinuesAfterBytesAlreadyConsumed) {
     // fallback writes the remainder starting at absolute offset 512.
     EXPECT_EQ(backing[0], 0u);
     EXPECT_EQ(backing[512], 0x5A);
-    EXPECT_EQ(backing[2 * 512], 0u);                // the bad sector
+    EXPECT_EQ(backing[2 * 512], 0u);  // the bad sector
     EXPECT_EQ(backing[3 * 512], 0x5A);
 }
 
@@ -119,7 +118,9 @@ TEST(SectorSkippingWriteTest, HandlesTrailingPartialSector) {
 
 TEST(SectorSkippingWriteTest, CountsEveryFailingSector) {
     std::vector<uint8_t> backing;
-    FailingPWrite write{&backing, {512, 3 * 512}};
+    FailingPWrite write{
+        &backing, {512, 3 * 512}
+    };
 
     std::vector<uint8_t> data(FOUR_SECTORS, 0xFF);
     uint64_t skipped = 0;
@@ -132,10 +133,9 @@ TEST(WriteToleranceTest, FastPathWritesEntireTempFile) {
     TempTestFile file;
     ASSERT_TRUE(file.valid());
 
-    const std::vector<uint8_t> data(1024, 0x42);
+    const std::vector<uint8_t> data(1'024, 0x42);
     uint64_t bad_blocks = 0;
-    const auto consumed =
-        util::write_with_bad_sector_tolerance(file.fd(), data, bad_blocks);
+    const auto consumed = util::write_with_bad_sector_tolerance(file.fd(), data, bad_blocks);
 
     EXPECT_EQ(consumed, data.size());
     EXPECT_EQ(bad_blocks, 0u);

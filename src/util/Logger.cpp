@@ -182,10 +182,9 @@ auto Logger::get_timestamp() -> std::string {
     std::tm tm_buf{};
     gmtime_r(&time_t_now, &tm_buf);
 
-    return std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z ", 
-                       tm_buf.tm_year + 1900, tm_buf.tm_mon + 1, tm_buf.tm_mday,
-                       tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec,
-                       ms.count());
+    return std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z ", tm_buf.tm_year + 1'900,
+                       tm_buf.tm_mon + 1, tm_buf.tm_mday, tm_buf.tm_hour, tm_buf.tm_min,
+                       tm_buf.tm_sec, ms.count());
 }
 
 auto Logger::level_to_string(LogLevel level) -> std::string_view {

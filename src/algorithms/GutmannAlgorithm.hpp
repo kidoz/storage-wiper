@@ -6,6 +6,7 @@
 #pragma once
 
 #include "IWipeAlgorithm.hpp"
+
 #include <span>
 
 /**

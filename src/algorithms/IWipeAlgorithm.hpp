@@ -31,7 +31,7 @@ public:
      * @return true if successful, false otherwise
      */
     [[nodiscard]] virtual bool execute(int fd, uint64_t size, ProgressCallback callback,
-                         const std::atomic<bool>& cancel_flag) = 0;
+                                       const std::atomic<bool>& cancel_flag) = 0;
 
     /**
      * @brief Execute the wipe algorithm on a device by path
@@ -47,8 +47,8 @@ public:
      * @return true if successful, false otherwise
      */
     [[nodiscard]] virtual bool execute_on_device(const std::string& device_path, uint64_t size,
-                                   ProgressCallback callback,
-                                   const std::atomic<bool>& cancel_flag) {
+                                                 ProgressCallback callback,
+                                                 const std::atomic<bool>& cancel_flag) {
         int fd = open(device_path.c_str(), O_WRONLY | O_SYNC);
         if (fd < 0) {
             if (callback) {
@@ -121,7 +121,7 @@ public:
      * - Multi-pass algorithms: verify final pattern
      */
     [[nodiscard]] virtual bool verify(int fd, uint64_t size, ProgressCallback callback,
-                        const std::atomic<bool>& cancel_flag) {
+                                      const std::atomic<bool>& cancel_flag) {
         // Default implementation: verification not supported
         (void)fd;
         (void)size;

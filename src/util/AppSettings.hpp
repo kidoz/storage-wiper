@@ -16,7 +16,7 @@
 namespace util {
 
 struct AppSettingsData {
-    int algorithm_id = 0;            ///< WipeAlgorithm as int
+    int algorithm_id = 0;  ///< WipeAlgorithm as int
     bool verification_enabled = false;
 };
 
