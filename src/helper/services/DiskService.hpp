@@ -81,6 +81,8 @@ private:
 };
 
 class DiskService : public IDiskService {
+    friend class DiskServiceTest;
+
 public:
     DiskService();
     ~DiskService() override = default;

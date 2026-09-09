@@ -656,6 +656,7 @@ auto DiskService::parse_partition_info(const std::string& device_path,
 
 void DiskService::append_partitions(std::vector<DiskInfo>& disks, const std::string& disk_sys_path,
                                     const MountCache& mount_cache) {
+    const DiskInfo parent = disks.back();
     std::error_code iter_ec;
     for (fs::directory_iterator it{disk_sys_path, iter_ec}, end; it != end && !iter_ec;
          it.increment(iter_ec)) {
@@ -676,8 +677,7 @@ void DiskService::append_partitions(std::vector<DiskInfo>& disks, const std::str
             continue;
         }
 
-        if (auto part =
-                parse_partition_info(part_path, it->path().string(), disks.back(), mount_cache);
+        if (auto part = parse_partition_info(part_path, it->path().string(), parent, mount_cache);
             part.size_bytes > 0) {
             disks.push_back(std::move(part));
         }

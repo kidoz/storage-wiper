@@ -14,9 +14,16 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
+
 class DiskServiceTest : public ::testing::Test {
 protected:
     DiskService service;
+    static void append_partitions(DiskService& instance, std::vector<DiskInfo>& disks,
+                                  const std::string& directory, const MountCache& mounts) {
+        instance.append_partitions(disks, directory, mounts);
+    }
 };
 
 // ========== validate_device_path Tests ==========
@@ -206,5 +213,41 @@ TEST_F(DiskServiceTest, GetAvailableDisks_HasNonZeroSize) {
     for (const auto& disk : disks) {
         // All returned disks should have non-zero size
         EXPECT_GT(disk.size_bytes, 0ULL) << "Disk has zero size: " << disk.path;
+    }
+}
+
+TEST_F(DiskServiceTest, EveryPartitionRetainsOriginalDiskParent) {
+    class TestDiskService : public DiskService {
+    public:
+        auto validate_device_path(const std::string&) -> std::expected<void, util::Error> override {
+            return {};
+        }
+    } instance;
+    TempTestFile root;
+    ASSERT_TRUE(root.valid());
+    const auto directory = root.path() + "-sysfs";
+    std::filesystem::create_directories(directory);
+    struct Cleanup {
+        std::string path;
+        ~Cleanup() { std::filesystem::remove_all(path); }
+    } cleanup{directory};
+    for (const auto* name : {"sda1", "sda2", "sda3"}) {
+        const auto path = directory + "/" + name;
+        std::filesystem::create_directory(path);
+        std::ofstream{path + "/partition"} << "1";
+        std::ofstream{path + "/size"} << "8";
+    }
+    auto parent = MockDiskService::CreateTestDisk("/dev/sda", 16'384);
+    parent.model = "Parent model";
+    std::vector<DiskInfo> disks{parent};
+    MountCache mounts{{{.device = "/dev/sda2", .mount_point = "/mnt/test", .filesystem = "ext4"}}};
+    append_partitions(instance, disks, directory, mounts);
+    ASSERT_EQ(disks.size(), 4u);
+    for (size_t i = 1; i < disks.size(); ++i) {
+        EXPECT_EQ(disks[i].parent_disk, "/dev/sda");
+        EXPECT_EQ(disks[i].model, parent.model);
+        EXPECT_EQ(disks[i].serial, parent.serial);
+        EXPECT_TRUE(disks[i].is_partition);
+        EXPECT_EQ(disks[i].is_mounted, disks[i].path == "/dev/sda2");
     }
 }
