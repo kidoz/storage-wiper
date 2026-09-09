@@ -92,6 +92,21 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="1.5.0" date="2026-09-09">
+      <description>
+        <p>Feature release: firmware erase for NVMe, wipe certificates, partitions, parallel wipes:</p>
+        <ul>
+          <li>Hardware Secure Erase now covers NVMe drives via Sanitize (crypto erase, block erase or overwrite) with live progress, falling back to Format NVM with cryptographic erase</li>
+          <li>Every successful wipe can produce a JSON and text certificate with device identity, algorithm, NIST SP 800-88 category, timing, throughput and verification verdict</li>
+          <li>Partitions are listed next to their disks and can be wiped individually without touching the partition table or sibling partitions</li>
+          <li>Wipes on different devices run in parallel with per-device progress, cancellation and certificates</li>
+          <li>Drives with unwritable sectors are wiped as far as possible and the number of skipped sectors is reported</li>
+          <li>SSDs receive a TRIM pass after a successful wipe and its verification</li>
+          <li>The last-used algorithm and verification choice are remembered between runs</li>
+          <li>Algorithms show their NIST SP 800-88 category (Clear or Purge) in the GUI and CLI</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.4.3" date="2026-09-04">
       <description>
         <p>SMART health monitoring fix and expansion release:</p>

@@ -406,7 +406,7 @@ Static analysis available via:
 
 ## Project Status
 
-**Current Version**: 1.4.3
+**Current Version**: 1.5.0
 
 ### Completed Features
 - ✅ Core disk detection and enumeration
