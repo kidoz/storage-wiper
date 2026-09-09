@@ -29,18 +29,22 @@ bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
     // Passes 1-4: Random data
     for (int pass = 1; pass <= 4; ++pass) {
         uint64_t written = 0;
+        uint64_t bad_blocks = 0;
 
         while (written < size && !cancel_flag.load()) {
             util::RandomBufferGenerator::fill(buffer);
 
             size_t to_write = std::min(static_cast<uint64_t>(BUFFER_SIZE), size - written);
-            ssize_t result = util::write_with_retry(fd, std::span<const uint8_t>(buffer.data(), to_write));
+            uint64_t bad = 0;
+            const auto result = util::write_with_bad_sector_tolerance(
+                fd, std::span<const uint8_t>(buffer.data(), to_write), bad);
 
-            if (result <= 0) {
+            if (result == 0) {
                 return false;
             }
+            bad_blocks += bad;
 
-            written += static_cast<uint64_t>(result);
+            written += result;
 
             if (callback) {
                 WipeProgress progress{};
@@ -51,6 +55,7 @@ bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
                 progress.percentage =
                     (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
                 progress.status = "Writing pattern (Pass " + std::to_string(pass) + "/35)";
+                progress.bad_block_count = bad_blocks;
                 callback(progress);
             }
         }
@@ -70,8 +75,7 @@ bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
 
     for (int pass = 5; pass <= 31; ++pass) {
         std::fill(buffer.begin(), buffer.end(), patterns[(pass - 5) % 27]);
-        if (!write_pattern(fd, size, buffer, callback, pass, 35,
-                           cancel_flag)) {
+        if (!write_pattern(fd, size, buffer, callback, pass, 35, cancel_flag)) {
             return false;
         }
         if (lseek(fd, 0, SEEK_SET) == -1)
@@ -81,18 +85,22 @@ bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
     // Passes 32-35: Random data
     for (int pass = 32; pass <= 35; ++pass) {
         uint64_t written = 0;
+        uint64_t bad_blocks = 0;
 
         while (written < size && !cancel_flag.load()) {
             util::RandomBufferGenerator::fill(buffer);
 
             size_t to_write = std::min(static_cast<uint64_t>(BUFFER_SIZE), size - written);
-            ssize_t result = util::write_with_retry(fd, std::span<const uint8_t>(buffer.data(), to_write));
+            uint64_t bad = 0;
+            const auto result = util::write_with_bad_sector_tolerance(
+                fd, std::span<const uint8_t>(buffer.data(), to_write), bad);
 
-            if (result <= 0) {
+            if (result == 0) {
                 return false;
             }
+            bad_blocks += bad;
 
-            written += static_cast<uint64_t>(result);
+            written += result;
 
             if (callback) {
                 WipeProgress progress{};
@@ -103,6 +111,7 @@ bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
                 progress.percentage =
                     (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
                 progress.status = "Writing pattern (Pass " + std::to_string(pass) + "/35)";
+                progress.bad_block_count = bad_blocks;
                 callback(progress);
             }
         }
@@ -121,19 +130,23 @@ bool GutmannAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
 }
 
 bool GutmannAlgorithm::write_pattern(int fd, uint64_t size, std::span<const uint8_t> pattern,
-                                     ProgressCallback callback, int pass,
-                                     int total_passes, const std::atomic<bool>& cancel_flag) {
+                                     ProgressCallback callback, int pass, int total_passes,
+                                     const std::atomic<bool>& cancel_flag) {
     uint64_t written = 0;
+    uint64_t bad_blocks = 0;
 
     while (written < size && !cancel_flag.load()) {
         size_t to_write = std::min(pattern.size(), size - written);
-        ssize_t result = util::write_with_retry(fd, std::span<const uint8_t>(pattern.data(), to_write));
+        uint64_t bad = 0;
+        const auto result = util::write_with_bad_sector_tolerance(
+            fd, std::span<const uint8_t>(pattern.data(), to_write), bad);
 
-        if (result <= 0) {
+        if (result == 0) {
             return false;
         }
+        bad_blocks += bad;
 
-        written += static_cast<uint64_t>(result);
+        written += result;
 
         if (callback) {
             WipeProgress progress{};
@@ -145,6 +158,7 @@ bool GutmannAlgorithm::write_pattern(int fd, uint64_t size, std::span<const uint
                 (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
             progress.status = "Writing pattern (Pass " + std::to_string(pass) + "/" +
                               std::to_string(total_passes) + ")";
+            progress.bad_block_count = bad_blocks;
             callback(progress);
         }
     }

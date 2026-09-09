@@ -33,20 +33,23 @@ bool VSITRAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
 
     // Pass 7: Random data
     uint64_t written = 0;
+    uint64_t bad_blocks = 0;
 
     while (written < size && !cancel_flag.load()) {
         // Generate fresh random data for each buffer
         util::RandomBufferGenerator::fill(buffer);
 
         size_t to_write = std::min(static_cast<uint64_t>(BUFFER_SIZE), size - written);
-        ssize_t result =
-            util::write_with_retry(fd, std::span<const uint8_t>(buffer.data(), to_write));
+        uint64_t bad = 0;
+        const auto result = util::write_with_bad_sector_tolerance(
+            fd, std::span<const uint8_t>(buffer.data(), to_write), bad);
 
-        if (result <= 0) {
+        if (result == 0) {
             return false;
         }
+        bad_blocks += bad;
 
-        written += static_cast<uint64_t>(result);
+        written += result;
 
         if (callback) {
             WipeProgress progress{};
@@ -57,6 +60,7 @@ bool VSITRAlgorithm::execute(int fd, uint64_t size, ProgressCallback callback,
             progress.percentage =
                 (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
             progress.status = "Writing pattern (Pass 7/7)";
+            progress.bad_block_count = bad_blocks;
             callback(progress);
         }
     }
@@ -68,17 +72,20 @@ bool VSITRAlgorithm::write_pattern(int fd, uint64_t size, std::span<const uint8_
                                    ProgressCallback callback, int pass, int total_passes,
                                    const std::atomic<bool>& cancel_flag) {
     uint64_t written = 0;
+    uint64_t bad_blocks = 0;
 
     while (written < size && !cancel_flag.load()) {
         size_t to_write = std::min(pattern.size(), size - written);
-        ssize_t result =
-            util::write_with_retry(fd, std::span<const uint8_t>(pattern.data(), to_write));
+        uint64_t bad = 0;
+        const auto result = util::write_with_bad_sector_tolerance(
+            fd, std::span<const uint8_t>(pattern.data(), to_write), bad);
 
-        if (result <= 0) {
+        if (result == 0) {
             return false;
         }
+        bad_blocks += bad;
 
-        written += static_cast<uint64_t>(result);
+        written += result;
 
         if (callback) {
             WipeProgress progress{};
@@ -90,6 +97,7 @@ bool VSITRAlgorithm::write_pattern(int fd, uint64_t size, std::span<const uint8_
                 (static_cast<double>(written) / static_cast<double>(size)) * 100.0;
             progress.status = "Writing pattern (Pass " + std::to_string(pass) + "/" +
                               std::to_string(total_passes) + ")";
+            progress.bad_block_count = bad_blocks;
             callback(progress);
         }
     }
