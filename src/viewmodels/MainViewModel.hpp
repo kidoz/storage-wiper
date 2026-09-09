@@ -212,6 +212,9 @@ public:
      */
     void restore_settings(const util::AppSettingsData& settings);
 
+    using SettingsSaveCallback = std::function<void(const util::AppSettingsData&)>;
+    void set_settings_save_callback(SettingsSaveCallback callback);
+
     /**
      * @brief Snapshot the current wipe settings for persistence
      */
@@ -261,6 +264,7 @@ private:
     std::shared_ptr<IDiskService> disk_service_;
     std::shared_ptr<IWipeService> wipe_service_;
     NotificationCallback notification_callback_;
+    SettingsSaveCallback settings_save_callback_;
 
     // Subscription IDs for cleanup
     size_t selected_disk_subscription_id_ = 0;

@@ -411,10 +411,21 @@ void MainViewModel::confirm_wipe_for(const std::string& path, WipeAlgorithm algo
         const bool started =
             wipe_service->wipe_disk(path, algorithm, std::move(progress_callback), verify);
 
-        if (!started) {
+        if (started) {
+            Glib::signal_idle().connect([weak_self, algorithm, verify]() {
+                if (auto vm = weak_self.lock(); vm && vm->settings_save_callback_) {
+                    vm->settings_save_callback_(
+                        util::AppSettingsData{.algorithm_id = static_cast<int>(algorithm),
+                                              .verification_enabled = verify});
+                }
+                return false;
+            });
+        } else {
             Glib::signal_idle().connect([weak_self, path]() {
                 if (auto vm = weak_self.lock()) {
-                    vm->active_wipes_.erase(path);
+                    if (vm->active_wipes_.erase(path) == 0) {
+                        return false;
+                    }
                     vm->is_wipe_in_progress.set(!vm->active_wipes_.empty());
                     vm->update_can_wipe();
                     vm->cancel_command->raise_can_execute_changed();
@@ -720,4 +731,8 @@ auto MainViewModel::build_certificate_data(const std::string& path, const WipeAc
     data.success = true;
     data.tool_version = PROJECT_VERSION;
     return data;
+}
+
+void MainViewModel::set_settings_save_callback(SettingsSaveCallback callback) {
+    settings_save_callback_ = std::move(callback);
 }

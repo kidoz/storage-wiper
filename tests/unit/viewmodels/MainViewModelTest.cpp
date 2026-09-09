@@ -420,6 +420,40 @@ TEST(MainViewModelScopeNote, PartitionWithoutParentHasNoNote) {
     EXPECT_TRUE(note.empty());
 }
 
+TEST_F(MainViewModelTest, SavesPresetForEveryParallelStartUsingConfirmedSettings) {
+    EXPECT_CALL(*mock_wipe_service, wipe_disk(_, _, _)).Times(2).WillRepeatedly(Return(true));
+    ON_CALL(*mock_wipe_service, supports_verification(_)).WillByDefault(Return(true));
+    std::vector<util::AppSettingsData> saved;
+    view_model->set_settings_save_callback(
+        [&](const auto& settings) { saved.push_back(settings); });
+    view_model->select_disk("/dev/sda");
+    view_model->select_algorithm(WipeAlgorithm::ZERO_FILL);
+    view_model->confirm_wipe();
+    ASSERT_TRUE(wait_for([&] { return saved.size() == 1; }));
+    EXPECT_TRUE(view_model->is_wipe_in_progress.get());
+
+    view_model->select_disk("/dev/sdb");
+    view_model->select_algorithm(WipeAlgorithm::DOD_5220_22_M);
+    view_model->verification_enabled.set(true);
+    view_model->confirm_wipe();
+    // The selection can change while authorization/start is still in flight.
+    view_model->select_algorithm(WipeAlgorithm::GUTMANN);
+    ASSERT_TRUE(wait_for([&] { return saved.size() == 2; }));
+    EXPECT_EQ(saved[0].algorithm_id, static_cast<int>(WipeAlgorithm::ZERO_FILL));
+    EXPECT_EQ(saved[1].algorithm_id, static_cast<int>(WipeAlgorithm::DOD_5220_22_M));
+    EXPECT_TRUE(saved[1].verification_enabled);
+}
+
+TEST_F(MainViewModelTest, RejectedStartDoesNotSavePreset) {
+    int saves = 0;
+    view_model->set_settings_save_callback([&](const auto&) { ++saves; });
+    ON_CALL(*mock_wipe_service, wipe_disk(_, _, _)).WillByDefault(Return(false));
+    view_model->select_disk("/dev/sda");
+    view_model->confirm_wipe();
+    ASSERT_TRUE(wait_for([&] { return !view_model->is_wipe_in_progress.get(); }));
+    EXPECT_EQ(saves, 0);
+}
+
 TEST_F(MainViewModelTest, HardwareEraseOfPartitionIsRejectedBeforeConfirmation) {
     auto partition = MockDiskService::CreateTestDisk("/dev/nvme999n1p1");
     partition.is_partition = true;

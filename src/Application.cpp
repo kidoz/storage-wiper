@@ -143,11 +143,8 @@ void StorageWiperApp::setup_main_window() {
 
     // Restore the last-used wipe preset and persist it on every wipe start
     view_model_->restore_settings(util::AppSettings::load());
-    view_model_->is_wipe_in_progress.subscribe([&vm = *view_model_](bool in_progress) {
-        if (in_progress) {
-            util::AppSettings::save(vm.current_settings());
-        }
-    });
+    view_model_->set_settings_save_callback(
+        [](const util::AppSettingsData& settings) { util::AppSettings::save(settings); });
 
     // Create View
     view_ = std::make_unique<MainWindow>(main_window_);
