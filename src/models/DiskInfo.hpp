@@ -82,6 +82,8 @@ struct DiskInfo {
     bool is_mounted = false;    ///< Mount status (direct or via LVM/dm)
     std::string mount_point;    ///< Mount point path
     bool is_lvm_pv = false;     ///< Whether device is an LVM Physical Volume or has dm holders
+    bool is_partition = false;  ///< Whether this is a partition of a disk, not the whole disk
+    std::string parent_disk;    ///< Parent disk path for partitions (e.g., /dev/sda), else empty
     SmartData smart;            ///< SMART health data
 
     auto operator==(const DiskInfo&) const -> bool = default;

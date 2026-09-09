@@ -128,6 +128,39 @@ private:
     [[nodiscard]] auto parse_disk_info(const std::string& device_path,
                                        const MountCache& mount_cache) -> DiskInfo;
 
+    /**
+     * @brief Parse one partition of a disk (fast path)
+     *
+     * Inherits model, serial, SSD flag, and removability from the parent disk;
+     * size, mount state, and LVM holder status are read for the partition.
+     *
+     * @param device_path Partition device path (e.g., /dev/sda1)
+     * @param part_sys_path sysfs directory of the partition
+     * @param parent Parent disk info (as returned by parse_disk_info)
+     * @param mount_cache Pre-parsed mount table
+     * @return DiskInfo with is_partition = true
+     */
+    [[nodiscard]] static auto parse_partition_info(const std::string& device_path,
+                                                   const std::string& part_sys_path,
+                                                   const DiskInfo& parent,
+                                                   const MountCache& mount_cache) -> DiskInfo;
+
+    /**
+     * @brief Append all partitions of a disk to the disk list
+     * @param disks List to append to; the parent disk must be disks.back()
+     * @param disk_sys_path sysfs directory of the parent disk
+     * @param mount_cache Pre-parsed mount table
+     */
+    void append_partitions(std::vector<DiskInfo>& disks, const std::string& disk_sys_path,
+                           const MountCache& mount_cache);
+
+    /**
+     * @brief Check whether a device name is a partition of some disk
+     * @param device_name Kernel device name (e.g., "sda1")
+     * @return true when the sysfs "partition" attribute exists for the device
+     */
+    [[nodiscard]] static auto is_partition_device(const std::string& device_name) -> bool;
+
     [[nodiscard]] auto check_if_ssd(const std::string& device_path) -> bool;
 
     /**

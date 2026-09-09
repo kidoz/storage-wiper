@@ -10,9 +10,9 @@
       Authorization: su.kidoz.storage_wiper.list-disks
     -->
     <method name="GetDisks">
-      <arg name="disks" type="a(sssxbbsbsubbxiiiiiii)" direction="out"/>
+      <arg name="disks" type="a(sssxbbsbsubbxiiiiiiibsb)" direction="out"/>
       <!-- Array of structs:
-           s: path (/dev/sda)
+           s: path (/dev/sda or /dev/sda1)
            s: model
            s: serial
            x: size_bytes (int64)
@@ -32,6 +32,13 @@
            i: percentage_used (-1 if unknown)
            i: available_spare_percent (NVMe only, -1 if unknown)
            i: available_spare_threshold_percent (NVMe only, -1 if unknown)
+           b: is_partition (true when the entry is a partition of a disk)
+           s: parent_disk (e.g. /dev/sda; empty for whole disks)
+
+           Partitions of each disk are listed directly after the disk.
+           Partitions inherit the parent disk's model/serial/SMART data;
+           wiping one erases only that partition, leaving the partition
+           table and sibling partitions intact.
       -->
     </method>
 
@@ -104,6 +111,13 @@
            s: name
            s: description
            i: pass_count
+
+           algorithm_id → NIST SP 800-88 media sanitization category:
+             0 (Zero Fill), 1 (Random Fill), 2 (DoD 5220.22-M),
+             3 (Gutmann), 4 (Schneier), 5 (VSITR), 6 (GOST R 50739-95)
+               → Clear (overwrite-based)
+             7 (Hardware Secure Erase: ATA Security Erase / NVMe Sanitize)
+               → Purge (firmware-level erase)
       -->
     </method>
 
@@ -117,18 +131,24 @@
     <method name="StartWipe">
       <arg name="device_path" type="s" direction="in"/>
       <arg name="algorithm_id" type="u" direction="in"/>
+      <arg name="verify" type="b" direction="in"/>
+      <!-- verify: request post-wipe verification. Ignored (reported back as
+           verification_enabled=false) for algorithms that do not support it. -->
       <arg name="started" type="b" direction="out"/>
       <arg name="error_message" type="s" direction="out"/>
     </method>
 
     <!--
       CancelWipe:
-      Cancel the current wipe operation.
+      Cancel the wipe operation running on the given device. Wipes on other
+      devices are not affected.
 
       Authorization: su.kidoz.storage_wiper.wipe-disk
     -->
     <method name="CancelWipe">
+      <arg name="device_path" type="s" direction="in"/>
       <arg name="cancelled" type="b" direction="out"/>
+      <!-- cancelled: false when no wipe is running on the device -->
     </method>
 
     <!--
@@ -144,6 +164,23 @@
       <arg name="is_complete" type="b"/>
       <arg name="has_error" type="b"/>
       <arg name="error_message" type="s"/>
+      <arg name="bytes_written" type="t"/>
+      <arg name="total_bytes" type="t"/>
+      <arg name="speed_bytes_per_sec" type="t"/>
+      <arg name="estimated_seconds_remaining" type="x"/>
+      <arg name="verification_enabled" type="b"/>
+      <arg name="verification_in_progress" type="b"/>
+      <arg name="verification_passed" type="b"/>
+      <arg name="verification_percentage" type="d"/>
+      <arg name="bad_block_count" type="t"/>
+      <!-- Full signature: (sdiisbbstttxbbbdt)
+           x: estimated_seconds_remaining is -1 when unknown
+           b: verification_enabled is false when verification was requested
+              but the algorithm does not support it
+           t: bad_block_count is the number of sectors the current pass could
+              not write (bad-sector tolerance); the completion value is the
+              count of distinct unwritable sectors
+      -->
     </signal>
 
   </interface>

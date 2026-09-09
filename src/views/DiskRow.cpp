@@ -78,6 +78,10 @@ void DiskRow::populate_from_disk_info() {
 
     info_text += disk_.is_ssd ? " - SSD" : " - HDD";
 
+    if (disk_.is_partition) {
+        info_text += " - Partition of " + disk_.parent_disk;
+    }
+
     if (disk_.is_lvm_pv) {
         info_text += " - LVM physical volume";
     }

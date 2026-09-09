@@ -59,6 +59,8 @@ public:
                         .is_mounted = mounted,
                         .mount_point = mounted ? "/mnt/test" : "",
                         .is_lvm_pv = false,
+                        .is_partition = false,
+                        .parent_disk = {},
                         .smart = {}};
     }
 };

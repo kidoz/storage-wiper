@@ -192,6 +192,7 @@ auto DiskService::get_available_disks_sync() -> std::vector<DiskInfo> {
                 smart_eligible_paths.push_back(device_path);
             }
             disks.emplace_back(std::move(info));
+            append_partitions(disks, entry.path().string(), mount_cache);
         }
     }
 
@@ -253,6 +254,19 @@ auto DiskService::get_available_disks_sync() -> std::vector<DiskInfo> {
                 disk.smart = std::move(it->second);
             } else if (auto cached = smart_state_->lookup(disk.path)) {
                 disk.smart = std::move(*cached);
+            }
+        }
+
+        // Partitions report the health of the media they live on
+        for (auto& disk : disks) {
+            if (!disk.is_partition) {
+                continue;
+            }
+            for (const auto& parent : disks) {
+                if (!parent.is_partition && parent.path == disk.parent_disk) {
+                    disk.smart = parent.smart;
+                    break;
+                }
             }
         }
 
@@ -347,8 +361,26 @@ auto DiskService::unmount_disk(const std::string& path) -> std::expected<void, u
         return std::unexpected(valid.error());
     }
 
+    // A partition unmounts by exact name: it has no partitions of its own, and
+    // prefix matching would wrongly pull in sibling partitions (/dev/sda1 vs
+    // /dev/sda12).
+    const auto device_name = fs::path{path}.filename().string();
+    const bool partition_device = is_partition_device(device_name);
+
     // Collect all mount points for this device and its partitions
     std::vector<std::string> mount_points;
+    auto collect_matches = [&](FILE* mtab) {
+        while (auto* entry = ::getmntent(mtab)) {
+            const std::string_view mount_device{entry->mnt_fsname};
+            const bool matches =
+                partition_device
+                    ? mount_device == path
+                    : device_path_matcher::is_device_or_partition_of(path, mount_device);
+            if (matches) {
+                mount_points.push_back(entry->mnt_dir);
+            }
+        }
+    };
 
     if (auto mtab_deleter =
             [](FILE* f) {
@@ -357,15 +389,7 @@ auto DiskService::unmount_disk(const std::string& path) -> std::expected<void, u
             };
         std::unique_ptr<FILE, decltype(mtab_deleter)> mtab{::setmntent("/proc/mounts", "r"),
                                                            mtab_deleter}) {
-        while (auto* entry = ::getmntent(mtab.get())) {
-            const std::string_view mount_device{entry->mnt_fsname};
-
-            // Match device itself or any partition (e.g., /dev/sda, /dev/sda1, /dev/sda2).
-            // Suffix check guards against /dev/sdaa1 leaking into a /dev/sda match.
-            if (device_path_matcher::is_device_or_partition_of(path, mount_device)) {
-                mount_points.push_back(entry->mnt_dir);
-            }
-        }
+        collect_matches(mtab.get());
     }
 
     if (mount_points.empty()) {
@@ -401,7 +425,11 @@ auto DiskService::unmount_disk(const std::string& path) -> std::expected<void, u
         while (auto* entry = ::getmntent(mtab.get())) {
             const std::string_view mount_device{entry->mnt_fsname};
 
-            if (device_path_matcher::is_device_or_partition_of(path, mount_device)) {
+            const bool matches =
+                partition_device
+                    ? mount_device == path
+                    : device_path_matcher::is_device_or_partition_of(path, mount_device);
+            if (matches) {
                 // Still mounted. Report the mount point whose umount() actually
                 // failed, so the errno matches the path in the message.
                 const std::string error_str =
@@ -509,6 +537,8 @@ auto DiskService::parse_disk_info(const std::string& device_path, const MountCac
                          .is_mounted = false,
                          .mount_point = {},
                          .is_lvm_pv = false,
+                         .is_partition = false,
+                         .parent_disk = {},
                          .smart = {}};
 
     const auto device_name = fs::path{device_path}.filename().string();
@@ -580,6 +610,90 @@ auto DiskService::parse_disk_info(const std::string& device_path, const MountCac
     // in get_available_disks() for better performance
 
     return info;
+}
+
+auto DiskService::parse_partition_info(const std::string& device_path,
+                                       const std::string& part_sys_path, const DiskInfo& parent,
+                                       const MountCache& mount_cache) -> DiskInfo {
+    // Inherit identity and media characteristics from the parent disk
+    DiskInfo info = parent;
+    info.path = device_path;
+    info.is_partition = true;
+    info.parent_disk = parent.path;
+    info.size_bytes = 0;
+    info.is_mounted = false;
+    info.mount_point.clear();
+    info.filesystem.clear();
+    info.smart = {};  // copied from the (possibly later-resolved) parent after enumeration
+
+    // Partition size in 512-byte sectors
+    if (std::ifstream size_file{part_sys_path + "/size"}; size_file.is_open()) {
+        uint64_t sectors{};
+        if (size_file >> sectors && sectors <= UINT64_MAX / BYTES_PER_SECTOR) {
+            info.size_bytes = sectors * BYTES_PER_SECTOR;
+        }
+    }
+
+    // dm holders of the partition itself (e.g., LVM PV on a partition)
+    const auto part_name = fs::path{device_path}.filename().string();
+    const auto dm_holders = collect_dm_holders(part_sys_path, part_name);
+    info.is_lvm_pv = !dm_holders.empty();
+
+    // Exact mount match: a partition is not a parent device, and matching
+    // "partitions of the partition" would let /dev/sda1 adopt /dev/sda12's
+    // mount point.
+    for (const auto& entry : mount_cache.entries) {
+        if (entry.device == device_path) {
+            info.is_mounted = true;
+            info.mount_point = entry.mount_point;
+            info.filesystem = entry.filesystem;
+            break;
+        }
+    }
+
+    return info;
+}
+
+void DiskService::append_partitions(std::vector<DiskInfo>& disks, const std::string& disk_sys_path,
+                                    const MountCache& mount_cache) {
+    std::error_code iter_ec;
+    for (fs::directory_iterator it{disk_sys_path, iter_ec}, end; it != end && !iter_ec;
+         it.increment(iter_ec)) {
+        if (iter_ec) {
+            break;
+        }
+
+        // Only kernel-recognised partitions carry the "partition" attribute;
+        // this skips holders/, slaves/, and other sysfs subdirectories.
+        std::error_code ec;
+        if (!fs::exists(it->path() / "partition", ec) || ec) {
+            continue;
+        }
+
+        const auto part_name = it->path().filename().string();
+        const auto part_path = std::format("/dev/{}", part_name);
+        if (auto valid = validate_device_path(part_path); !valid) {
+            continue;
+        }
+
+        if (auto part =
+                parse_partition_info(part_path, it->path().string(), disks.back(), mount_cache);
+            part.size_bytes > 0) {
+            disks.push_back(std::move(part));
+        }
+    }
+}
+
+auto DiskService::is_partition_device(const std::string& device_name) -> bool {
+    std::error_code iter_ec;
+    for (fs::directory_iterator it{"/sys/block", iter_ec}, end; it != end && !iter_ec;
+         it.increment(iter_ec)) {
+        std::error_code ec;
+        if (fs::exists(it->path() / device_name / "partition", ec) && !ec) {
+            return true;
+        }
+    }
+    return false;
 }
 
 auto DiskService::check_if_ssd(const std::string& device_path) -> bool {
