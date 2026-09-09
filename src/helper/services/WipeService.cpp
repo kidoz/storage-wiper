@@ -20,7 +20,9 @@
 #include <cerrno>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <utility>
 
 // System headers
@@ -30,6 +32,8 @@
 
 // Linux-specific headers
 #include <linux/fs.h>
+
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -132,45 +136,147 @@ private:
     std::deque<uint64_t> speed_samples_;
 };
 
+/**
+ * @brief Resolve the kernel name of the disk that owns a device
+ *
+ * For whole disks this is the device's own name; for partitions it is found
+ * via the sysfs layout (/sys/block/<disk>/<partition>).
+ */
+auto parent_disk_name(const std::string& device_path) -> std::string {
+    const auto name = fs::path{device_path}.filename().string();
+
+    std::error_code ec;
+    if (fs::exists(std::format("/sys/block/{}/queue/rotational", name), ec)) {
+        return name;
+    }
+
+    std::error_code iter_ec;
+    for (fs::directory_iterator it{"/sys/block", iter_ec}, end; it != end && !iter_ec;
+         it.increment(iter_ec)) {
+        std::error_code ec2;
+        if (fs::exists(it->path() / name / "partition", ec2) && !ec2) {
+            return it->path().filename().string();
+        }
+    }
+    return name;
+}
+
+/**
+ * @brief Check whether the device is an SSD (non-rotational media)
+ */
+auto is_non_rotational_device(const std::string& device_path) -> bool {
+    std::ifstream file{
+        std::format("/sys/block/{}/queue/rotational", parent_disk_name(device_path))};
+    if (!file) {
+        return false;  // unknown: do not touch the device with discards
+    }
+    int rotational = 1;
+    file >> rotational;
+    return rotational == 0;
+}
+
+/**
+ * @brief Issue BLKDISCARD over the whole device to restore SSD performance
+ *
+ * Runs after a successful wipe (and its verification, if any), so the
+ * discard can never hide wipe results from the read-back. Failures are
+ * non-fatal: devices and bridges that do not support discard are simply
+ * skipped.
+ *
+ * @return true when at least the first discard was accepted
+ */
+auto issue_trim_if_ssd(const std::string& disk_path, uint64_t device_size) -> bool {
+    if (device_size == 0 || !is_non_rotational_device(disk_path)) {
+        return false;
+    }
+
+    const util::FileDescriptor fd{open(disk_path.c_str(), O_WRONLY | O_EXCL)};
+    if (!fd) {
+        return false;  // something claimed the device between wipe and trim
+    }
+
+    constexpr uint64_t DISCARD_CHUNK = uint64_t{1} << 30;  // 1 GiB per request
+    uint64_t offset = 0;
+    bool supported = true;
+
+    while (offset < device_size) {
+        const uint64_t range[2] = {offset, std::min(DISCARD_CHUNK, device_size - offset)};
+        if (ioctl(fd.get(), BLKDISCARD, range) != 0) {
+            supported = false;
+            break;
+        }
+        offset += range[1];
+    }
+
+    if (supported) {
+        LOG_INFO("WipeService",
+                 std::format("BLKDISCARD issued for {} ({} bytes)", disk_path, device_size));
+    }
+    return supported;
+}
+
 }  // namespace
 
 WipeService::WipeService(std::shared_ptr<IDiskService> disk_service)
     : disk_service_(std::move(disk_service)) {
-    state_ = std::make_shared<ThreadState>();
     initialize_algorithms();
 }
 
 WipeService::~WipeService() {
-    if (state_->operation_in_progress.load()) {
-        state_->cancel_requested.store(true);
+    // Snapshot the operations so workers, which never touch the map, are safe
+    std::map<std::string, std::shared_ptr<Operation>> ops;
+    {
+        std::lock_guard lock(operations_mutex_);
+        ops = operations_;
+    }
 
-        // Wait for thread with timeout - log warning but continue waiting
-        auto start = std::chrono::steady_clock::now();
-        while (state_->operation_in_progress.load()) {
-            auto elapsed = std::chrono::steady_clock::now() - start;
-            if (elapsed >= SHUTDOWN_TIMEOUT) {
-                // Log critical warning but still wait for join
-                // Better to block shutdown than corrupt data by detaching
-                LOG_ERROR(
-                    "WipeService",
-                    std::format("Shutdown - thread did not respond to cancel within "
-                                "{}s timeout. Waiting for thread to complete to prevent "
-                                "data corruption.",
-                                std::chrono::duration_cast<std::chrono::seconds>(SHUTDOWN_TIMEOUT)
-                                    .count()));
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds{100});
+    // Ask every live operation to stop
+    for (auto& [path, op] : ops) {
+        if (op->state->operation_in_progress.load()) {
+            op->state->cancel_requested.store(true);
         }
     }
 
-    std::lock_guard lock(thread_mutex_);
-    if (wipe_thread_.joinable()) {
-        // Always join - never detach. If thread is stuck, we wait.
-        // Detaching a wipe thread can lead to data corruption if the process
-        // exits while writing to disk.
-        wipe_thread_.join();
+    // Wait (bounded) for the cancellations to take effect
+    const auto start = std::chrono::steady_clock::now();
+    for (;;) {
+        bool all_stopped = true;
+        for (auto& [path, op] : ops) {
+            if (op->state->operation_in_progress.load()) {
+                all_stopped = false;
+                break;
+            }
+        }
+        if (all_stopped) {
+            break;
+        }
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        if (elapsed >= SHUTDOWN_TIMEOUT) {
+            // Log critical warning but still wait for join
+            // Better to block shutdown than corrupt data by detaching
+            LOG_ERROR(
+                "WipeService",
+                std::format(
+                    "Shutdown - some operations did not respond to cancel within "
+                    "{}s timeout. Waiting for their threads to complete to prevent "
+                    "data corruption.",
+                    std::chrono::duration_cast<std::chrono::seconds>(SHUTDOWN_TIMEOUT).count()));
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{100});
     }
+
+    for (auto& [path, op] : ops) {
+        if (op->thread.joinable()) {
+            // Always join - never detach. If a thread is stuck, we wait.
+            // Detaching a wipe thread can lead to data corruption if the
+            // process exits while writing to disk.
+            op->thread.join();
+        }
+    }
+
+    std::lock_guard lock(operations_mutex_);
+    operations_.clear();
 }
 
 void WipeService::initialize_algorithms() {
@@ -192,18 +298,39 @@ auto WipeService::get_algorithm(WipeAlgorithm algo) const -> std::shared_ptr<IWi
     return nullptr;
 }
 
+auto WipeService::is_operation_in_progress(const std::string& disk_path) -> bool {
+    std::lock_guard lock(operations_mutex_);
+    const auto it = operations_.find(disk_path);
+    return it != operations_.end() && it->second->state->operation_in_progress.load();
+}
+
+auto WipeService::cancel_operation(const std::string& disk_path) -> bool {
+    std::lock_guard lock(operations_mutex_);
+    const auto it = operations_.find(disk_path);
+    if (it == operations_.end() || !it->second->state->operation_in_progress.load()) {
+        return false;
+    }
+    // The worker checks the flag and terminates gracefully; the entry is
+    // reaped when the same device is wiped again or on destruction.
+    it->second->state->cancel_requested.store(true);
+    return true;
+}
+
 auto WipeService::prepare_wipe(const std::string& disk_path, WipeAlgorithm algorithm,
                                const ProgressCallback& callback) -> std::optional<WipePreparation> {
-    // Atomically claim the operation slot: with a separate load/store, two
-    // concurrent calls could both pass the guard, and the loser would hit
-    // std::terminate when assigning over a joinable wipe_thread_.
-    bool expected = false;
-    if (!state_->operation_in_progress.compare_exchange_strong(expected, true)) {
-        return std::nullopt;  // Operation already in progress
+    // Claim the per-device operation slot. Wipes on different devices run in
+    // parallel; a second wipe on the same device is rejected until the first
+    // has finished.
+    {
+        std::lock_guard lock(operations_mutex_);
+        if (const auto it = operations_.find(disk_path); it != operations_.end()) {
+            if (it->second->state->operation_in_progress.load()) {
+                return std::nullopt;  // Operation already in progress on this device
+            }
+        }
     }
 
     if (!disk_service_) {
-        state_->operation_in_progress.store(false);
         if (callback) {
             WipeProgress progress{};
             progress.has_error = true;
@@ -215,7 +342,6 @@ auto WipeService::prepare_wipe(const std::string& disk_path, WipeAlgorithm algor
     }
 
     if (auto eligible = device_policy::validate_wipe_target(*disk_service_, disk_path); !eligible) {
-        state_->operation_in_progress.store(false);
         if (callback) {
             WipeProgress progress{};
             progress.has_error = true;
@@ -226,19 +352,8 @@ auto WipeService::prepare_wipe(const std::string& disk_path, WipeAlgorithm algor
         return std::nullopt;
     }
 
-    // Join previous thread if it exists (with lock)
-    {
-        std::lock_guard lock(thread_mutex_);
-        if (wipe_thread_.joinable()) {
-            wipe_thread_.join();
-        }
-    }
-
-    state_->cancel_requested.store(false);
-
     auto algorithm_ptr = get_algorithm(algorithm);
     if (!algorithm_ptr) {
-        state_->operation_in_progress.store(false);
         if (callback) {
             WipeProgress progress{};
             progress.has_error = true;
@@ -248,8 +363,25 @@ auto WipeService::prepare_wipe(const std::string& disk_path, WipeAlgorithm algor
         return std::nullopt;
     }
 
+    // Reap the previous finished operation for this device (join + erase) and
+    // insert the new one atomically. Joining here is deadlock-free: workers
+    // never take operations_mutex_.
+    auto operation = std::make_shared<Operation>();
+    {
+        std::lock_guard lock(operations_mutex_);
+        if (const auto it = operations_.find(disk_path); it != operations_.end()) {
+            if (it->second->thread.joinable()) {
+                it->second->thread.join();
+            }
+            operations_.erase(it);
+        }
+        operation->state->operation_in_progress.store(true);
+        operations_.emplace(disk_path, operation);
+    }
+
     return WipePreparation{.algorithm = algorithm_ptr,
-                           .requires_device_access = algorithm_ptr->requires_device_access()};
+                           .requires_device_access = algorithm_ptr->requires_device_access(),
+                           .operation = std::move(operation)};
 }
 
 auto WipeService::execute_wipe_on_device(
@@ -345,13 +477,27 @@ auto WipeService::execute_wipe_on_device(
 }
 
 auto WipeService::build_completion_status(bool wipe_result, bool do_verify, bool verify_result,
-                                          bool cancelled) -> WipeProgress {
+                                          bool cancelled, uint64_t bad_blocks, bool trim_issued)
+    -> WipeProgress {
     WipeProgress final_progress{};
     final_progress.is_complete = true;
     final_progress.has_error = !wipe_result || (do_verify && !verify_result);
     final_progress.percentage = wipe_result ? 100.0 : 0.0;
     final_progress.verification_enabled = do_verify;
     final_progress.verification_passed = verify_result;
+    final_progress.bad_block_count = bad_blocks;
+
+    auto success_note = [trim_issued]() -> std::string {
+        return trim_issued ? " TRIM/discard issued." : "";
+    };
+    auto bad_block_note = [bad_blocks]() -> std::string {
+        if (bad_blocks == 0) {
+            return "";
+        }
+        return std::format(" {} bad sectors could not be overwritten; data in them may "
+                           "survive an overwrite wipe.",
+                           bad_blocks);
+    };
 
     if (cancelled) {
         final_progress.status = "Operation cancelled";
@@ -362,9 +508,11 @@ auto WipeService::build_completion_status(bool wipe_result, bool do_verify, bool
         final_progress.error_message = "Verification failed: data does not match expected pattern";
     } else if (wipe_result) {
         if (do_verify) {
-            final_progress.status = "Wipe and verification completed successfully";
+            final_progress.status =
+                "Wipe and verification completed successfully." + success_note() + bad_block_note();
         } else {
-            final_progress.status = "Wipe completed successfully";
+            final_progress.status =
+                "Wipe completed successfully." + success_note() + bad_block_note();
         }
     } else if (!final_progress.has_error) {
         final_progress.has_error = true;
@@ -378,16 +526,6 @@ auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorith
                             ProgressCallback callback) -> bool {
     // Delegate to the full overload with verify=false
     return wipe_disk(disk_path, algorithm, std::move(callback), false);
-}
-
-auto WipeService::cancel_current_operation() -> bool {
-    if (state_->operation_in_progress.load()) {
-        state_->cancel_requested.store(true);
-        // Thread will check cancel_requested flag and terminate gracefully
-        // No need to join here - let the operation finish on its own
-        return true;
-    }
-    return false;
 }
 
 auto WipeService::get_algorithm_name(WipeAlgorithm algo) -> std::string {
@@ -440,21 +578,36 @@ auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorith
 
     // Check if verification is requested but not supported
     const bool do_verify = verify && preparation->algorithm->supports_verification();
+    if (verify && !do_verify) {
+        // Never silently ignore an explicit --verify request: log it so the
+        // audit trail shows verification did not run.
+        LOG_WARNING("WipeService",
+                    std::format("Verification requested but not supported by algorithm {}; "
+                                "verification will be skipped",
+                                preparation->algorithm->get_name()));
+    }
 
-    // Run wipe operation in separate thread
-    std::lock_guard lock(thread_mutex_);
-    wipe_thread_ =
-        std::thread([disk_path, callback, state = state_, algorithm_ptr = preparation->algorithm,
-                     requires_device_access = preparation->requires_device_access, do_verify]() {
+    // Run wipe operation in its own thread; operations on other devices are
+    // unaffected and may run in parallel.
+    {
+        auto& op_thread = preparation->operation->thread;
+        op_thread = std::thread([disk_path, callback, state = preparation->operation->state,
+                                 algorithm_ptr = preparation->algorithm,
+                                 requires_device_access = preparation->requires_device_access,
+                                 do_verify]() {
             bool wipe_result = false;
             bool verify_result = true;
+            bool trim_issued = false;
             uint64_t device_size = 0;
+            auto bad_blocks_total = std::make_shared<std::atomic<uint64_t>>(0);
 
             // Create progress tracker to calculate speed and ETA
             auto tracker = std::make_shared<ProgressTracker>(callback);
-            auto tracked_callback = [tracker, do_verify](const WipeProgress& progress) {
+            auto tracked_callback = [tracker, do_verify,
+                                     bad_blocks_total](const WipeProgress& progress) {
                 WipeProgress p = progress;
                 p.verification_enabled = do_verify;
+                bad_blocks_total->store(p.bad_block_count, std::memory_order_relaxed);
                 tracker->report(p);
             };
 
@@ -503,6 +656,13 @@ auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorith
                                                           verify_callback, state->cancel_requested);
                 }
 
+                // Deallocate the media after a successful wipe (and its
+                // read-back) so SSDs reclaim their performance. Skipped when
+                // the operation was cancelled.
+                if (wipe_result && !state->cancel_requested.load()) {
+                    trim_issued = issue_trim_if_ssd(disk_path, device_size);
+                }
+
             } catch (const std::exception& e) {
                 WipeProgress progress{};
                 progress.has_error = true;
@@ -513,11 +673,13 @@ auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorith
 
             // Build and send completion status
             auto final_progress = build_completion_status(wipe_result, do_verify, verify_result,
-                                                          state->cancel_requested.load());
+                                                          state->cancel_requested.load(),
+                                                          bad_blocks_total->load(), trim_issued);
             tracked_callback(final_progress);
 
             state->operation_in_progress.store(false);
         });
+    }
 
     return true;
 }

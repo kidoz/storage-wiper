@@ -31,7 +31,7 @@ public:
     [[nodiscard]] auto get_algorithm_description(WipeAlgorithm algo) -> std::string override;
     [[nodiscard]] auto get_pass_count(WipeAlgorithm algo) -> int override;
     [[nodiscard]] auto is_ssd_compatible(WipeAlgorithm algo) -> bool override;
-    auto cancel_current_operation() -> bool override;
+    auto cancel_operation(const std::string& device_path) -> bool override;
 
 private:
     static constexpr auto SHUTDOWN_TIMEOUT = std::chrono::seconds{5};
@@ -42,11 +42,26 @@ private:
     };
 
     /**
+     * @brief One wipe in flight, keyed by device path
+     *
+     * Each operation owns its thread and cancellation state so that wiping
+     * several devices in parallel - and cancelling one of them - never
+     * touches another operation. Completed entries stay in the map (thread
+     * still joinable) until the same device is wiped again or the service is
+     * destroyed; workers never mutate the map themselves.
+     */
+    struct Operation {
+        std::shared_ptr<ThreadState> state = std::make_shared<ThreadState>();
+        std::thread thread;
+    };
+
+    /**
      * @brief Result of wipe preparation validation
      */
     struct WipePreparation {
         std::shared_ptr<IWipeAlgorithm> algorithm;
         bool requires_device_access;
+        std::shared_ptr<Operation> operation;
     };
 
     /**
@@ -58,9 +73,10 @@ private:
     };
 
     std::shared_ptr<IDiskService> disk_service_;
-    std::shared_ptr<ThreadState> state_;
-    std::thread wipe_thread_;
-    mutable std::mutex thread_mutex_;  // Protects wipe_thread_ access
+
+    // One entry per device with a wipe in flight or recently finished
+    std::map<std::string, std::shared_ptr<Operation>> operations_;
+    mutable std::mutex operations_mutex_;  // Protects operations_
 
     // Algorithm factory
     std::map<WipeAlgorithm, std::shared_ptr<IWipeAlgorithm>> algorithms_;
@@ -68,6 +84,14 @@ private:
     void initialize_algorithms();
     [[nodiscard]] auto get_algorithm(WipeAlgorithm algo) const -> std::shared_ptr<IWipeAlgorithm>;
 
+public:
+    /**
+     * @brief Check whether a wipe is currently running on a device
+     * @param disk_path Device to check
+     */
+    [[nodiscard]] auto is_operation_in_progress(const std::string& disk_path) -> bool;
+
+private:
     /**
      * @brief Validate inputs and prepare for wipe operation
      * @param disk_path Path to the device
@@ -100,9 +124,12 @@ private:
      * @param do_verify Whether verification was requested
      * @param verify_result Whether verification passed
      * @param cancelled Whether operation was cancelled
+     * @param bad_blocks Number of sectors the final pass could not write
+     * @param trim_issued Whether a BLKDISCARD was issued after the wipe
      * @return Completed WipeProgress struct
      */
     [[nodiscard]] static auto build_completion_status(bool wipe_result, bool do_verify,
-                                                      bool verify_result, bool cancelled)
+                                                      bool verify_result, bool cancelled,
+                                                      uint64_t bad_blocks, bool trim_issued)
         -> WipeProgress;
 };

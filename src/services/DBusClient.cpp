@@ -33,7 +33,7 @@ auto fallback_algorithm_name(WipeAlgorithm algo) -> std::string {
         case WipeAlgorithm::GOST_R_50739_95:
             return "GOST R 50739-95";
         case WipeAlgorithm::ATA_SECURE_ERASE:
-            return "ATA Secure Erase";
+            return "Hardware Secure Erase";
     }
     return "Unknown";
 }
@@ -55,7 +55,8 @@ auto fallback_algorithm_description(WipeAlgorithm algo) -> std::string {
         case WipeAlgorithm::GOST_R_50739_95:
             return "Russian GOST R 50739-95 2-pass standard";
         case WipeAlgorithm::ATA_SECURE_ERASE:
-            return "Hardware-based secure erase using ATA Security commands";
+            return "Firmware-based secure erase: ATA Security Erase for SATA drives, "
+                   "NVMe Sanitize (crypto/block erase) for NVMe drives";
     }
     return "Unknown algorithm";
 }
@@ -344,6 +345,13 @@ void DBusClient::on_name_vanished(GDBusConnection* /*connection*/, const gchar* 
             }
         }
 
+        // In-flight wipes died with the helper; drop their callbacks so a
+        // restarted helper does not route progress to stale callers.
+        {
+            std::lock_guard lock(self->callback_mutex_);
+            self->progress_callbacks_.clear();
+        }
+
         self->set_state(ConnectionState::DISCONNECTED, "Helper service stopped");
         self->schedule_reconnect();
     }
@@ -463,12 +471,13 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/, const gchar
     gboolean verification_in_progress = FALSE;
     gboolean verification_passed = FALSE;
     gdouble verification_percentage = 0.0;
+    guint64 bad_block_count = 0;
 
-    g_variant_get(parameters, "(&sdii&sbb&stttxbbbd)", &device_path, &percentage, &current_pass,
+    g_variant_get(parameters, "(&sdii&sbb&stttxbbbdt)", &device_path, &percentage, &current_pass,
                   &total_passes, &status, &is_complete, &has_error, &error_message, &bytes_written,
                   &total_bytes, &speed_bytes_per_sec, &estimated_seconds_remaining,
                   &verification_enabled, &verification_in_progress, &verification_passed,
-                  &verification_percentage);
+                  &verification_percentage, &bad_block_count);
 
     WipeProgress progress{.bytes_written = bytes_written,
                           .total_bytes = total_bytes,
@@ -485,12 +494,24 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/, const gchar
                           .verification_in_progress = verification_in_progress != FALSE,
                           .verification_passed = verification_passed != FALSE,
                           .verification_percentage = verification_percentage,
-                          .verification_mismatches = 0};
+                          .verification_mismatches = 0,
+                          .bad_block_count = bad_block_count};
 
-    // Call the callback
-    std::lock_guard lock(self->callback_mutex_);
-    if (self->progress_callback_) {
-        self->progress_callback_(progress);
+    // Route the progress to the wipe it belongs to; concurrent wipes each
+    // have their own callback keyed by device path.
+    ProgressCallback callback;
+    {
+        std::lock_guard lock(self->callback_mutex_);
+        if (const auto it = self->progress_callbacks_.find(std::string{device_path});
+            it != self->progress_callbacks_.end()) {
+            callback = it->second;
+            if (progress.is_complete) {
+                self->progress_callbacks_.erase(it);
+            }
+        }
+    }
+    if (callback) {
+        callback(progress);
     }
 }
 
@@ -550,13 +571,15 @@ void DBusClient::get_available_disks(
                 gint32 percentage_used = -1;
                 gint32 available_spare = -1;
                 gint32 available_spare_threshold = -1;
+                gboolean is_partition = FALSE;
+                const gchar* parent_disk = nullptr;
 
                 while (g_variant_iter_next(
-                    &iter, "(&s&s&sxbb&sb&subbxiiiiiii)", &path, &model, &serial, &size_bytes,
+                    &iter, "(&s&s&sxbb&sb&subbxiiiiiiib&s)", &path, &model, &serial, &size_bytes,
                     &is_removable, &is_ssd, &filesystem, &is_mounted, &mount_point, &smart_status,
                     &smart_available, &smart_healthy, &power_on_hours, &reallocated_sectors,
                     &pending_sectors, &temperature_celsius, &uncorrectable_errors, &percentage_used,
-                    &available_spare, &available_spare_threshold)) {
+                    &available_spare, &available_spare_threshold, &is_partition, &parent_disk)) {
                     if (path) {
                         SmartData smart;
                         smart.status = static_cast<SmartData::HealthStatus>(smart_status);
@@ -581,6 +604,8 @@ void DBusClient::get_available_disks(
                                                  .is_mounted = is_mounted != FALSE,
                                                  .mount_point = mount_point ? mount_point : "",
                                                  .is_lvm_pv = false,
+                                                 .is_partition = is_partition != FALSE,
+                                                 .parent_disk = parent_disk ? parent_disk : "",
                                                  .smart = smart});
                     }
                 }
@@ -785,10 +810,10 @@ auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm
     }
     ProxyRefGuard proxy_guard{proxy_copy};
 
-    // Store callback for signal handler
+    // Store callback for the signal handler, keyed by device
     {
         std::lock_guard lock(callback_mutex_);
-        progress_callback_ = std::move(callback);
+        progress_callbacks_[disk_path] = std::move(callback);
     }
 
     GError* error = nullptr;
@@ -865,7 +890,7 @@ auto DBusClient::supports_verification(WipeAlgorithm algo) -> bool {
     }
 }
 
-auto DBusClient::cancel_current_operation() -> bool {
+auto DBusClient::cancel_operation(const std::string& device_path) -> bool {
     GDBusProxy* proxy_copy = nullptr;
     {
         std::lock_guard lock(proxy_mutex_);
@@ -878,8 +903,8 @@ auto DBusClient::cancel_current_operation() -> bool {
 
     GError* error = nullptr;
     GVariant* result =
-        g_dbus_proxy_call_sync(proxy_copy, "CancelWipe", nullptr, G_DBUS_CALL_FLAGS_NONE,
-                               DBUS_TIMEOUT_MS, nullptr, &error);
+        g_dbus_proxy_call_sync(proxy_copy, "CancelWipe", g_variant_new("(s)", device_path.c_str()),
+                               G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
         g_clear_error(&error);

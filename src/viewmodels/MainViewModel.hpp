@@ -13,7 +13,11 @@
 #include "models/ViewTypes.hpp"
 #include "services/IDiskService.hpp"
 #include "services/IWipeService.hpp"
+#include "util/AppSettings.hpp"
+#include "util/WipeCertificate.hpp"
 
+#include <chrono>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -82,9 +86,17 @@ public:
     mvvm::Observable<bool> can_wipe{false};
 
     /**
-     * @brief Current wipe progress
+     * @brief Current wipe progress of the selected disk
+     *
+     * Mirrors the entry of the selected disk in wipe_progresses so the view
+     * can keep a single progress area bound to it.
      */
     mvvm::Observable<WipeProgress> wipe_progress{{}};
+
+    /**
+     * @brief Progress of every wipe currently in flight, keyed by device path
+     */
+    mvvm::Observable<std::map<std::string, WipeProgress>> wipe_progresses{{}};
 
     /**
      * @brief Whether post-wipe verification is enabled for the next wipe
@@ -184,7 +196,68 @@ public:
      */
     void set_notification_callback(NotificationCallback callback);
 
+    /**
+     * @brief Set the directory wipe certificates are written to on success
+     *
+     * Certificate writing is disabled while no directory is configured (used
+     * by unit tests to stay off the real filesystem).
+     */
+    void set_certificate_directory(const std::string& directory);
+
+    /**
+     * @brief Restore the last-used wipe preset
+     *
+     * Invalid algorithm ids are ignored; verification is dropped again when
+     * the restored algorithm cannot verify.
+     */
+    void restore_settings(const util::AppSettingsData& settings);
+
+    /**
+     * @brief Snapshot the current wipe settings for persistence
+     */
+    [[nodiscard]] auto current_settings() const -> util::AppSettingsData;
+
+    /**
+     * @brief Warning shown when an erase reaches beyond the selected device
+     *
+     * An NVMe firmware erase is issued to the controller, so it destroys every
+     * namespace the controller owns. Public so the wording is unit tested.
+     *
+     * @param algorithm Selected algorithm
+     * @param path Selected device path
+     * @return Warning text, or empty when the erase is limited to the device
+     */
+    [[nodiscard]] static auto controller_wide_warning(WipeAlgorithm algorithm,
+                                                      const std::string& path) -> std::string;
+
+    /**
+     * @brief Scope statement shown in the wipe confirmation dialog
+     *
+     * Makes explicit whether the wipe covers the whole device (including
+     * partitions and the partition table) or only one partition. Public so
+     * the wording is unit tested.
+     *
+     * @param disk Selected device
+     * @param child_partitions Partition device names of the disk (empty for
+     *                         partitions themselves)
+     * @return Scope text, or empty when there is nothing to call out
+     */
+    [[nodiscard]] static auto build_scope_note(const DiskInfo& disk,
+                                               const std::vector<std::string>& child_partitions)
+        -> std::string;
+
 private:
+    /**
+     * @brief Per-device bookkeeping for a wipe started from this ViewModel
+     */
+    struct WipeActivity {
+        WipeAlgorithm algorithm = WipeAlgorithm::ZERO_FILL;
+        bool verify = false;
+        std::chrono::system_clock::time_point started_at{};
+        std::chrono::steady_clock::time_point started_steady{};
+        uint64_t peak_speed = 0;
+    };
+
     std::shared_ptr<IDiskService> disk_service_;
     std::shared_ptr<IWipeService> wipe_service_;
     NotificationCallback notification_callback_;
@@ -203,15 +276,22 @@ private:
     void start_wipe();
     void confirm_wipe_for(const std::string& path, WipeAlgorithm algorithm, bool verify);
     void unmount_and_wipe(const std::string& path);
-    void handle_wipe_progress(const WipeProgress& progress);
-    void handle_wipe_completion(bool success, const std::string& error_message = "");
+    void handle_wipe_progress(const std::string& path, const WipeProgress& progress);
+    void finish_wipe(const std::string& path, const WipeProgress& progress);
+    void handle_wipe_completion(const std::string& path, const WipeActivity& activity,
+                                const WipeProgress& progress);
     void show_message(MessageInfo::Type type, const std::string& title, const std::string& message,
                       std::function<void(bool)> callback = nullptr);
     [[nodiscard]] auto find_disk_info(const std::string& path) const -> std::optional<DiskInfo>;
     [[nodiscard]] auto build_disk_summary(const std::optional<DiskInfo>& disk_info,
                                           const std::string& fallback_path) const -> std::string;
+    [[nodiscard]] auto build_certificate_data(const std::string& path, const WipeActivity& activity,
+                                              const WipeProgress& progress) const
+        -> util::WipeCertificateData;
 
-    std::string active_wipe_disk_path_;
-    WipeAlgorithm active_wipe_algorithm_ = WipeAlgorithm::ZERO_FILL;
-    bool active_wipe_verification_enabled_ = false;
+    // Wipes in flight, keyed by device path (main thread only)
+    std::map<std::string, WipeActivity> active_wipes_;
+
+    // Certificate output directory; empty disables certificate writing (tests)
+    std::string certificate_directory_;
 };

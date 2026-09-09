@@ -16,6 +16,7 @@
 #include <gio/gio.h>
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -116,14 +117,17 @@ public:
     [[nodiscard]] auto get_pass_count(WipeAlgorithm algo) -> int override;
     [[nodiscard]] auto is_ssd_compatible(WipeAlgorithm algo) -> bool override;
     [[nodiscard]] auto supports_verification(WipeAlgorithm algo) -> bool override;
-    auto cancel_current_operation() -> bool override;
+    auto cancel_operation(const std::string& device_path) -> bool override;
 
 private:
     GDBusConnection* connection_ = nullptr;
     GDBusProxy* proxy_ = nullptr;
     mutable std::mutex proxy_mutex_;  // Protects proxy_ access during reconnection
     guint signal_subscription_id_ = 0;
-    ProgressCallback progress_callback_;
+
+    // One progress callback per device so several concurrent wipes can be
+    // routed to their own caller by the signal's device_path argument.
+    std::map<std::string, ProgressCallback> progress_callbacks_;
     mutable std::mutex callback_mutex_;
 
     // Algorithm info cache (fetched once from helper)

@@ -55,9 +55,25 @@ public:
         return false;
     }
 
+    /**
+     * @brief Get the NIST SP 800-88 sanitization category of an algorithm
+     * @param algo Wipe algorithm
+     * @return Category label, e.g. "NIST 800-88 Clear" or "NIST 800-88 Purge"
+     */
+    [[nodiscard]] virtual auto get_nist_category(WipeAlgorithm algo) -> std::string {
+        return std::string{nist_800_88_category(algo)};
+    }
+
+    /**
+     * @brief Request cancellation of the wipe running on a specific device
+     * @param device_path Device whose wipe should be cancelled
+     * @return true if a wipe was running on the device and cancellation was
+     *         requested; the operation still finishes asynchronously
+     */
+    virtual auto cancel_operation(const std::string& device_path) -> bool = 0;
+
     [[nodiscard]] virtual auto get_algorithm_name(WipeAlgorithm algo) -> std::string = 0;
     [[nodiscard]] virtual auto get_algorithm_description(WipeAlgorithm algo) -> std::string = 0;
     [[nodiscard]] virtual auto get_pass_count(WipeAlgorithm algo) -> int = 0;
     [[nodiscard]] virtual auto is_ssd_compatible(WipeAlgorithm algo) -> bool = 0;
-    virtual auto cancel_current_operation() -> bool = 0;
 };

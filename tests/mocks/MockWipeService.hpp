@@ -22,7 +22,7 @@ public:
     MOCK_METHOD(int, get_pass_count, (WipeAlgorithm algo), (override));
     MOCK_METHOD(bool, is_ssd_compatible, (WipeAlgorithm algo), (override));
     MOCK_METHOD(bool, supports_verification, (WipeAlgorithm algo), (override));
-    MOCK_METHOD(bool, cancel_current_operation, (), (override));
+    MOCK_METHOD(bool, cancel_operation, (const std::string& device_path), (override));
 
     // Helper: Create a nice mock with sensible defaults
     static std::shared_ptr<MockWipeService> CreateNiceMock() {
@@ -37,7 +37,8 @@ public:
         ON_CALL(*mock, supports_verification(testing::_)).WillByDefault(testing::Return(true));
         ON_CALL(*mock, wipe_disk(testing::_, testing::_, testing::_))
             .WillByDefault(testing::Return(true));
-        ON_CALL(*mock, cancel_current_operation()).WillByDefault(testing::Return(true));
+        ON_CALL(*mock, cancel_operation(testing::An<const std::string&>()))
+            .WillByDefault(testing::Return(true));
 
         return mock;
     }

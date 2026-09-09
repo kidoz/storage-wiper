@@ -421,12 +421,14 @@ void MainWindowContent::update_progress(const WipeProgress& progress) {
         progress_label_->set_text(status.str());
     }
 
-    // Show/hide progress elements
-    update_progress_visibility(!progress.is_complete);
+    // Show/hide progress elements. A progress with no total bytes is a
+    // placeholder (selected device not wiping) and stays hidden.
+    update_progress_visibility(!progress.is_complete && progress.total_bytes > 0);
 
     // Show/hide cancel button during operation
     if (cancel_button_) {
-        cancel_button_->set_visible(!progress.is_complete && !progress.has_error);
+        cancel_button_->set_visible(!progress.is_complete && !progress.has_error &&
+                                    progress.total_bytes > 0);
     }
 }
 
@@ -495,9 +497,11 @@ void MainWindowContent::update_operation_controls() {
     if (!view_model_)
         return;
 
-    const bool controls_enabled = view_model_->is_connected.get() &&
-                                  !view_model_->is_wipe_in_progress.get() &&
-                                  !view_model_->is_operation_pending.get();
+    // Wipes running on other devices must not lock the UI: the disk list and
+    // options stay interactive so further devices can be selected and wiped
+    // in parallel. The wipe button itself follows the per-device can_wipe.
+    const bool controls_enabled =
+        view_model_->is_connected.get() && !view_model_->is_operation_pending.get();
 
     if (disk_list_) {
         disk_list_->set_sensitive(controls_enabled);
@@ -520,9 +524,8 @@ void MainWindowContent::update_verification_control() {
         verification_check_->set_active(enabled);
     }
 
-    const bool controls_enabled = view_model_->is_connected.get() &&
-                                  !view_model_->is_wipe_in_progress.get() &&
-                                  !view_model_->is_operation_pending.get();
+    const bool controls_enabled =
+        view_model_->is_connected.get() && !view_model_->is_operation_pending.get();
     const bool available = view_model_->verification_available.get();
     verification_check_->set_sensitive(controls_enabled && available);
     verification_check_->set_tooltip_text(

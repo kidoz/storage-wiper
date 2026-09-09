@@ -11,6 +11,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
+#include <future>
+#include <thread>
 
 using ::testing::_;
 using ::testing::NiceMock;
@@ -186,17 +189,67 @@ TEST_F(MainViewModelTest, CancelCommand_DisabledWhenNotWiping) {
     EXPECT_FALSE(view_model->cancel_command->can_execute());
 }
 
-// Test: cancel_command enabled during wipe
+// Test: cancel_command enabled while the selected disk is wiping
 TEST_F(MainViewModelTest, CancelCommand_EnabledDuringWipe) {
-    EXPECT_CALL(*mock_disk_service, get_available_disks(testing::_)).WillOnce([](auto callback) {
-        callback(std::vector<DiskInfo>{});
-    });
+    std::vector<DiskInfo> disk_list;
+    disk_list.push_back(MockDiskService::CreateTestDisk("/dev/sda"));
+
+    ON_CALL(*mock_disk_service, get_available_disks(testing::_))
+        .WillByDefault([&disk_list](auto callback) { callback(disk_list); });
+
+    // Keep the mock wipe in flight until the test releases it, then report a
+    // completion so the ViewModel clears the active wipe.
+    std::promise<void> release;
+    ON_CALL(*mock_wipe_service, wipe_disk(testing::_, testing::_, testing::_))
+        .WillByDefault([&release](const std::string&, WipeAlgorithm, ProgressCallback callback) {
+            release.get_future().wait();
+            if (callback) {
+                WipeProgress done{};
+                done.is_complete = true;
+                callback(done);
+            }
+            return true;
+        });
 
     view_model->initialize();
     SimulateConnected();
-    view_model->is_wipe_in_progress.set(true);
+    view_model->select_disk("/dev/sda");
+    PumpMainLoop();
+
+    // Start the wipe through the public flow: wipe_command raises the
+    // confirmation dialog and the callback accepts it.
+    ASSERT_TRUE(view_model->wipe_command->can_execute());
+    view_model->wipe_command->execute();
+    PumpMainLoop();
+    const auto& message = view_model->current_message.get();
+    ASSERT_NE(message.type, MessageInfo::Type::ERROR);
+    if (message.confirmation_callback) {
+        message.confirmation_callback(true);
+    }
 
     EXPECT_TRUE(view_model->cancel_command->can_execute());
+
+    // A second wipe on another device is allowed while the first runs, but
+    // cancel does not apply to a device that is not wiping.
+    disk_list.push_back(MockDiskService::CreateTestDisk("/dev/sdb"));
+    view_model->select_disk("/dev/sdb");
+    PumpMainLoop();
+    EXPECT_TRUE(view_model->can_wipe.get());
+    EXPECT_FALSE(view_model->cancel_command->can_execute());
+
+    release.set_value();
+    // Let the wipe thread and completion idle callbacks run
+    std::this_thread::sleep_for(std::chrono::milliseconds{50});
+    PumpMainLoop();
+    std::this_thread::sleep_for(std::chrono::milliseconds{50});
+    PumpMainLoop();
+
+    // Once the wipe on /dev/sda finished, selecting it again allows a new
+    // wipe and cancel no longer applies to it.
+    view_model->select_disk("/dev/sda");
+    PumpMainLoop();
+    EXPECT_FALSE(view_model->cancel_command->can_execute());
+    EXPECT_TRUE(view_model->can_wipe.get());
 }
 
 // Test: algorithms observable is populated
@@ -289,4 +342,71 @@ TEST_F(MainViewModelTest, SelectedAlgorithm_HasDefaultValue) {
     auto algo = view_model->selected_algorithm.get();
     // Just check it has a valid value
     EXPECT_GE(static_cast<int>(algo), 0);
+}
+
+// ==========================================================================
+// controller_wide_warning
+// ==========================================================================
+
+TEST(MainViewModelScopeWarning, NvmeFirmwareEraseWarnsAboutOtherNamespaces) {
+    // Sanitize and Format NVM are controller-scoped, so the confirmation has
+    // to say that siblings of the selected namespace are erased too.
+    const auto warning =
+        MainViewModel::controller_wide_warning(WipeAlgorithm::ATA_SECURE_ERASE, "/dev/nvme0n1");
+
+    EXPECT_FALSE(warning.empty());
+    EXPECT_NE(warning.find("namespace"), std::string::npos);
+    EXPECT_NE(warning.find("/dev/nvme0n1"), std::string::npos);
+}
+
+TEST(MainViewModelScopeWarning, SataFirmwareEraseHasNoExtraScope) {
+    EXPECT_TRUE(MainViewModel::controller_wide_warning(WipeAlgorithm::ATA_SECURE_ERASE, "/dev/sda")
+                    .empty());
+}
+
+TEST(MainViewModelScopeWarning, SoftwareOverwriteOnNvmeHasNoExtraScope) {
+    // A software overwrite writes only to the selected namespace.
+    EXPECT_TRUE(
+        MainViewModel::controller_wide_warning(WipeAlgorithm::ZERO_FILL, "/dev/nvme0n1").empty());
+}
+
+// ==========================================================================
+// build_scope_note
+// ==========================================================================
+
+TEST(MainViewModelScopeNote, PartitionSiblingsAreSpared) {
+    DiskInfo disk{};
+    disk.path = "/dev/sda1";
+    disk.is_partition = true;
+    disk.parent_disk = "/dev/sda";
+    const auto note = MainViewModel::build_scope_note(disk, {});
+
+    EXPECT_FALSE(note.empty());
+    EXPECT_NE(note.find("only this partition"), std::string::npos);
+    EXPECT_NE(note.find("/dev/sda"), std::string::npos);
+}
+
+TEST(MainViewModelScopeNote, WholeDiskListsPartitions) {
+    DiskInfo disk{};
+    disk.path = "/dev/sda";
+    const auto note = MainViewModel::build_scope_note(disk, {"/dev/sda1", "/dev/sda2"});
+
+    EXPECT_FALSE(note.empty());
+    EXPECT_NE(note.find("/dev/sda1"), std::string::npos);
+    EXPECT_NE(note.find("/dev/sda2"), std::string::npos);
+    EXPECT_NE(note.find("partition table"), std::string::npos);
+}
+
+TEST(MainViewModelScopeNote, WholeDiskWithoutPartitionsHasNoNote) {
+    DiskInfo disk{};
+    disk.path = "/dev/sdb";
+    EXPECT_TRUE(MainViewModel::build_scope_note(disk, {}).empty());
+}
+
+TEST(MainViewModelScopeNote, PartitionWithoutParentHasNoNote) {
+    DiskInfo disk{};
+    disk.path = "/dev/sda1";
+    disk.is_partition = true;
+    const auto note = MainViewModel::build_scope_note(disk, {});
+    EXPECT_TRUE(note.empty());
 }

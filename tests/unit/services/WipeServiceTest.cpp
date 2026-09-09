@@ -11,7 +11,11 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <atomic>
+#include <fstream>
 #include <future>
+#include <iterator>
 #include <thread>
 
 class WipeServiceTest : public ::testing::Test {
@@ -35,10 +39,7 @@ protected:
     }
 
     void TearDown() override {
-        // Ensure any ongoing operation is cancelled
-        if (wipe_service) {
-            wipe_service->cancel_current_operation();
-        }
+        // The destructor cancels in-flight operations and joins their threads
         wipe_service.reset();
     }
 };
@@ -75,7 +76,79 @@ TEST_F(WipeServiceTest, IsSsdCompatible_ReturnsCorrectValues) {
 
 // Test: cancel operation when nothing running
 TEST_F(WipeServiceTest, CancelOperation_ReturnsFalseWhenNotRunning) {
-    EXPECT_FALSE(wipe_service->cancel_current_operation());
+    EXPECT_FALSE(wipe_service->cancel_operation("/dev/nonexistent_device"));
+}
+
+// Test: wipes on different devices run in parallel; a second wipe on the same
+// device is rejected while the first is in flight
+TEST_F(WipeServiceTest, ParallelWipes_AcceptedPerDevice) {
+    TempTestFile file_a;
+    TempTestFile file_b;
+    ASSERT_TRUE(file_a.valid());
+    ASSERT_TRUE(file_b.valid());
+    constexpr uint64_t SIZE = 1'000'000;
+    ASSERT_TRUE(file_a.resize(SIZE));
+    ASSERT_TRUE(file_b.resize(SIZE));
+
+    auto make_disk = [](const std::string& path) {
+        DiskInfo info{};
+        info.path = path;
+        info.size_bytes = SIZE;
+        return info;
+    };
+    ON_CALL(*disk_service, get_available_disks_blocking())
+        .WillByDefault(testing::Return(
+            std::vector<DiskInfo>{make_disk(file_a.path()), make_disk(file_b.path())}));
+
+    std::atomic<int> completions{0};
+    ProgressCallback callback = [this, &completions](const WipeProgress& progress) {
+        std::lock_guard lock(progress_mutex);
+        captured_progress.push_back(progress);
+        if (progress.is_complete) {
+            ++completions;
+        }
+    };
+
+    EXPECT_TRUE(wipe_service->wipe_disk(file_a.path(), WipeAlgorithm::ZERO_FILL, callback));
+    EXPECT_TRUE(wipe_service->wipe_disk(file_b.path(), WipeAlgorithm::ZERO_FILL, callback));
+
+    // The mock bypasses the device whitelist, so each worker fails fast on
+    // BLKGETSIZE64 for a regular file; both operations must still report a
+    // completion from their own thread.
+    EXPECT_TRUE(ThreadingTestHelper::WaitUntil([&] {
+        return !wipe_service->is_operation_in_progress(file_a.path()) &&
+               !wipe_service->is_operation_in_progress(file_b.path());
+    }));
+    EXPECT_EQ(completions.load(), 2);
+}
+
+// Test: a device can be wiped again after its previous wipe finished
+TEST_F(WipeServiceTest, SequentialWipes_OnSameDevice_AreAccepted) {
+    TempTestFile file;
+    ASSERT_TRUE(file.valid());
+    constexpr uint64_t SIZE = 500'000;
+    ASSERT_TRUE(file.resize(SIZE));
+
+    ON_CALL(*disk_service, get_available_disks_blocking())
+        .WillByDefault(testing::Return(
+            std::vector<DiskInfo>{MockDiskService::CreateTestDisk(file.path(), SIZE)}));
+
+    std::atomic<int> completions{0};
+    ProgressCallback callback = [&](const WipeProgress& progress) {
+        if (progress.is_complete) {
+            ++completions;
+        }
+    };
+
+    EXPECT_TRUE(wipe_service->wipe_disk(file.path(), WipeAlgorithm::ZERO_FILL, callback));
+    EXPECT_TRUE(ThreadingTestHelper::WaitUntil(
+        [&] { return !wipe_service->is_operation_in_progress(file.path()); }));
+
+    EXPECT_TRUE(wipe_service->wipe_disk(file.path(), WipeAlgorithm::ZERO_FILL, callback));
+    EXPECT_TRUE(ThreadingTestHelper::WaitUntil(
+        [&] { return !wipe_service->is_operation_in_progress(file.path()); }));
+
+    EXPECT_EQ(completions.load(), 2);
 }
 
 // Test: destructor doesn't hang without operations
