@@ -209,16 +209,17 @@ TEST_F(MainViewModelTest, CancelCommand_EnabledDuringWipe) {
     // Keep the mock wipe in flight until the test releases it, then report a
     // completion so the ViewModel clears the active wipe.
     std::promise<void> release;
-    ON_CALL(*mock_wipe_service, wipe_disk(testing::_, testing::_, testing::_))
-        .WillByDefault([&release](const std::string&, WipeAlgorithm, ProgressCallback callback) {
-            release.get_future().wait();
-            if (callback) {
-                WipeProgress done{};
-                done.is_complete = true;
-                callback(done);
-            }
-            return true;
-        });
+    ON_CALL(*mock_wipe_service, wipe_disk(testing::_, testing::_, testing::_, testing::_))
+        .WillByDefault(
+            [&release](const std::string&, WipeAlgorithm, ProgressCallback callback, bool) {
+                release.get_future().wait();
+                if (callback) {
+                    WipeProgress done{};
+                    done.is_complete = true;
+                    callback(done);
+                }
+                return true;
+            });
 
     view_model->initialize();
     SimulateConnected();
@@ -421,7 +422,7 @@ TEST(MainViewModelScopeNote, PartitionWithoutParentHasNoNote) {
 }
 
 TEST_F(MainViewModelTest, SavesPresetForEveryParallelStartUsingConfirmedSettings) {
-    EXPECT_CALL(*mock_wipe_service, wipe_disk(_, _, _)).Times(2).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mock_wipe_service, wipe_disk(_, _, _, _)).Times(2).WillRepeatedly(Return(true));
     ON_CALL(*mock_wipe_service, supports_verification(_)).WillByDefault(Return(true));
     std::vector<util::AppSettingsData> saved;
     view_model->set_settings_save_callback(
@@ -447,7 +448,7 @@ TEST_F(MainViewModelTest, SavesPresetForEveryParallelStartUsingConfirmedSettings
 TEST_F(MainViewModelTest, RejectedStartDoesNotSavePreset) {
     int saves = 0;
     view_model->set_settings_save_callback([&](const auto&) { ++saves; });
-    ON_CALL(*mock_wipe_service, wipe_disk(_, _, _)).WillByDefault(Return(false));
+    ON_CALL(*mock_wipe_service, wipe_disk(_, _, _, _)).WillByDefault(Return(false));
     view_model->select_disk("/dev/sda");
     view_model->confirm_wipe();
     ASSERT_TRUE(wait_for([&] { return !view_model->is_wipe_in_progress.get(); }));
@@ -462,7 +463,7 @@ TEST_F(MainViewModelTest, HardwareEraseOfPartitionIsRejectedBeforeConfirmation) 
     view_model->disks.set({partition});
     view_model->select_disk(partition.path);
     view_model->select_algorithm(WipeAlgorithm::ATA_SECURE_ERASE);
-    EXPECT_CALL(*mock_wipe_service, wipe_disk(_, _, _)).Times(0);
+    EXPECT_CALL(*mock_wipe_service, wipe_disk(_, _, _, _)).Times(0);
     view_model->wipe_command->execute();
     EXPECT_EQ(view_model->current_message.get().type, MessageInfo::Type::ERROR);
     EXPECT_NE(view_model->current_message.get().message.find("partition"), std::string::npos);
@@ -481,8 +482,8 @@ TEST_F(MainViewModelTest, CertificateRetainsMultiPassCountAndBadSectors) {
     view_model->select_disk("/dev/sda");
     view_model->select_algorithm(WipeAlgorithm::VSITR);
     ON_CALL(*mock_wipe_service, get_pass_count(WipeAlgorithm::VSITR)).WillByDefault(Return(7));
-    EXPECT_CALL(*mock_wipe_service, wipe_disk(_, WipeAlgorithm::VSITR, _))
-        .WillOnce([](const auto&, auto, auto callback) {
+    EXPECT_CALL(*mock_wipe_service, wipe_disk(_, WipeAlgorithm::VSITR, _, _))
+        .WillOnce([](const auto&, auto, auto callback, bool) {
             WipeProgress complete{};
             complete.is_complete = true;
             complete.bad_block_count = 4;
@@ -517,8 +518,8 @@ TEST_F(MainViewModelTest, DisconnectFailureClearsActiveWipeWithoutWritingCertifi
     view_model->set_certificate_directory(directory);
     SimulateConnected();
     view_model->select_disk("/dev/sda");
-    EXPECT_CALL(*mock_wipe_service, wipe_disk(_, _, _))
-        .WillOnce([](const auto&, auto, auto callback) {
+    EXPECT_CALL(*mock_wipe_service, wipe_disk(_, _, _, _))
+        .WillOnce([](const auto&, auto, auto callback, bool) {
             WipeProgress failure{};
             failure.is_complete = true;
             failure.has_error = true;
@@ -533,4 +534,43 @@ TEST_F(MainViewModelTest, DisconnectFailureClearsActiveWipeWithoutWritingCertifi
     EXPECT_EQ(view_model->current_message.get().type, MessageInfo::Type::ERROR);
     view_model->select_disk("/dev/sda");
     EXPECT_TRUE(view_model->can_wipe.get());
+}
+
+TEST_F(MainViewModelTest, ForwardsVerificationToWipeService) {
+    std::promise<bool> requested;
+    auto result = requested.get_future();
+    EXPECT_CALL(*mock_wipe_service, wipe_disk("/dev/sda", WipeAlgorithm::ZERO_FILL, _, true))
+        .WillOnce([&](const auto&, auto, auto, bool verify) {
+            requested.set_value(verify);
+            return true;
+        });
+    view_model->select_disk("/dev/sda");
+    view_model->verification_available.set(true);
+    view_model->verification_enabled.set(true);
+    view_model->confirm_wipe();
+    ASSERT_EQ(result.wait_for(std::chrono::seconds{2}), std::future_status::ready);
+    EXPECT_TRUE(result.get());
+}
+
+TEST_F(MainViewModelTest, DuplicateConfirmationPreservesRunningWipeAndCompletion) {
+    std::promise<ProgressCallback> started;
+    auto result = started.get_future();
+    EXPECT_CALL(*mock_wipe_service, wipe_disk("/dev/sda", _, _, _))
+        .Times(1)
+        .WillOnce([&](const auto&, auto, auto callback, bool) {
+            started.set_value(std::move(callback));
+            return true;
+        });
+    view_model->select_disk("/dev/sda");
+    view_model->confirm_wipe();
+    ASSERT_EQ(result.wait_for(std::chrono::seconds{2}), std::future_status::ready);
+    auto progress_callback = result.get();
+    view_model->confirm_wipe();
+    EXPECT_TRUE(view_model->is_wipe_in_progress.get());
+    WipeProgress complete{};
+    complete.is_complete = true;
+    complete.percentage = 100.0;
+    progress_callback(complete);
+    ASSERT_TRUE(wait_for([&] { return !view_model->is_wipe_in_progress.get(); }));
+    EXPECT_TRUE(view_model->wipe_progress.get().is_complete);
 }

@@ -17,6 +17,10 @@ public:
     MOCK_METHOD(bool, wipe_disk,
                 (const std::string& disk_path, WipeAlgorithm algorithm, ProgressCallback callback),
                 (override));
+    MOCK_METHOD(bool, wipe_disk,
+                (const std::string& disk_path, WipeAlgorithm algorithm, ProgressCallback callback,
+                 bool verify),
+                (override));
     MOCK_METHOD(std::string, get_algorithm_name, (WipeAlgorithm algo), (override));
     MOCK_METHOD(std::string, get_algorithm_description, (WipeAlgorithm algo), (override));
     MOCK_METHOD(int, get_pass_count, (WipeAlgorithm algo), (override));
@@ -36,6 +40,8 @@ public:
         ON_CALL(*mock, is_ssd_compatible(testing::_)).WillByDefault(testing::Return(true));
         ON_CALL(*mock, supports_verification(testing::_)).WillByDefault(testing::Return(true));
         ON_CALL(*mock, wipe_disk(testing::_, testing::_, testing::_))
+            .WillByDefault(testing::Return(true));
+        ON_CALL(*mock, wipe_disk(testing::_, testing::_, testing::_, testing::_))
             .WillByDefault(testing::Return(true));
         ON_CALL(*mock, cancel_operation(testing::An<const std::string&>()))
             .WillByDefault(testing::Return(true));

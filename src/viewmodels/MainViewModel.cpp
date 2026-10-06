@@ -393,7 +393,9 @@ void MainViewModel::confirm_wipe_for(const std::string& path, WipeAlgorithm algo
     activity.started_at = std::chrono::system_clock::now();
     activity.started_steady = std::chrono::steady_clock::now();
     activity.peak_speed = 0;
-    active_wipes_[path] = activity;
+    if (!active_wipes_.try_emplace(path, activity).second) {
+        return;
+    }
     is_wipe_in_progress.set(true);
     update_can_wipe();
     cancel_command->raise_can_execute_changed();
