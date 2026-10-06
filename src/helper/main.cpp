@@ -439,15 +439,17 @@ void handle_start_wipe(GDBusMethodInvocation* invocation, GVariant* parameters) 
             payload);
     };
 
-    const bool started =
-        g_wipe_service->wipe_disk(device, algorithm, progress_callback, verify != FALSE);
+    const auto started =
+        g_wipe_service->start_wipe(device, algorithm, progress_callback, verify != FALSE);
     if (!started) {
         g_dbus_method_invocation_return_value(
-            invocation, g_variant_new("(bs)", FALSE, "Failed to start wipe operation"));
+            invocation, g_variant_new(dbus_signatures::START_WIPE_REPLY, FALSE,
+                                      started.error().message.c_str()));
         return;
     }
 
-    g_dbus_method_invocation_return_value(invocation, g_variant_new("(bs)", TRUE, ""));
+    g_dbus_method_invocation_return_value(
+        invocation, g_variant_new(dbus_signatures::START_WIPE_REPLY, TRUE, ""));
 }
 
 /**

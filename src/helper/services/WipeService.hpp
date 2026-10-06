@@ -27,12 +27,20 @@ public:
     auto wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm, ProgressCallback callback,
                    bool verify) -> bool override;
 
+    // The helper uses this result to return a specific start rejection reason.
+    [[nodiscard]] auto start_wipe(const std::string& disk_path, WipeAlgorithm algorithm,
+                                  ProgressCallback callback, bool verify)
+        -> std::expected<void, util::Error>;
+
     [[nodiscard]] auto supports_verification(WipeAlgorithm algo) -> bool override;
     [[nodiscard]] auto get_algorithm_name(WipeAlgorithm algo) -> std::string override;
     [[nodiscard]] auto get_algorithm_description(WipeAlgorithm algo) -> std::string override;
     [[nodiscard]] auto get_pass_count(WipeAlgorithm algo) -> int override;
     [[nodiscard]] auto is_ssd_compatible(WipeAlgorithm algo) -> bool override;
     auto cancel_operation(const std::string& device_path) -> bool override;
+
+protected:
+    virtual auto create_worker_thread(std::function<void()> worker) -> std::thread;
 
 private:
     static constexpr auto SHUTDOWN_TIMEOUT = std::chrono::seconds{5};
@@ -91,11 +99,11 @@ private:
      * @param disk_path Path to the device
      * @param algorithm Wipe algorithm to use
      * @param callback Progress callback
-     * @return WipePreparation if valid, nullopt if validation failed (error already reported)
+     * @return WipePreparation if valid, otherwise the start rejection reason
      */
     [[nodiscard]] auto prepare_wipe(const std::string& disk_path, WipeAlgorithm algorithm,
                                     const ProgressCallback& callback)
-        -> std::optional<WipePreparation>;
+        -> std::expected<WipePreparation, util::Error>;
 
     /**
      * @brief Build completion status based on wipe and verification results

@@ -235,4 +235,32 @@ TEST(WriteHelpersIoTest, FailedPositionRestoreAbortsWrite) {
     close(fd);
 }
 
+TEST_F(WipeServiceIoTest, ThreadCreationFailureReleasesSlotAndAllowsRetry) {
+    class FailingWorkerService : public WipeService {
+    public:
+        using WipeService::WipeService;
+        bool fail = true;
+
+    protected:
+        auto create_worker_thread(std::function<void()> worker) -> std::thread override {
+            if (fail) {
+                throw std::system_error(
+                    std::make_error_code(std::errc::resource_unavailable_try_again));
+            }
+            return WipeService::create_worker_thread(std::move(worker));
+        }
+    } instance{disks};
+    const auto rejected = instance.start_wipe(TARGET, WipeAlgorithm::ZERO_FILL, callback(), false);
+    ASSERT_FALSE(rejected);
+    EXPECT_NE(rejected.error().message.find("Failed to start wipe worker"), std::string::npos);
+    EXPECT_FALSE(instance.is_operation_in_progress(TARGET));
+    ASSERT_EQ(progress.size(), 1u);
+    EXPECT_TRUE(progress.back().is_complete);
+    EXPECT_TRUE(progress.back().has_error);
+    instance.fail = false;
+    ASSERT_TRUE(instance.wipe_disk(TARGET, WipeAlgorithm::ZERO_FILL, callback()));
+    EXPECT_TRUE(
+        ThreadingTestHelper::WaitUntil([&] { return !instance.is_operation_in_progress(TARGET); }));
+}
+
 }  // namespace
