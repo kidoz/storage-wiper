@@ -566,7 +566,9 @@ void on_bus_acquired(GDBusConnection* /*connection*/, const gchar* /*name*/,
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     // Initialize logger for helper daemon
-    util::Logger::instance().initialize("/var/log/storage-wiper", "storage-wiper-helper");
+    if (!util::Logger::instance().initialize("/var/log/storage-wiper", "storage-wiper-helper")) {
+        util::Logger::instance().set_console_output(true);
+    }
 
     // Check if running as root
     if (getuid() != 0) {

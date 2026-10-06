@@ -316,7 +316,7 @@ cli-help: build-cli
 
 # View helper logs
 logs-helper:
-    sudo tail -f /var/log/storage-wiper/*.log 2>/dev/null || echo "No helper logs found (run 'sudo mkdir -p /var/log/storage-wiper' to create directory)"
+    sudo tail -f /var/log/storage-wiper/storage-wiper-helper.log 2>/dev/null || echo "No helper logs found"
 
 # View GUI logs
 logs-gui:

@@ -41,6 +41,8 @@ DeviceAllow=char-* rw
 ReadOnlyPaths=/sys
 
 # Logging
+LogsDirectory=storage-wiper
+LogsDirectoryMode=0750
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=storage-wiper-helper
