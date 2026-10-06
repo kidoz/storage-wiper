@@ -260,7 +260,7 @@ pkg-arch:
 
 # Install Arch Linux package (release)
 pkg-arch-install: pkg-arch
-    cd packaging/archlinux && sudo pacman -U storage-wiper-[0-9]*.pkg.tar.zst
+    cd packaging/archlinux && makepkg --packagelist | xargs -r sudo pacman -U
 
 # Build Arch Linux package (git version from local repo)
 pkg-arch-git:
@@ -268,7 +268,7 @@ pkg-arch-git:
 
 # Install Arch Linux package (git version)
 pkg-arch-git-install: pkg-arch-git
-    cd packaging/archlinux && sudo pacman -U storage-wiper-git-*.pkg.tar.zst
+    cd packaging/archlinux && makepkg -p PKGBUILD-git --packagelist | xargs -r sudo pacman -U
 
 # Clean Arch Linux package build artifacts
 pkg-arch-clean:
