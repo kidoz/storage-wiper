@@ -67,7 +67,7 @@
       ValidateDevicePath:
       Check if a device path is valid and safe to wipe.
 
-      Authorization: none (informational only)
+      Authorization: su.kidoz.storage_wiper.list-disks
     -->
     <method name="ValidateDevicePath">
       <arg name="path" type="s" direction="in"/>
@@ -102,7 +102,7 @@
       GetAlgorithms:
       Returns list of available wipe algorithms.
 
-      Authorization: none (informational only)
+      Authorization: su.kidoz.storage_wiper.list-disks
     -->
     <method name="GetAlgorithms">
       <arg name="algorithms" type="a(ussi)" direction="out"/>
