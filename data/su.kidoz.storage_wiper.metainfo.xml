@@ -36,11 +36,7 @@
   <screenshots>
     <screenshot type="default">
       <caption>Main window showing available disks and wipe algorithms</caption>
-      <image>https://raw.githubusercontent.com/kidoz/storage-wiper/main/data/screenshots/main-window.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>Wipe operation in progress with real-time status</caption>
-      <image>https://raw.githubusercontent.com/kidoz/storage-wiper/main/data/screenshots/wipe-progress.png</image>
+      <image>https://raw.githubusercontent.com/kidoz/storage-wiper/main/docs/images/main.png</image>
     </screenshot>
   </screenshots>
 
