@@ -1,502 +1,87 @@
 # Storage Wiper
 
-A modern, secure disk wiping application built with GTK4 and libadwaita for Linux systems. Features multiple DoD-compliant wiping algorithms and a clean, intuitive interface.
+Storage Wiper is a Linux application for erasing storage devices, with a
+GTK4/libadwaita interface and a command-line client. Both clients run as a normal
+user and communicate with a privileged helper over D-Bus; polkit authorizes
+device operations.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)
-![GTK4](https://img.shields.io/badge/GTK-4.0+-green.svg)
+![GTK4](https://img.shields.io/badge/GTK-4-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)
+
+**Wiping permanently destroys data.** Confirm the device identity and operation
+scope before starting. Learn the application with the read-only tutorials first.
+
+## Documentation
+
+Start at the [documentation home](docs/README.md). The documentation follows
+[Diátaxis](https://diataxis.fr/), with separate routes for learning, completing
+tasks, looking up facts, and understanding the design.
+
+| Your goal | Start here |
+| --- | --- |
+| Build the project and try its simulated tests | [Build and explore](docs/tutorials/build_and_explore.md) |
+| Learn to inspect disks without wiping them | [Inspect devices](docs/tutorials/inspect_devices.md) |
+| Install the application and helper | [Install](docs/how_to/install.md) |
+| Erase a selected device | [Wipe a device](docs/how_to/wipe_device.md) |
+| Look up CLI flags or algorithm support | [CLI](docs/reference/cli.md) · [Algorithms](docs/reference/algorithms.md) |
+| Understand privilege separation and wipe scope | [Architecture](docs/explanation/architecture.md) · [Device scope](docs/explanation/device_scope.md) |
 
 ## Features
 
-- 🔒 **8 Secure Wiping Algorithms** (labeled with their NIST SP 800-88 category)
-  - Zero Fill (1-pass, Clear)
-  - Random Fill (1-pass, Clear)
-  - DoD 5220.22-M (3-pass, Clear)
-  - Bruce Schneier (7-pass, Clear)
-  - VSITR German Standard (7-pass, Clear)
-  - GOST R 50739-95 Russian Standard (2-pass, Clear)
-  - Peter Gutmann (35-pass, Clear)
-  - Hardware Secure Erase (firmware-based, NIST 800-88 Purge)
-    - SATA: ATA Security Erase (enhanced erase when supported)
-    - NVMe: Sanitize (crypto erase → block erase → overwrite) or Format NVM
-      with cryptographic erase
-
-- 📜 **Wipe Certificates**
-  - JSON + text certificate after each successful GUI wipe
-    (`~/.local/share/storage-wiper/certificates/`)
-  - CLI: `--certificate <path>` for scripted audit trails
-  - Records device identity (model/serial), algorithm, NIST 800-88 category,
-    timing, throughput, and verification verdict
-
-- 💾 **Smart Disk Detection**
-  - Automatic SSD vs HDD detection
-  - NVMe drive support
-  - Mount status warnings
-  - LVM Physical Volume support (with logical volume exclusion)
-  - Size and model information display
-  - SMART health status (reallocated/pending sectors, temperature, power-on hours)
-  - SSD and NVMe wear level, plus NVMe spare capacity
-  - eMMC life-time estimate from the EXT_CSD registers
-
-- 🧩 **Partition-Level Wiping**
-  - Partitions are listed next to their disk and can be wiped individually
-  - Wiping a partition leaves the partition table and sibling partitions intact
-  - Scope of each wipe is stated in the confirmation dialog
-  - SMART health is inherited from the partition's parent disk
-  - Hardware Secure Erase requires a whole disk; NVMe erases also require all
-    namespaces on the controller to be unmounted and free of overlapping wipes
-
-- 🔀 **Multi-Disk Parallel Wiping**
-  - Wipe several devices at the same time from one helper connection
-  - Progress, verification, cancellation, and certificates are per device
-  - The GUI tracks every wipe in flight; the progress area follows the
-    selected disk
-  - CLI users can simply start one process per device
-  - A device can only host one wipe at a time; other devices are unaffected
-
-- 🛠 **Resilient Wipe Engine**
-  - Bad-sector tolerance: failing drives are wiped as far as possible and the
-    number of unwritable sectors is reported at completion and in certificates
-  - Automatic TRIM/discard (BLKDISCARD) after successful SSD wipes to restore
-    performance - issued after verification so it never masks the result
-  - Remembers the last-used algorithm and verification choice for the next start
-
-- ✅ **Post-Wipe Verification** (optional)
-  - Zero Fill: reads back and checks all zeros
-  - Random Fill and DoD: chi-squared entropy test on the final pass
-
-- ⌨️ **Command-Line Interface** (`storage-wiper-cli`)
-  - List disks (plain or JSON output)
-  - Scripted wiping with any algorithm, optional verification
-  - Terminal progress bar with speed and ETA
-
-- 🎨 **Modern GTK4/Adwaita Interface**
-  - Native GNOME integration
-  - Adaptive and responsive design
-  - Real-time progress reporting
-  - Destructive action confirmations
-
-- 🏗️ **Clean Architecture**
-  - Model-View-ViewModel (MVVM) pattern
-  - Dependency injection
-  - Interface-based design
-  - Modern C++23 codebase
-  - D-Bus privilege separation
-
-## Screenshots
-
-[![Storage Wiper Main Interface](docs/images/main.png)](docs/images/main.png)
-
-*Storage Wiper showing disk selection with NVMe drives and wiping algorithm options*
-
-## Requirements
-
-### Runtime Dependencies
-- GTK4 (≥ 4.0)
-- gtkmm-4.0 (≥ 4.6)
-- libadwaita-1 (≥ 1.0)
-- Linux kernel with `/sys/block` support
-- D-Bus system bus
-- polkit (for privilege escalation)
-
-### Build Dependencies
-- Meson (≥ 0.59.0)
-- Ninja build system
-- g++ or clang++ with C++23 support
-- pkg-config
-- GTK4 development files
-- gtkmm-4.0 development files
-- libadwaita development files
-
-### Optional (for development)
-- [just](https://github.com/casey/just) (command runner - highly recommended)
-- clang-tidy (static analysis)
-- cppcheck (bug detection)
-- entr (file watcher for auto-rebuild)
-
-## Installation
-
-### Arch Linux
-
-```bash
-# Install dependencies
-sudo pacman -S gtk4 gtkmm-4.0 libadwaita meson ninja gcc pkgconf just
-
-# Clone repository
-git clone https://github.com/kidoz/storage-wiper.git
-cd storage-wiper
-
-# Build using just (recommended)
-just build
-
-# Or build with Meson directly
-meson setup builddir
-meson compile -C builddir
-
-# Install (optional)
-sudo meson install -C builddir
-```
-
-### Other Distributions
-
-**Debian/Ubuntu:**
-```bash
-sudo apt install libgtk-4-dev libgtkmm-4.0-dev libadwaita-1-dev meson ninja-build g++ pkg-config
-meson setup builddir
-meson compile -C builddir
-```
-
-**Fedora:**
-```bash
-sudo dnf install gtk4-devel gtkmm4.0-devel libadwaita-devel meson ninja-build gcc-c++ pkgconfig
-meson setup builddir
-meson compile -C builddir
-```
-
-## Usage
-
-⚠️ **WARNING**: This tool permanently destroys data. Use with extreme caution!
-
-```bash
-# Run with just (recommended)
-just run
-
-# Or run the application directly (D-Bus helper handles privileged operations)
-./builddir/storage_wiper
-
-# Run via pkexec (alternative authentication method)
-just run-pkexec
-```
-
-**Note**: The application uses D-Bus with privilege separation. The GUI runs unprivileged, while the `storage-wiper-helper` daemon handles disk operations with appropriate permissions via polkit.
-
-**Workflow:**
-1. Select your target disk from the list
-2. Choose a wiping algorithm
-3. Confirm the destructive action
-4. Monitor progress
-
-### Development Commands
-
-```bash
-just              # Show all available commands
-just build        # Build release
-just build-debug  # Build debug
-just run-inspect  # Run with GTK inspector
-just watch        # Auto-rebuild on file changes (requires entr)
-just lint         # Run clang-tidy
-just cppcheck     # Run cppcheck
-just format       # Format code with clang-format
-just format-check # Check formatting (CI-friendly)
-
-# Testing
-just test         # Run all unit tests
-just test-verbose # Run tests with detailed output
-just test-filter "Pattern"  # Run specific tests
-
-# Device I/O simulations and isolated D-Bus regression tests
-meson test -C build device_io_tests dbus_client_tests
-
-# Memory analysis
-just valgrind     # Check for memory leaks
-```
-
-### Command-Line Interface
-
-The `storage-wiper-cli` executable provides scripted access to all wiping functionality:
-
-```bash
-# List available disks
-storage-wiper-cli --list
-storage-wiper-cli --list --json
-
-# Wipe a disk
-storage-wiper-cli --wipe /dev/sdb --algorithm dod-5220-22-m
-storage-wiper-cli --wipe /dev/sdb --verify          # With post-wipe verification
-storage-wiper-cli --wipe /dev/sdb --force-unmount   # Unmount before wiping
-storage-wiper-cli --wipe /dev/sdb --yes             # Skip confirmation
-storage-wiper-cli --wipe /dev/sdb --certificate /tmp/report   # Write report.json/.txt
-
-# Help
-storage-wiper-cli --help
-```
-
-Algorithm names: `zero-fill` (default), `random-fill`, `dod-5220-22-m`, `schneier`, `vsitr`, `gost`, `gutmann`, `ata-secure-erase` (alias: `hardware-secure-erase`).
-
-## Partition Wiping
-
-`storage-wiper-cli --list` (and the GUI disk list) shows the partitions of
-every disk directly after the disk itself, marked as partitions. A partition
-can be wiped like a disk:
-
-```bash
-storage-wiper-cli --wipe /dev/sda1 --force-unmount
-```
-
-Wiping a partition erases only that partition's data area - the partition
-table and sibling partitions are not touched. Wiping the whole disk still
-erases everything, including the partition table. Both CLI and GUI state the
-scope in the confirmation step before anything destructive happens.
-
-## Bad Sectors and SSD TRIM
-
-If a drive refuses writes during a wipe (bad sectors), the wipe does not
-abort: each 512-byte sector is retried, unwritable sectors are skipped and
-counted, and the completion status plus certificate report how many sectors
-could not be overwritten. Data in skipped sectors may survive, which is why
-the count is surfaced rather than hidden.
-
-After a successful wipe of a non-rotational device, the helper issues
-`BLKDISCARD` (TRIM) over the whole device so the SSD can reclaim performance.
-The discard runs after read-back verification, so it can never influence the
-verdict, and it is skipped silently on devices that do not support it.
-
-## Wipe Certificates
-
-Every successful GUI wipe writes a certificate pair to
-`~/.local/share/storage-wiper/certificates/` (`.json` for machines, `.txt` for
-people). The CLI writes one on demand via `--certificate <path>`: if *path* is
-an existing directory (or ends with `/`), an auto-named pair is placed there;
-otherwise `<path>.json` and `<path>.txt` are written.
-
-Certificates include the device identity (path, model, serial, size), the
-algorithm and its NIST SP 800-88 media sanitization category, start/completion
-timestamps, duration, peak throughput, and the verification verdict.
-
-## LVM and Device-Mapper Handling
-
-Storage Wiper uses a **hybrid approach** for LVM environments:
-
-✅ **Shows physical disks** - Including disks that are LVM Physical Volumes (PVs)
-- Examples: `/dev/sda`, `/dev/nvme0n1`
-- These can be wiped to destroy LVM configurations
-
-❌ **Hides logical volumes** - Device-mapper devices are excluded
-- Examples: `/dev/mapper/vg-lv`, `/dev/dm-0`
-- Use `lvremove`, `vgremove`, `pvremove` first
-
-**Recommended workflow:**
-```bash
-# 1. Remove LVM structures
-sudo lvremove /dev/vg_name/lv_name
-sudo vgremove vg_name
-sudo pvremove /dev/sda1
-
-# 2. Wipe the physical disk
-./storage_wiper
-```
-
-## Security Considerations
-
-- ✅ D-Bus privilege separation (GUI runs unprivileged)
-- ✅ Polkit-based privilege escalation
-- ✅ Device path whitelist validation
-- ✅ Mount status checking
-- ✅ Destructive action confirmations
-- ✅ Virtual device filtering (loop, ram, dm-)
-- ✅ O_SYNC flag to bypass write caching
-- ✅ Thread-safe operation cancellation
-
-## Algorithm Comparison
-
-| Algorithm                | Passes | Best For                        | Speed   |
-|--------------------------|--------|---------------------------------|---------|
-| Zero Fill                | 1      | Quick wipe, SSDs                | ⚡⚡⚡ |
-| Random Fill              | 1      | Basic security                  | ⚡⚡⚡ |
-| GOST R 50739-95          | 2      | Russian compliance              | ⚡⚡   |
-| DoD 5220.22-M            | 3      | Government standard             | ⚡⚡   |
-| Schneier                 | 7      | High security                   | ⚡     |
-| VSITR                    | 7      | German compliance               | ⚡     |
-| Gutmann                  | 35     | Maximum paranoia                | 🐌     |
-| Hardware Secure Erase    | N/A    | SSDs/NVMe (firmware-based, Purge) | ⚡⚡⚡ |
-
-**Note**: For modern SSDs, Hardware Secure Erase or a single-pass wipe
-(Zero/Random) is generally sufficient due to wear-leveling and internal
-architecture. On NVMe drives, Sanitize crypto erase is instant, causes no
-flash wear, and reaches areas software overwrite cannot.
+- Eight algorithms: Zero Fill, Random Fill, DoD 5220.22-M, Gutmann, Schneier,
+  VSITR, GOST R 50739-95, and hardware secure erase.
+- ATA Security Erase and NVMe Sanitize, with cryptographic Format NVM as an
+  NVMe fallback when supported.
+- Whole-disk and partition selection, mount checks, and explicit scope
+  confirmation. Hardware erase requires a whole disk and can affect every NVMe
+  namespace on a controller.
+- Concurrent wipes on independent devices, with progress and cancellation
+  tracked per device.
+- Optional readback verification for Zero Fill, Random Fill, and DoD.
+- SMART health information for supported ATA, SCSI/SAT, NVMe, and eMMC devices.
+- Bad-sector reporting and discard after successful SSD wipes, following
+  verification when enabled.
+- JSON and text wipe certificates, generated automatically by the GUI and on
+  request by the CLI.
+- JSON device listings for scripts and saved GUI algorithm/verification
+  preferences.
+
+The application's Clear/Purge labels describe its algorithm categories. They
+are not an independent certification of a particular device or sanitization
+procedure; see [sanitization and verification](docs/explanation/sanitization.md).
+
+## Screenshot
+
+[![Storage Wiper disk selection and algorithms](docs/images/main.png)](docs/images/main.png)
 
 ## Development
 
-### Building with Linters
+The project uses C++23, Meson, Google Test/Mock, and a Model-View-ViewModel
+architecture. It builds three executables: `storage_wiper`,
+`storage-wiper-cli`, and `storage-wiper-helper`.
 
-```bash
-# Enable clang-tidy
-meson setup builddir -Denable_clang_tidy=true
-meson compile -C builddir
-meson compile -C builddir clang-tidy
+- [Build requirements and options](docs/reference/build.md)
+- [Run tests and quality checks](docs/how_to/run_checks.md)
+- [Build Arch Linux packages](docs/how_to/package_archlinux.md)
+- [Write documentation](docs/how_to/write_documentation.md)
 
-# Enable cppcheck
-meson setup builddir -Denable_cppcheck=true
-meson compile -C builddir
-meson compile -C builddir cppcheck
+HPA/DCO hidden-area detection and named wiping profiles are planned. Current
+scope and hardware limitations are documented in
+[device scope](docs/explanation/device_scope.md).
 
-# Clean and reconfigure
-rm -rf builddir
-meson setup builddir
-```
+## Contributing and support
 
-### Architecture
+Keep changes focused, follow the surrounding code style, and add regression
+coverage for behavior changes. Run the relevant checks and update documentation
+when commands or behavior change.
 
-Storage Wiper follows the **MVVM (Model-View-ViewModel)** pattern with a privileged D-Bus helper:
+- [Bug reports](https://github.com/kidoz/storage-wiper/issues)
+- [Discussions](https://github.com/kidoz/storage-wiper/discussions)
+- Security reports: contact Aleksandr Pavlov privately at <ckidoz@gmail.com>.
 
-- **View Layer**: GTK4/Adwaita UI (`MainWindow`, `DiskRow`, `AlgorithmRow`)
-- **ViewModel Layer**: Business logic with observable properties (`MainViewModel`)
-- **Model Layer**: D-Bus client services (`DBusClient`), helper services (`DiskService`, `WipeService`), and Algorithms
+Storage Wiper is licensed under the [MIT License](LICENSE.md).
 
-**D-Bus Architecture**: The GUI runs unprivileged while a separate `storage-wiper-helper` daemon handles privileged disk operations via D-Bus. This provides better security through privilege separation.
-
-Key design patterns:
-- Dependency Injection (custom DI container)
-- Observable Pattern (automatic UI updates via `Observable<T>`)
-- Command Pattern (UI actions via `Command`)
-- Strategy Pattern (pluggable algorithms via `IWipeAlgorithm`)
-- Factory Pattern (algorithm creation)
-- RAII (resource management)
-
-### Project Structure
-
-The project uses a **unified layout** where headers and sources are kept together:
-
-```
-storage-wiper/
-├── src/                  # All source and header files
-│   ├── Application.hpp/cpp
-│   ├── main.cpp
-│   ├── algorithms/       # Wiping algorithms (IWipeAlgorithm implementations)
-│   ├── cli/              # Command-line interface (storage-wiper-cli)
-│   ├── core/             # Observable, Command infrastructure
-│   ├── di/               # Dependency injection container
-│   ├── helper/           # Privileged D-Bus helper daemon
-│   ├── models/           # Data structures (DiskInfo, WipeTypes, ViewTypes)
-│   ├── services/         # Service interfaces and D-Bus client (DBusClient)
-│   ├── helper/services/  # Privileged disk services (DiskService, WipeService)
-│   ├── util/             # Utility classes (FileDescriptor, Result)
-│   ├── viewmodels/       # Business logic (MainViewModel)
-│   └── views/            # GTK4/Adwaita UI widgets
-├── tests/                # Unit tests (Google Test/Mock)
-│   ├── mocks/            # Mock implementations
-│   ├── fixtures/         # Test fixtures
-│   └── unit/             # Unit test files
-├── data/                 # Desktop integration files
-├── packaging/            # Distribution packages (Arch Linux)
-├── justfile              # Development commands
-└── meson.build           # Build configuration
-```
-
-### Three Executables
-
-1. **storage_wiper** - Main GUI application (runs unprivileged)
-2. **storage-wiper-cli** - Command-line interface (runs unprivileged, same D-Bus backend)
-3. **storage-wiper-helper** - Privileged D-Bus helper for disk access (installed to libdir)
-
-### Code Quality
-
-The project uses modern C++23 features:
-- `std::format` for string formatting
-- `std::ranges` for algorithms
-- `std::string_view` for efficiency
-- Designated initializers
-- `constexpr` and `noexcept`
-- Smart pointers for memory safety
-
-Static analysis available via:
-- clang-tidy (CppCoreGuidelines, CERT, security)
-- cppcheck (bugs, style, performance)
-
-## Project Status
-
-**Current Version**: 1.5.1
-
-### Completed Features
-- ✅ Core disk detection and enumeration
-- ✅ SSD/HDD/NVMe detection
-- ✅ 8 wiping algorithms implemented
-- ✅ GTK4/Adwaita UI
-- ✅ Command-line interface (`storage-wiper-cli` with JSON output)
-- ✅ Post-wipe verification (Zero Fill, Random Fill, DoD 5220.22-M)
-- ✅ SMART health monitoring (ATA/SATA, SCSI/USB via SAT pass-through, NVMe, eMMC)
-- ✅ Structured file logging with rotation
-- ✅ MVVM architecture with observable data binding
-- ✅ Progress reporting with ETA and speed display
-- ✅ Desktop notifications on completion
-- ✅ Mount status checking
-- ✅ LVM physical volume support
-- ✅ Thread-safe cancellation
-- ✅ Static analysis integration (clang-tidy, cppcheck)
-- ✅ Code formatting with clang-format
-- ✅ RAII-based resource management
-- ✅ Exception-safe progress callbacks
-- ✅ Desktop integration (polkit, .desktop file, icon, AppStream metainfo)
-- ✅ Arch Linux packaging
-- ✅ Comprehensive unit tests (Google Test/Mock)
-- ✅ Memory leak checking with valgrind
-- ✅ D-Bus privilege separation architecture
-- ✅ D-Bus reconnection logic
-- ✅ Systemd service file for D-Bus helper
-
-### Planned Features
-- [ ] HPA/DCO (hidden-area) detection
-- [ ] Named wiping profiles (the last-used configuration is already restored automatically)
-
-### Known Limitations
-- SMART data unavailable on SD cards and on USB enclosures that do not implement
-  SCSI/ATA translation (the SAT pass-through fallback covers the ones that do)
-- Hardware Secure Erase requires hardware support: SATA drives must not be
-  security-frozen, and NVMe drives without Sanitize or cryptographic Format NVM
-  fall back to software overwrite algorithms
-- Bad sectors that cannot be overwritten may retain their old data; the count
-  is reported at completion so failing drives are visible in the audit trail
-- D-Bus helper requires proper polkit configuration for privilege escalation
-
-## Contributing
-
-Contributions are welcome! This project is a defensive security tool, so please keep security as the top priority.
-
-### Guidelines
-1. Follow existing code style (see `.clang-tidy`)
-2. Run linters before submitting (`./run-linters.sh`)
-3. Test on real hardware carefully (use VMs when possible)
-4. Add tests for new algorithms
-5. Update documentation
-
-### Security Policy
-- Only defensive security features
-- No credential harvesting
-- Clear warnings for destructive actions
-- Whitelist-based device validation
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
-
-## Disclaimer
-
-⚠️ **IMPORTANT**: This software permanently destroys data. The authors are not responsible for data loss, hardware damage, or any other consequences of using this software. Always verify you have selected the correct disk and have proper backups before wiping.
-
-This is a defensive security tool intended for legitimate data sanitization purposes only.
-
-## Acknowledgments
-
-- GTK4 and libadwaita teams for the excellent UI framework
-- C++ Core Guidelines authors (Bjarne Stroustrup, Herb Sutter)
-- Algorithm authors: Peter Gutmann, Bruce Schneier, and standards bodies
-- Open source community
-
-## Support
-
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/kidoz/storage-wiper/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/kidoz/storage-wiper/discussions)
-- 📧 **Security Issues**: Report privately via email
-
-## See Also
-
-- [justfile](justfile) - Development command runner
-- [meson.build](meson.build) - Build system configuration
-- [packaging/archlinux/](packaging/archlinux/) - Arch Linux packaging
-
----
-
-**Made with ❤️ for secure data sanitization**
-
-**Author**: Aleksandr Pavlov (<ckidoz@gmail.com>)
+Thanks to the GTK4/libadwaita teams, the algorithm authors, and the contributors
+who maintain the project.
