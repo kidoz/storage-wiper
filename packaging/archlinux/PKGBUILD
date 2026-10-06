@@ -19,7 +19,7 @@ makedepends=(
   'ninja'
 )
 source=("$pkgname-$pkgver.tar.gz::https://github.com/kidoz/storage-wiper/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('acda6739c9c46e9a2d5f9cf9ba20476d5e459857e4fe4e1c108cf5e07f34e713')
 
 build() {
   arch-meson "$pkgname-$pkgver" build
