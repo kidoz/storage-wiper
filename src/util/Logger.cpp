@@ -25,6 +25,9 @@ auto Logger::initialize(const std::filesystem::path& log_dir, const std::string&
                         LogLevel min_level, LogRotationPolicy policy) -> bool {
     std::lock_guard lock(mutex_);
 
+    initialized_ = false;
+    rotation_failed_ = false;
+
     // Close existing file if reinitializing
     if (file_.is_open()) {
         file_.close();
@@ -34,16 +37,16 @@ auto Logger::initialize(const std::filesystem::path& log_dir, const std::string&
     app_name_ = app_name;
     min_level_ = min_level;
     policy_ = policy;
+    policy_.max_files = std::max(1, policy_.max_files);
     current_file_size_ = 0;
 
     // Create log directory if it doesn't exist
     std::error_code ec;
-    if (!std::filesystem::exists(log_dir_)) {
-        if (!std::filesystem::create_directories(log_dir_, ec)) {
-            std::cerr << "Logger: Failed to create log directory: " << log_dir_ << " - "
-                      << ec.message() << std::endl;
-            return false;
-        }
+    std::filesystem::create_directories(log_dir_, ec);
+    if (ec) {
+        std::cerr << "Logger: Failed to create log directory: " << log_dir_ << " - " << ec.message()
+                  << std::endl;
+        return false;
     }
 
     // Open log file
@@ -71,6 +74,7 @@ auto Logger::is_initialized() const -> bool {
 auto Logger::open_log_file() -> bool {
     auto log_path = log_dir_ / (app_name_ + ".log");
 
+    file_.clear();
     file_.open(log_path, std::ios::app);
     if (!file_.is_open()) {
         std::cerr << "Logger: Failed to open log file: " << log_path << std::endl;
@@ -202,48 +206,59 @@ auto Logger::level_to_string(LogLevel level) -> std::string_view {
 }
 
 void Logger::check_and_rotate() {
-    if (current_file_size_ >= policy_.max_file_size_bytes) {
+    if (!rotation_failed_ && current_file_size_ >= policy_.max_file_size_bytes) {
         rotate_logs();
     }
 }
 
 void Logger::rotate_logs() {
-    // Close current file
-    if (file_.is_open()) {
-        file_.close();
-    }
-
-    auto base_path = log_dir_ / (app_name_ + ".log");
+    const auto base_path = log_dir_ / (app_name_ + ".log");
     std::error_code ec;
+    auto fail_rotation = [&]() {
+        rotation_failed_ = true;
+        std::cerr << "Logger: Log rotation failed: " << ec.message() << std::endl;
+    };
 
-    // Delete oldest file if at max
-    auto oldest_path = log_dir_ / std::format("{}.{}.log", app_name_, policy_.max_files);
-    if (std::filesystem::exists(oldest_path)) {
-        std::filesystem::remove(oldest_path, ec);
+    // Keep the open file usable if maintenance of old logs fails. Stop
+    // retrying on every line; initialize() resets the failure state.
+    const auto oldest_path = log_dir_ / std::format("{}.{}.log", app_name_, policy_.max_files);
+    std::filesystem::remove(oldest_path, ec);
+    if (ec) {
+        fail_rotation();
+        return;
     }
-
-    // Shift existing rotated files (n-1 -> n, n-2 -> n-1, etc.)
     for (int i = policy_.max_files - 1; i >= 1; --i) {
-        auto old_path = log_dir_ / std::format("{}.{}.log", app_name_, i);
-        auto new_path = log_dir_ / std::format("{}.{}.log", app_name_, i + 1);
-
-        if (std::filesystem::exists(old_path)) {
+        const auto old_path = log_dir_ / std::format("{}.{}.log", app_name_, i);
+        const auto new_path = log_dir_ / std::format("{}.{}.log", app_name_, i + 1);
+        const bool exists = std::filesystem::exists(old_path, ec);
+        if (ec) {
+            fail_rotation();
+            return;
+        }
+        if (exists) {
             std::filesystem::rename(old_path, new_path, ec);
+            if (ec) {
+                fail_rotation();
+                return;
+            }
         }
     }
 
-    // Rotate current file to .1.log
-    auto first_rotated = log_dir_ / std::format("{}.1.log", app_name_);
-    if (std::filesystem::exists(base_path)) {
-        std::filesystem::rename(base_path, first_rotated, ec);
+    file_.close();
+    const auto first_rotated = log_dir_ / std::format("{}.1.log", app_name_);
+    std::filesystem::rename(base_path, first_rotated, ec);
+    if (ec) {
+        fail_rotation();
     }
-
-    // Reopen fresh log file
-    open_log_file();
-
-    // Log rotation event
-    file_ << get_timestamp() << " [INFO ] [Logger] Log file rotated" << std::endl;
-    file_.flush();
+    initialized_ = open_log_file();
+    if (!initialized_) {
+        console_output_ = true;
+        return;
+    }
+    if (!rotation_failed_) {
+        file_ << get_timestamp() << " [INFO ] [Logger] Log file rotated" << std::endl;
+        file_.flush();
+    }
 }
 
 }  // namespace util

@@ -326,6 +326,7 @@ if get_option('enable_tests')
     'tests/unit/util/AppSettingsTest.cpp',
     'tests/unit/util/WipeCertificateTest.cpp',
     'tests/unit/util/WriteHelpersTest.cpp',
+    'tests/unit/util/LoggerTest.cpp',
     'tests/unit/viewmodels/MainViewModelTest.cpp',
   )
 

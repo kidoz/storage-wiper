@@ -196,6 +196,7 @@ private:
     LogLevel min_level_ = LogLevel::INFO;
     LogRotationPolicy policy_;
     bool initialized_ = false;
+    bool rotation_failed_ = false;
     bool console_output_ = false;
     size_t current_file_size_ = 0;
 };
