@@ -21,3 +21,9 @@ option('enable_tests',
 #   meson configure builddir -Db_sanitize=undefined      # UndefinedBehaviorSanitizer (UBSAN)
 #   meson configure builddir -Db_sanitize=address,undefined  # Both ASAN + UBSAN
 #   meson configure builddir -Db_sanitize=thread         # ThreadSanitizer (TSAN)
+
+option('systemd_system_unit_dir',
+  type: 'string',
+  value: '',
+  description: 'Systemd unit directory (default: libdir/systemd/system under prefix)'
+)

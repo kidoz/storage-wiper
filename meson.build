@@ -240,6 +240,10 @@ install_data(
 )
 
 # Systemd service file for D-Bus helper
+systemd_system_unit_dir = get_option('systemd_system_unit_dir')
+if systemd_system_unit_dir == ''
+  systemd_system_unit_dir = get_option('libdir') / 'systemd/system'
+endif
 configure_file(
   input: 'data/dbus/storage-wiper-helper.service.in',
   output: 'storage-wiper-helper.service',
@@ -247,7 +251,7 @@ configure_file(
     'LIBDIR': get_option('prefix') / get_option('libdir')
   },
   install: true,
-  install_dir: '/usr/lib/systemd/system'
+  install_dir: systemd_system_unit_dir
 )
 
 # AppStream metainfo for software centers (GNOME Software, KDE Discover)
