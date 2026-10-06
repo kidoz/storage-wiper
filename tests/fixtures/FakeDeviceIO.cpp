@@ -96,6 +96,10 @@ auto FakeDeviceIO::pwrite(int fd, const void* buffer, size_t count, off_t offset
 auto FakeDeviceIO::seek(int fd, off_t offset, int whence) -> off_t {
     std::lock_guard lock(mutex_);
     auto& descriptor = descriptors_.at(fd);
+    if (whence == SEEK_SET && devices.at(descriptor.path).fail_position_restore) {
+        errno = EIO;
+        return -1;
+    }
     descriptor.offset = whence == SEEK_SET ? offset : descriptor.offset + offset;
     return descriptor.offset;
 }

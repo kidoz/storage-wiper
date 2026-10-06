@@ -19,6 +19,7 @@ public:
         bool busy = false;
         bool fail_writes = false;
         bool short_then_error = false;
+        bool fail_position_restore = false;
         int writes = 0;
         int claims = 0;
         int flushes = 0;

@@ -63,8 +63,6 @@ auto sector_skipping_write(PWriteFn pwrite_fn, off_t base, size_t done,
                 pwrite_fn(absolute, std::span<const uint8_t>(data.data() + done, chunk));
             if (result == static_cast<ssize_t>(chunk)) {
                 written = true;
-            } else if (result < 0) {
-                break;  // persistent device error: this sector is bad
             }
         }
         if (!written) {
@@ -125,22 +123,19 @@ inline auto write_with_bad_sector_tolerance(int fd, std::span<const uint8_t> dat
     uint64_t skipped = 0;
     done = detail::sector_skipping_write(
         [fd](off_t offset, std::span<const uint8_t> chunk) -> ssize_t {
-            for (int attempt = 0; attempt < detail::BAD_BLOCK_ATTEMPTS; ++attempt) {
-                const auto result = ::pwrite(fd, chunk.data(), chunk.size(), offset);
-                if (result == static_cast<ssize_t>(chunk.size())) {
-                    return result;
-                }
-                if (result < 0 && errno != EINTR) {
-                    return -1;
-                }
-            }
-            return -1;
+            ssize_t result;
+            do {
+                result = ::pwrite(fd, chunk.data(), chunk.size(), offset);
+            } while (result < 0 && errno == EINTR);
+            return result;
         },
         base, done, data, skipped);
 
     // Keep the sequential position in sync: skipped sectors still consume
     // device space, so the next plain write must land after them.
-    ::lseek(fd, base + static_cast<off_t>(done), SEEK_SET);
+    if (::lseek(fd, base + static_cast<off_t>(done), SEEK_SET) < 0) {
+        return 0;  // The position contract failed; callers must abort.
+    }
 
     bad_blocks = skipped;
     return done;

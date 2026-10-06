@@ -223,4 +223,16 @@ TEST(WriteHelpersIoTest, ShortWriteThenErrorRetriesAtOriginalBufferOffset) {
     close(fd);
 }
 
+TEST(WriteHelpersIoTest, FailedPositionRestoreAbortsWrite) {
+    FakeDeviceIO io;
+    io.devices[TARGET].short_then_error = true;
+    io.devices[TARGET].fail_position_restore = true;
+    const int fd = open(TARGET, O_RDWR);
+    ASSERT_GE(fd, 0);
+    std::vector<uint8_t> zeros(2'048);
+    uint64_t bad = 0;
+    EXPECT_EQ(util::write_with_bad_sector_tolerance(fd, zeros, bad), 0u);
+    close(fd);
+}
+
 }  // namespace

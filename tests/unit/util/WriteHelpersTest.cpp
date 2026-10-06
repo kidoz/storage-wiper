@@ -129,6 +129,34 @@ TEST(SectorSkippingWriteTest, CountsEveryFailingSector) {
     EXPECT_EQ(skipped, 2u);
 }
 
+TEST(SectorSkippingWriteTest, RetriesTransientErrorsWithinOneBudget) {
+    std::vector<uint8_t> data(512, 0xAB);
+    int attempts = 0;
+    uint64_t skipped = 0;
+    sector_skipping_write(
+        [&](off_t, std::span<const uint8_t> chunk) -> ssize_t {
+            ++attempts;
+            return attempts < 3 ? -1 : static_cast<ssize_t>(chunk.size());
+        },
+        0, 0, data, skipped);
+    EXPECT_EQ(attempts, 3);
+    EXPECT_EQ(skipped, 0u);
+}
+
+TEST(SectorSkippingWriteTest, PersistentErrorsStopAtRetryBudget) {
+    std::vector<uint8_t> data(512, 0xAB);
+    int attempts = 0;
+    uint64_t skipped = 0;
+    sector_skipping_write(
+        [&](off_t, std::span<const uint8_t>) -> ssize_t {
+            ++attempts;
+            return -1;
+        },
+        0, 0, data, skipped);
+    EXPECT_EQ(attempts, util::detail::BAD_BLOCK_ATTEMPTS);
+    EXPECT_EQ(skipped, 1u);
+}
+
 TEST(WriteToleranceTest, FastPathWritesEntireTempFile) {
     TempTestFile file;
     ASSERT_TRUE(file.valid());
