@@ -24,6 +24,7 @@ namespace cli {
  * @brief Parsed command line options
  */
 struct CliOptions {
+    bool invalid_arguments = false;
     bool show_help = false;
     bool show_version = false;
     bool list_disks = false;

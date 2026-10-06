@@ -72,6 +72,11 @@ auto CliApplication::run(int argc, char* argv[]) -> int {
 
     auto options = parse_args(argc, argv);
 
+    if (options.invalid_arguments) {
+        print_help();
+        return 2;
+    }
+
     if (options.show_help) {
         print_help();
         return 0;
@@ -141,9 +146,14 @@ auto CliApplication::parse_args(int argc, char* argv[]) -> CliOptions {
                 options.certificate_path = optarg;
                 break;
             default:
-                options.show_help = true;
+                options.invalid_arguments = true;
                 break;
         }
+    }
+
+    if (optind < argc) {
+        std::cerr << "Error: Unexpected argument: " << argv[optind] << "\n";
+        options.invalid_arguments = true;
     }
 
     return options;
