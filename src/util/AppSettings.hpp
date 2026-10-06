@@ -9,6 +9,8 @@
 
 #pragma once
 
+#include "models/WipeTypes.hpp"
+
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -33,7 +35,7 @@ public:
     static auto save(const AppSettingsData& data) -> bool;
 
     /// Highest valid algorithm id (WipeAlgorithm::ATA_SECURE_ERASE)
-    static constexpr int MAX_ALGORITHM_ID = 7;
+    static constexpr int MAX_ALGORITHM_ID = static_cast<int>(WipeAlgorithm::ATA_SECURE_ERASE);
 };
 
 }  // namespace util
