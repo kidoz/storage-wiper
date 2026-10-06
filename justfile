@@ -155,7 +155,6 @@ valgrind:
     @meson configure {{build_dir}} -Denable_tests=true -Dbuildtype=debug >/dev/null
     meson compile -C {{build_dir}}
     valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
-        --suppressions=.valgrind-suppressions \
         --error-exitcode=1 ./{{build_dir}}/storage_wiper_tests
 
 # Run tests with valgrind (summary only)
@@ -163,7 +162,7 @@ valgrind-quick:
     @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}} -Denable_tests=true -Dbuildtype=debug; fi
     @meson configure {{build_dir}} -Denable_tests=true -Dbuildtype=debug >/dev/null
     meson compile -C {{build_dir}}
-    valgrind --leak-check=summary --suppressions=.valgrind-suppressions \
+    valgrind --leak-check=summary \
         ./{{build_dir}}/storage_wiper_tests
 
 # Run tests with valgrind and save report to file
@@ -172,7 +171,6 @@ valgrind-report:
     @meson configure {{build_dir}} -Denable_tests=true -Dbuildtype=debug >/dev/null
     meson compile -C {{build_dir}}
     valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
-        --suppressions=.valgrind-suppressions \
         --log-file=valgrind-report.txt ./{{build_dir}}/storage_wiper_tests
     @echo "Report saved to valgrind-report.txt"
 
@@ -182,7 +180,6 @@ valgrind-filter pattern:
     @meson configure {{build_dir}} -Denable_tests=true -Dbuildtype=debug >/dev/null
     meson compile -C {{build_dir}}
     valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
-        --suppressions=.valgrind-suppressions \
         ./{{build_dir}}/storage_wiper_tests --gtest_filter="*{{pattern}}*"
 
 # Generate valgrind suppression file from current run
