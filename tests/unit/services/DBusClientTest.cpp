@@ -254,3 +254,16 @@ TEST(DBusSignaturesTest, ShippedInterfaceDescriptionMatchesCode) {
     ASSERT_TRUE(std::regex_search(text, match, pattern)) << "GetDisks arg not found";
     EXPECT_EQ(match[1].str(), std::string{dbus_signatures::DISK_ARRAY});
 }
+
+TEST_F(DBusClientTest, MalformedProgressDoesNotConsumeActiveCallback) {
+    int callbacks = 0;
+    ASSERT_TRUE(
+        client->wipe_disk("/dev/sda", WipeAlgorithm::ZERO_FILL, [&](const auto&) { ++callbacks; }));
+    ASSERT_TRUE(g_dbus_connection_emit_signal(helper, nullptr, PATH, NAME, "WipeProgress",
+                                              g_variant_new("(s)", "/dev/sda"), nullptr));
+    g_dbus_connection_flush_sync(helper, nullptr, nullptr);
+    // A valid event sent after the malformed one must still reach the callback.
+    emit("/dev/sda", true);
+    ASSERT_TRUE(pump_until([&] { return callbacks == 1; }));
+}
+

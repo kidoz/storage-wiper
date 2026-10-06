@@ -466,6 +466,13 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/, const gchar
     if (g_strcmp0(signal_name, "WipeProgress") != 0)
         return;
 
+    // Reject malformed payloads before calling the variadic parser.
+    if (!parameters ||
+        !g_variant_is_of_type(parameters, G_VARIANT_TYPE(dbus_signatures::WIPE_PROGRESS))) {
+        LOG_WARNING("DBusClient", "Ignoring malformed WipeProgress signal");
+        return;
+    }
+
     // Parse progress signal
     const gchar* device_path = nullptr;
     gdouble percentage = 0.0;
@@ -490,6 +497,10 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/, const gchar
                   &bytes_written, &total_bytes, &speed_bytes_per_sec, &estimated_seconds_remaining,
                   &verification_enabled, &verification_in_progress, &verification_passed,
                   &verification_percentage, &bad_block_count);
+
+    if (!device_path || !*device_path) {
+        return;
+    }
 
     WipeProgress progress{.bytes_written = bytes_written,
                           .total_bytes = total_bytes,
