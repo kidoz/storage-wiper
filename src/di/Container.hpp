@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <typeindex>
 #include <unordered_map>
+#include <utility>
 
 namespace di {
 
@@ -76,10 +77,8 @@ public:
         };
 
         std::scoped_lock lock(mutex_);
-        registrations_[std::type_index(typeid(Interface))] =
-            Registration{.factory = [factory]() -> std::any { return factory(); },
-                         .lifetime = lifetime,
-                         .instance = std::any{}};
+        registrations_[std::type_index(typeid(Interface))] = std::make_shared<Registration>(
+            [factory]() -> std::any { return factory(); }, lifetime, std::any{});
     }
 
     /**
@@ -100,10 +99,8 @@ public:
     void register_factory(std::function<std::shared_ptr<Interface>()> factory,
                           Lifetime lifetime = Lifetime::SINGLETON) {
         std::scoped_lock lock(mutex_);
-        registrations_[std::type_index(typeid(Interface))] =
-            Registration{.factory = [factory]() -> std::any { return factory(); },
-                         .lifetime = lifetime,
-                         .instance = std::any{}};
+        registrations_[std::type_index(typeid(Interface))] = std::make_shared<Registration>(
+            [factory]() -> std::any { return factory(); }, lifetime, std::any{});
     }
 
     /**
@@ -121,7 +118,7 @@ public:
     void register_instance(std::shared_ptr<Interface> instance) {
         std::scoped_lock lock(mutex_);
         registrations_[std::type_index(typeid(Interface))] =
-            Registration{.factory = nullptr, .lifetime = Lifetime::SINGLETON, .instance = instance};
+            std::make_shared<Registration>(nullptr, Lifetime::SINGLETON, std::any{instance});
     }
 
     /**
@@ -137,36 +134,40 @@ public:
      */
     template <typename Interface>
     [[nodiscard]] auto resolve() -> std::shared_ptr<Interface> {
-        std::scoped_lock lock(mutex_);
-
-        auto type_id = std::type_index(typeid(Interface));
-        auto it = registrations_.find(type_id);
-
-        if (it == registrations_.end()) {
-            throw std::runtime_error(std::string("Type not registered: ") +
-                                     typeid(Interface).name());
+        std::shared_ptr<Registration> registration;
+        {
+            std::scoped_lock lock(mutex_);
+            const auto it = registrations_.find(std::type_index(typeid(Interface)));
+            if (it == registrations_.end()) {
+                throw std::runtime_error(std::string("Type not registered: ") +
+                                         typeid(Interface).name());
+            }
+            registration = it->second;
         }
 
-        auto& registration = it->second;
-
-        // Return existing singleton instance if available
-        if (registration.lifetime == Lifetime::SINGLETON && registration.instance.has_value()) {
-            return std::any_cast<std::shared_ptr<Interface>>(registration.instance);
+        // User factories can resolve dependencies without holding the registry
+        // mutex. A per-registration lock still creates each singleton once.
+        if (registration->lifetime == Lifetime::TRANSIENT) {
+            return std::any_cast<std::shared_ptr<Interface>>(registration->factory());
         }
-
-        // Create new instance
-        if (!registration.factory) {
+        std::scoped_lock lock(registration->mutex);
+        if (registration->instance.has_value()) {
+            return std::any_cast<std::shared_ptr<Interface>>(registration->instance);
+        }
+        if (registration->creating) {
+            throw std::runtime_error("Circular singleton dependency");
+        }
+        if (!registration->factory) {
             throw std::runtime_error(std::string("No factory registered for type: ") +
                                      typeid(Interface).name());
         }
-
-        auto instance = std::any_cast<std::shared_ptr<Interface>>(registration.factory());
-
-        // Cache singleton instances
-        if (registration.lifetime == Lifetime::SINGLETON) {
-            registration.instance = instance;
-        }
-
+        registration->creating = true;
+        struct ResetCreating {
+            bool& creating;
+            ~ResetCreating() { creating = false; }
+        } reset{registration->creating};
+        auto instance = std::any_cast<std::shared_ptr<Interface>>(registration->factory());
+        registration->instance = instance;
         return instance;
     }
 
@@ -203,9 +204,16 @@ private:
         std::function<std::any()> factory;
         Lifetime lifetime;
         std::any instance;
+        std::recursive_mutex mutex;
+        bool creating = false;
+
+        Registration(std::function<std::any()> factory_fn, Lifetime service_lifetime,
+                     std::any service_instance)
+            : factory(std::move(factory_fn)), lifetime(service_lifetime),
+              instance(std::move(service_instance)) {}
     };
 
-    std::unordered_map<std::type_index, Registration> registrations_;
+    std::unordered_map<std::type_index, std::shared_ptr<Registration>> registrations_;
     mutable std::mutex mutex_;
 };
 

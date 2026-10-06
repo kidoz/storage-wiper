@@ -220,3 +220,21 @@ TEST(ServiceLocatorTest, Singleton_ReturnsSameInstance) {
 TEST_F(ContainerTest, LifetimeEnum_IsOneByte) {
     EXPECT_EQ(sizeof(di::Lifetime), 1);
 }
+
+TEST_F(ContainerTest, FactoryCanResolveAnotherService) {
+    struct DependentService {
+        std::shared_ptr<IDiskService> disks;
+    };
+    container.register_type<IDiskService, MockDiskService>();
+    container.register_factory<DependentService>(
+        [this] { return std::make_shared<DependentService>(container.resolve<IDiskService>()); });
+    auto resolved = container.resolve<DependentService>();
+    EXPECT_EQ(resolved->disks, container.resolve<IDiskService>());
+}
+
+TEST_F(ContainerTest, CircularSingletonDependencyThrowsAndCanBeReplaced) {
+    container.register_factory<IDiskService>([this] { return container.resolve<IDiskService>(); });
+    EXPECT_THROW((void)container.resolve<IDiskService>(), std::runtime_error);
+    container.register_type<IDiskService, MockDiskService>();
+    EXPECT_NE(container.resolve<IDiskService>(), nullptr);
+}
