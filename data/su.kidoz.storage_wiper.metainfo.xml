@@ -88,6 +88,21 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="1.5.1" date="2026-10-06">
+      <description>
+        <p>Reliability release: safer write recovery, stricter device and D-Bus validation:</p>
+        <ul>
+          <li>Wipe start rejections now name the reason: a wipe already running on the device or on an overlapping one, an unsupported or unknown algorithm, or a worker thread that could not be started</li>
+          <li>A device position that cannot be restored after bad sectors aborts the write instead of continuing at the wrong offset, and transient write errors are retried within one sector budget</li>
+          <li>Malformed WipeProgress signals are ignored instead of being parsed, and SMART data is read only for device paths that pass validation</li>
+          <li>A failed log rotation no longer silences the logger: the open file stays in use, rotation stops retrying every line, and a reopen failure falls back to the console</li>
+          <li>A second confirmation for a wipe already running is ignored instead of replacing the operation in progress</li>
+          <li>Service factories may resolve other services without deadlocking, and a circular singleton dependency reports an explicit error</li>
+          <li>Unknown command line arguments print the usage and exit 2 instead of exiting 0</li>
+          <li>The helper unit installs under the prefix's systemd directory, declares its log directory, and package upgrades no longer restart the helper mid-wipe</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.5.0" date="2026-09-09">
       <description>
         <p>Feature release: firmware erase for NVMe, wipe certificates, partitions, parallel wipes:</p>
