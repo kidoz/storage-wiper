@@ -52,22 +52,31 @@ MainWindow::MainWindow(AdwApplicationWindow* window)
     : window_(window), content_(std::make_unique<MainWindowContent>()) {}
 
 MainWindow::~MainWindow() {
-    // Unsubscribe from message observable
-    if (view_model_ && message_subscription_id_ != 0) {
-        view_model_->current_message.unsubscribe(message_subscription_id_);
+    unbind();
+}
+
+void MainWindow::unbind() {
+    // Subscription ID zero is valid.
+    if (view_model_ && message_subscription_id_.has_value()) {
+        view_model_->current_message.unsubscribe(*message_subscription_id_);
+        message_subscription_id_.reset();
     }
-    if (view_model_ && refresh_connected_subscription_id_ != 0) {
-        view_model_->is_connected.unsubscribe(refresh_connected_subscription_id_);
+    if (view_model_ && refresh_connected_subscription_id_.has_value()) {
+        view_model_->is_connected.unsubscribe(*refresh_connected_subscription_id_);
+        refresh_connected_subscription_id_.reset();
     }
-    if (view_model_ && refresh_wipe_subscription_id_ != 0) {
-        view_model_->is_wipe_in_progress.unsubscribe(refresh_wipe_subscription_id_);
+    if (view_model_ && refresh_wipe_subscription_id_.has_value()) {
+        view_model_->is_wipe_in_progress.unsubscribe(*refresh_wipe_subscription_id_);
+        refresh_wipe_subscription_id_.reset();
     }
-    if (view_model_ && refresh_pending_subscription_id_ != 0) {
-        view_model_->is_operation_pending.unsubscribe(refresh_pending_subscription_id_);
+    if (view_model_ && refresh_pending_subscription_id_.has_value()) {
+        view_model_->is_operation_pending.unsubscribe(*refresh_pending_subscription_id_);
+        refresh_pending_subscription_id_.reset();
     }
 }
 
 void MainWindow::bind(std::shared_ptr<MainViewModel> view_model) {
+    unbind();
     view_model_ = std::move(view_model);
 
     // Bind content widget to ViewModel

@@ -58,9 +58,16 @@ MainWindowContent::MainWindowContent() : Gtk::Box(Gtk::Orientation::VERTICAL, 0)
 }
 
 MainWindowContent::~MainWindowContent() {
-    // Note: subscriptions are automatically cleaned when ViewModel is destroyed
-    // The subscriptions_ vector is kept for potential explicit cleanup if needed
+    unbind();
+}
+
+void MainWindowContent::unbind() {
+    for (const auto& unsubscribe : subscriptions_) {
+        unsubscribe();
+    }
     subscriptions_.clear();
+    std::scoped_lock lock(task_mutex_);
+    pending_tasks_ = {};
 }
 
 void MainWindowContent::setup_from_builder() {
@@ -123,6 +130,7 @@ void MainWindowContent::connect_signals() {
 }
 
 void MainWindowContent::bind(std::shared_ptr<MainViewModel> view_model) {
+    unbind();
     view_model_ = std::move(view_model);
 
     // Set up data bindings
@@ -163,12 +171,11 @@ void MainWindowContent::bind_disks() {
     if (!view_model_)
         return;
 
-    auto id = view_model_->disks.subscribe([this](const std::vector<DiskInfo>& disks) {
+    subscribe(view_model_->disks, [this](const std::vector<DiskInfo>& disks) {
         auto disks_copy = disks;
         post_ui_update(
             [this, disks_copy = std::move(disks_copy)]() { update_disk_list(disks_copy); });
     });
-    subscriptions_.push_back(id);
 
     // Initialize with current value (subscribe doesn't call callback with existing value)
     update_disk_list(view_model_->disks.get());
@@ -178,14 +185,11 @@ void MainWindowContent::bind_algorithms() {
     if (!view_model_)
         return;
 
-    auto id =
-        view_model_->algorithms.subscribe([this](const std::vector<AlgorithmInfo>& algorithms) {
-            auto algos_copy = algorithms;
-            post_ui_update([this, algos_copy = std::move(algos_copy)]() {
-                update_algorithm_list(algos_copy);
-            });
-        });
-    subscriptions_.push_back(id);
+    subscribe(view_model_->algorithms, [this](const std::vector<AlgorithmInfo>& algorithms) {
+        auto algos_copy = algorithms;
+        post_ui_update(
+            [this, algos_copy = std::move(algos_copy)]() { update_algorithm_list(algos_copy); });
+    });
 
     // Initialize with current value (subscribe doesn't call callback with existing value)
     update_algorithm_list(view_model_->algorithms.get());
@@ -195,25 +199,23 @@ void MainWindowContent::bind_progress() {
     if (!view_model_)
         return;
 
-    auto id = view_model_->wipe_progress.subscribe([this](const WipeProgress& progress) {
+    subscribe(view_model_->wipe_progress, [this](const WipeProgress& progress) {
         auto progress_copy = progress;
         post_ui_update([this, progress_copy]() { update_progress(progress_copy); });
     });
-    subscriptions_.push_back(id);
 }
 
 void MainWindowContent::bind_can_wipe() {
     if (!view_model_)
         return;
 
-    auto id = view_model_->can_wipe.subscribe([this](bool can) {
+    subscribe(view_model_->can_wipe, [this](bool can) {
         post_ui_update([this, can]() {
             if (wipe_button_) {
                 wipe_button_->set_sensitive(can);
             }
         });
     });
-    subscriptions_.push_back(id);
 
     // Initialize with current value (subscribe doesn't call callback with existing value)
     if (wipe_button_) {
@@ -229,14 +231,11 @@ void MainWindowContent::bind_status() {
         post_ui_update([this]() { update_status_message(); });
     };
 
-    subscriptions_.push_back(view_model_->disks.subscribe([update](const auto&) { update(); }));
-    subscriptions_.push_back(view_model_->is_connected.subscribe([update](bool) { update(); }));
-    subscriptions_.push_back(
-        view_model_->connection_error.subscribe([update](const auto&) { update(); }));
-    subscriptions_.push_back(
-        view_model_->is_disk_refreshing.subscribe([update](bool) { update(); }));
-    subscriptions_.push_back(
-        view_model_->is_operation_pending.subscribe([update](bool) { update(); }));
+    subscribe(view_model_->disks, [update](const auto&) { update(); });
+    subscribe(view_model_->is_connected, [update](bool) { update(); });
+    subscribe(view_model_->connection_error, [update](const auto&) { update(); });
+    subscribe(view_model_->is_disk_refreshing, [update](bool) { update(); });
+    subscribe(view_model_->is_operation_pending, [update](bool) { update(); });
 
     update_status_message();
 }
@@ -249,11 +248,9 @@ void MainWindowContent::bind_operation_state() {
         post_ui_update([this]() { update_operation_controls(); });
     };
 
-    subscriptions_.push_back(view_model_->is_connected.subscribe([update](bool) { update(); }));
-    subscriptions_.push_back(
-        view_model_->is_wipe_in_progress.subscribe([update](bool) { update(); }));
-    subscriptions_.push_back(
-        view_model_->is_operation_pending.subscribe([update](bool) { update(); }));
+    subscribe(view_model_->is_connected, [update](bool) { update(); });
+    subscribe(view_model_->is_wipe_in_progress, [update](bool) { update(); });
+    subscribe(view_model_->is_operation_pending, [update](bool) { update(); });
 
     update_operation_controls();
 }
@@ -266,14 +263,10 @@ void MainWindowContent::bind_verification() {
         post_ui_update([this]() { update_verification_control(); });
     };
 
-    subscriptions_.push_back(
-        view_model_->verification_enabled.subscribe([update](bool) { update(); }));
-    subscriptions_.push_back(
-        view_model_->verification_available.subscribe([update](bool) { update(); }));
-    subscriptions_.push_back(
-        view_model_->is_wipe_in_progress.subscribe([update](bool) { update(); }));
-    subscriptions_.push_back(
-        view_model_->is_operation_pending.subscribe([update](bool) { update(); }));
+    subscribe(view_model_->verification_enabled, [update](bool) { update(); });
+    subscribe(view_model_->verification_available, [update](bool) { update(); });
+    subscribe(view_model_->is_wipe_in_progress, [update](bool) { update(); });
+    subscribe(view_model_->is_operation_pending, [update](bool) { update(); });
 
     update_verification_control();
 }
@@ -282,7 +275,7 @@ void MainWindowContent::bind_algorithm_warning() {
     if (!view_model_)
         return;
 
-    auto id = view_model_->algorithm_warning.subscribe([this](const std::string& warning) {
+    subscribe(view_model_->algorithm_warning, [this](const std::string& warning) {
         post_ui_update([this, warning]() {
             if (algorithm_warning_label_) {
                 algorithm_warning_label_->set_text(warning);
@@ -290,7 +283,6 @@ void MainWindowContent::bind_algorithm_warning() {
             }
         });
     });
-    subscriptions_.push_back(id);
 
     const auto warning = view_model_->algorithm_warning.get();
     algorithm_warning_label_->set_text(warning);

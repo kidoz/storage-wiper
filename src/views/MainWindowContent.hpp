@@ -87,8 +87,16 @@ private:
     // Flag to ignore selection changes during list updates
     bool updating_disk_list_ = false;
 
-    // Subscription IDs for cleanup
-    std::vector<size_t> subscriptions_;
+    // Each subscription retains the observable it must disconnect from.
+    std::vector<std::function<void()>> subscriptions_;
+
+    template <typename T, typename Callback>
+    void subscribe(mvvm::Observable<T>& property, Callback callback) {
+        const auto id = property.subscribe(std::move(callback));
+        subscriptions_.push_back([&property, id]() { property.unsubscribe(id); });
+    }
+
+    void unbind();
 
     // Setup methods
     void setup_from_builder();
