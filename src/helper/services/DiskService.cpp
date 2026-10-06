@@ -138,7 +138,7 @@ void SmartQueryState::retain(const std::vector<std::string>& present_paths) {
 }
 
 auto DiskService::get_smart_data(const std::string& device_path) -> SmartData {
-    if (!smart_service_) {
+    if (!smart_service_ || !validate_device_path(device_path)) {
         return {};
     }
     return smart_service_->get_smart_data(device_path);

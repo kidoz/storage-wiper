@@ -251,3 +251,19 @@ TEST_F(DiskServiceTest, EveryPartitionRetainsOriginalDiskParent) {
         EXPECT_EQ(disks[i].is_mounted, disks[i].path == "/dev/sda2");
     }
 }
+
+TEST_F(DiskServiceTest, SmartRequestUsesDeviceValidationBeforeAccess) {
+    class RejectingDiskService : public DiskService {
+    public:
+        std::string validated_path;
+        auto validate_device_path(const std::string& path)
+            -> std::expected<void, util::Error> override {
+            validated_path = path;
+            return std::unexpected(util::Error{"rejected"});
+        }
+    } rejecting;
+    for (const auto* path : {"/dev/sda", "/dev/sda/../dm-0", "/dev/loop0", ""}) {
+        EXPECT_FALSE(rejecting.get_smart_data(path).available);
+        EXPECT_EQ(rejecting.validated_path, path);
+    }
+}
