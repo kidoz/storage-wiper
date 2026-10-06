@@ -393,7 +393,8 @@ void handle_start_wipe(GDBusMethodInvocation* invocation, GVariant* parameters) 
     const char* device_path = nullptr;
     guint32 algorithm_id = 0;
     gboolean verify = FALSE;
-    g_variant_get(parameters, "(&sub)", &device_path, &algorithm_id, &verify);
+    g_variant_get(parameters, dbus_signatures::START_WIPE_PARSE, &device_path, &algorithm_id,
+                  &verify);
 
     const std::string device{device_path ? device_path : ""};
 
@@ -401,14 +402,16 @@ void handle_start_wipe(GDBusMethodInvocation* invocation, GVariant* parameters) 
     auto algorithm = static_cast<WipeAlgorithm>(algorithm_id);
     if (!is_supported_algorithm(algorithm)) {
         g_dbus_method_invocation_return_value(
-            invocation, g_variant_new("(bs)", FALSE, "Unsupported wipe algorithm"));
+            invocation,
+            g_variant_new(dbus_signatures::START_WIPE_REPLY, FALSE, "Unsupported wipe algorithm"));
         return;
     }
 
     if (auto eligible = device_policy::resolve_wipe_targets(*g_disk_service, device, algorithm);
         !eligible) {
         g_dbus_method_invocation_return_value(
-            invocation, g_variant_new("(bs)", FALSE, eligible.error().message.c_str()));
+            invocation, g_variant_new(dbus_signatures::START_WIPE_REPLY, FALSE,
+                                      eligible.error().message.c_str()));
         return;
     }
 
@@ -416,8 +419,8 @@ void handle_start_wipe(GDBusMethodInvocation* invocation, GVariant* parameters) 
     // that is already being wiped.
     if (g_wipe_service->is_operation_in_progress(device)) {
         g_dbus_method_invocation_return_value(
-            invocation,
-            g_variant_new("(bs)", FALSE, "A wipe operation is already in progress on this device"));
+            invocation, g_variant_new(dbus_signatures::START_WIPE_REPLY, FALSE,
+                                      "A wipe operation is already in progress on this device"));
         return;
     }
 
@@ -456,12 +459,12 @@ void handle_cancel_wipe(GDBusMethodInvocation* invocation, GVariant* parameters)
     }
 
     const char* device_path = nullptr;
-    g_variant_get(parameters, "(&s)", &device_path);
+    g_variant_get(parameters, dbus_signatures::CANCEL_WIPE_PARSE, &device_path);
 
     const bool cancelled = g_wipe_service->cancel_operation(device_path ? device_path : "");
 
-    g_dbus_method_invocation_return_value(invocation,
-                                          g_variant_new("(b)", cancelled ? TRUE : FALSE));
+    g_dbus_method_invocation_return_value(
+        invocation, g_variant_new(dbus_signatures::CANCEL_WIPE_REPLY, cancelled ? TRUE : FALSE));
 }
 
 /**

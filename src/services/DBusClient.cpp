@@ -846,8 +846,8 @@ auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm
     GError* error = nullptr;
     GVariant* result = g_dbus_proxy_call_sync(
         proxy_copy, "StartWipe",
-        g_variant_new("(sub)", disk_path.c_str(), static_cast<guint32>(algorithm),
-                      verify ? TRUE : FALSE),
+        g_variant_new(dbus_signatures::START_WIPE_REQUEST, disk_path.c_str(),
+                      static_cast<guint32>(algorithm), verify ? TRUE : FALSE),
         G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
@@ -860,7 +860,7 @@ auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm
 
     gboolean started = FALSE;
     const gchar* error_message = nullptr;
-    g_variant_get(result, "(b&s)", &started, &error_message);
+    g_variant_get(result, dbus_signatures::START_WIPE_REPLY_PARSE, &started, &error_message);
 
     if (!started) {
         LOG_ERROR("DBusClient",
@@ -931,9 +931,10 @@ auto DBusClient::cancel_operation(const std::string& device_path) -> bool {
     ProxyRefGuard proxy_guard{proxy_copy};
 
     GError* error = nullptr;
-    GVariant* result =
-        g_dbus_proxy_call_sync(proxy_copy, "CancelWipe", g_variant_new("(s)", device_path.c_str()),
-                               G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
+    GVariant* result = g_dbus_proxy_call_sync(
+        proxy_copy, "CancelWipe",
+        g_variant_new(dbus_signatures::CANCEL_WIPE_REQUEST, device_path.c_str()),
+        G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
         g_clear_error(&error);
@@ -941,7 +942,7 @@ auto DBusClient::cancel_operation(const std::string& device_path) -> bool {
     }
 
     gboolean cancelled = FALSE;
-    g_variant_get(result, "(b)", &cancelled);
+    g_variant_get(result, dbus_signatures::CANCEL_WIPE_REPLY, &cancelled);
     g_variant_unref(result);
 
     return cancelled != FALSE;

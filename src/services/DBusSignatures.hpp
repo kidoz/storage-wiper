@@ -83,6 +83,15 @@ static_assert(std::string_view{DISK_LIST_REPLY}.substr(1, sizeof(DISK_LIST_REPLY
 inline constexpr char SMART_RECORD[] = "(bbxiiiiiiiu)";
 static_assert(type_code_count(SMART_RECORD) == 11);
 
+// --- StartWipe / CancelWipe ---------------------------------------------------
+inline constexpr char START_WIPE_REQUEST[] = "(sub)";
+inline constexpr char START_WIPE_PARSE[] = "(&sub)";
+inline constexpr char START_WIPE_REPLY[] = "(bs)";
+inline constexpr char START_WIPE_REPLY_PARSE[] = "(b&s)";
+inline constexpr char CANCEL_WIPE_REQUEST[] = "(s)";
+inline constexpr char CANCEL_WIPE_PARSE[] = "(&s)";
+inline constexpr char CANCEL_WIPE_REPLY[] = "(b)";
+
 // --- WipeProgress signal ------------------------------------------------------
 //
 //   s device_path  d percentage  i current_pass  i total_passes  s status

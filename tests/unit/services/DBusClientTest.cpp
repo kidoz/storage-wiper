@@ -267,3 +267,34 @@ TEST_F(DBusClientTest, MalformedProgressDoesNotConsumeActiveCallback) {
     ASSERT_TRUE(pump_until([&] { return callbacks == 1; }));
 }
 
+TEST(DBusSignaturesTest, ShippedWipeMethodsAndProgressMatchCode) {
+    std::ifstream xml{std::string{SOURCE_ROOT} + "/data/dbus/su.kidoz.storage_wiper.Helper.xml"};
+    ASSERT_TRUE(xml);
+    std::stringstream buffer;
+    buffer << xml.rdbuf();
+    GError* error = nullptr;
+    auto* node = g_dbus_node_info_new_for_xml(buffer.str().c_str(), &error);
+    ASSERT_NE(node, nullptr) << (error ? error->message : "invalid XML");
+    auto* interface = g_dbus_node_info_lookup_interface(node, "su.kidoz.storage_wiper.Helper");
+    ASSERT_NE(interface, nullptr);
+    auto signature = [](GDBusArgInfo** arguments) {
+        std::string value = "(";
+        for (size_t i = 0; arguments && arguments[i]; ++i) {
+            value += arguments[i]->signature;
+        }
+        return value + ")";
+    };
+    auto* start = g_dbus_interface_info_lookup_method(interface, "StartWipe");
+    ASSERT_NE(start, nullptr);
+    EXPECT_EQ(signature(start->in_args), dbus_signatures::START_WIPE_REQUEST);
+    EXPECT_EQ(signature(start->out_args), dbus_signatures::START_WIPE_REPLY);
+    auto* cancel = g_dbus_interface_info_lookup_method(interface, "CancelWipe");
+    ASSERT_NE(cancel, nullptr);
+    EXPECT_EQ(signature(cancel->in_args), dbus_signatures::CANCEL_WIPE_REQUEST);
+    EXPECT_EQ(signature(cancel->out_args), dbus_signatures::CANCEL_WIPE_REPLY);
+    auto* progress = g_dbus_interface_info_lookup_signal(interface, "WipeProgress");
+    ASSERT_NE(progress, nullptr);
+    EXPECT_EQ(signature(progress->args), dbus_signatures::WIPE_PROGRESS);
+    g_dbus_node_info_unref(node);
+    g_clear_error(&error);
+}
