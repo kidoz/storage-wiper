@@ -19,6 +19,12 @@ source archive and verifies its SHA-256 checksum. It does not package uncommitte
 changes from your working tree. `-s` installs missing dependencies through
 pacman; `-f` permits replacing an existing package artifact.
 
+`makepkg` keeps its work tree in `packaging/archlinux/src/`, including a Meson
+build directory. After a version bump, add `-C` (`makepkg -sfC`) so that work
+tree is removed first. A reused build directory stays configured for the previous
+version's source, and the package then installs that older tree's files even
+though the new archive's checksum was verified.
+
 Install the artifacts named by the current recipe rather than globbing every
 old package in the directory:
 
