@@ -50,6 +50,7 @@ public:
 private:
     static void on_activate(GtkApplication* app, gpointer user_data);
     static void on_startup(GtkApplication* app, gpointer user_data);
+    static void on_main_window_destroyed(GtkWidget* widget, gpointer user_data);
 
     void configure_services();
     void setup_main_window();
