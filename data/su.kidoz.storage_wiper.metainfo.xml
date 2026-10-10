@@ -88,6 +88,16 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="1.5.3" date="2026-10-10">
+      <description>
+        <p>Health reporting fix: an NVMe module is no longer flagged for a temperature that is normal for it:</p>
+        <ul>
+          <li>Temperature bands follow the device class: 50/60 C for ATA and eMMC devices, 70/80 C for NVMe, whose own thermal verdict still arrives through the controller's critical warning bits</li>
+          <li>An NVMe module idling at 50 C reports good health instead of a warning</li>
+          <li>The disk tooltip shows the vendor spare threshold beside the spare capacity, so a spare warning names the value it is compared to</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.5.2" date="2026-10-10">
       <description>
         <p>Preview release: accurate reporting when a helper from an older build is still running, and a restructured documentation set:</p>
