@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 /**
  * @class SmartService
@@ -105,11 +106,43 @@ public:
     static void parse_ata_smart_data(const uint8_t* data, bool rotational, SmartData& result);
 
     /**
+     * @brief Temperature bands, in Celsius, used to classify a device's health
+     *
+     * The bands differ by device class: an NVMe module idles near 50 C where a
+     * hard drive or a 2.5" SATA SSD is already hot, so one set of numbers cannot
+     * serve both. The bands are advisory thresholds in the client; they do not
+     * replace the device's own verdict, which is reported separately (an NVMe
+     * critical warning bit, or an ATA threshold-exceeded status).
+     */
+    struct TemperatureLimits {
+        int warning;   ///< At or above this reading the health is WARNING
+        int critical;  ///< At or above this reading the health is CRITICAL
+
+        auto operator==(const TemperatureLimits&) const -> bool = default;
+    };
+
+    /// Bands applied to ATA (HDD and SATA SSD) and eMMC devices
+    static constexpr TemperatureLimits ATA_TEMPERATURE_LIMITS{50, 60};
+
+    /// Bands applied to NVMe devices, which run hotter by design
+    static constexpr TemperatureLimits NVME_TEMPERATURE_LIMITS{70, 80};
+
+    /**
+     * @brief Temperature bands that apply to a device path
+     * @param device_path Device path (e.g., /dev/sda, /dev/nvme0n1)
+     * @return Bands for the device class the path names
+     */
+    [[nodiscard]] static auto temperature_limits_for(std::string_view device_path)
+        -> TemperatureLimits;
+
+    /**
      * @brief Calculate health status from SMART attributes
      * @param data SmartData with raw attributes
+     * @param limits Temperature bands for the device class, ATA bands by default
      * @return Derived health status
      */
-    [[nodiscard]] static auto calculate_health_status(const SmartData& data)
+    [[nodiscard]] static auto calculate_health_status(
+        const SmartData& data, TemperatureLimits limits = ATA_TEMPERATURE_LIMITS)
         -> SmartData::HealthStatus;
 
 private:

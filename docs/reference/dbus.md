@@ -95,6 +95,29 @@ Whole-disk records have an empty parent path. Unknown SMART numeric values are
 Health status values are `0` unknown, `1` good, `2` warning, and `3` critical.
 Unknown numeric attributes are `-1`.
 
+## Health classification
+
+The helper derives the status from the device's own verdict and from the
+attributes it could read. Attributes that are absent or unknown (`-1`) never
+raise a status.
+
+A device is `critical` when it reports a failure verdict, when an NVMe critical
+warning bit is set, when available spare capacity is below the vendor threshold,
+or when a critical band is crossed: 50 reallocated sectors, 10 pending sectors,
+life used at 100 percent, or temperature at 60 C for ATA and eMMC devices and
+80 C for NVMe devices.
+
+It is `warning` when a lower band is crossed instead: 5 reallocated sectors,
+1 pending sector, any uncorrectable error, life used at 90 percent, or
+temperature at 50 C for ATA and eMMC devices and 70 C for NVMe devices. Spare
+capacity within 10 points of the vendor threshold is also a `warning`, ahead of
+the drive's own critical warning. Otherwise the status is `good`.
+
+The temperature bands differ by device class because an NVMe module idles near
+50 C where a hard drive or a 2.5" SATA SSD is already hot. The bands are
+advisory; an NVMe controller's own thermal verdict still arrives through its
+critical warning bits.
+
 ## WipeProgress signal
 
 Signature: `sdiisbbstttxbbbdt`, represented internally as

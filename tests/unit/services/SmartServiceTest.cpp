@@ -298,6 +298,47 @@ TEST(SmartServiceTest, HighTemperatureRaisesWarningThenCritical) {
     EXPECT_EQ(SmartService::calculate_health_status(data), SmartData::HealthStatus::CRITICAL);
 }
 
+// The temperature bands are per device class: a reading that warns on a
+// rotating disk or a 2.5" SATA SSD is ordinary for an NVMe module, which idles
+// hot and reports thermal trouble through its own critical warning bits.
+TEST(SmartServiceTest, TemperatureBandsFollowTheDeviceClass) {
+    EXPECT_EQ(SmartService::temperature_limits_for("/dev/nvme0n1"),
+              SmartService::NVME_TEMPERATURE_LIMITS);
+    EXPECT_EQ(SmartService::temperature_limits_for("/dev/nvme11n3"),
+              SmartService::NVME_TEMPERATURE_LIMITS);
+    EXPECT_EQ(SmartService::temperature_limits_for("/dev/sda"),
+              SmartService::ATA_TEMPERATURE_LIMITS);
+    EXPECT_EQ(SmartService::temperature_limits_for("/dev/hda"),
+              SmartService::ATA_TEMPERATURE_LIMITS);
+    EXPECT_EQ(SmartService::temperature_limits_for("/dev/mmcblk0"),
+              SmartService::ATA_TEMPERATURE_LIMITS);
+}
+
+// Regression: an NVMe module idling at 50 C was reported as Warning while every
+// drive-reported measure said the device was healthy.
+TEST(SmartServiceTest, NvmeIdlingAtFiftyCelsiusIsGood) {
+    SmartData data;
+    data.available = true;
+    data.temperature_celsius = 50;
+
+    EXPECT_EQ(SmartService::calculate_health_status(data), SmartData::HealthStatus::WARNING);
+    EXPECT_EQ(SmartService::calculate_health_status(data, SmartService::NVME_TEMPERATURE_LIMITS),
+              SmartData::HealthStatus::GOOD);
+}
+
+TEST(SmartServiceTest, NvmeTemperatureRaisesWarningThenCritical) {
+    SmartData data;
+    data.available = true;
+
+    data.temperature_celsius = 70;
+    EXPECT_EQ(SmartService::calculate_health_status(data, SmartService::NVME_TEMPERATURE_LIMITS),
+              SmartData::HealthStatus::WARNING);
+
+    data.temperature_celsius = 80;
+    EXPECT_EQ(SmartService::calculate_health_status(data, SmartService::NVME_TEMPERATURE_LIMITS),
+              SmartData::HealthStatus::CRITICAL);
+}
+
 TEST(SmartServiceTest, WearLevelRaisesWarningThenCritical) {
     SmartData data;
     data.available = true;

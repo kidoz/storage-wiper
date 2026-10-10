@@ -188,7 +188,13 @@ void DiskRow::setup_health_indicator() {
         tooltip += std::format("Life used: {}%\n", disk_.smart.percentage_used);
     }
     if (disk_.smart.available_spare_percent >= 0) {
-        tooltip += std::format("Spare capacity: {}%\n", disk_.smart.available_spare_percent);
+        // The vendor threshold explains a spare-capacity warning: reporting the
+        // percentage alone leaves the user without the number it is compared to.
+        tooltip += disk_.smart.available_spare_threshold_percent >= 0
+                       ? std::format("Spare capacity: {}% (vendor threshold {}%)\n",
+                                     disk_.smart.available_spare_percent,
+                                     disk_.smart.available_spare_threshold_percent)
+                       : std::format("Spare capacity: {}%\n", disk_.smart.available_spare_percent);
     }
 
     if (!tooltip.empty()) {

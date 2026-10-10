@@ -96,13 +96,12 @@ constexpr size_t ATTR_TABLE_OFFSET = 2;
 constexpr size_t ATTR_ENTRY_SIZE = 12;
 constexpr size_t ATTR_COUNT = 30;
 
-// Thresholds for health status
+// Thresholds for health status. Temperature bands depend on the device class
+// and live with the class mapping (SmartService::TemperatureLimits).
 constexpr int WARNING_REALLOCATED_SECTORS = 5;
 constexpr int CRITICAL_REALLOCATED_SECTORS = 50;
 constexpr int WARNING_PENDING_SECTORS = 1;
 constexpr int CRITICAL_PENDING_SECTORS = 10;
-constexpr int WARNING_TEMPERATURE = 50;
-constexpr int CRITICAL_TEMPERATURE = 60;
 constexpr int WARNING_PERCENTAGE_USED = 90;
 constexpr int CRITICAL_PERCENTAGE_USED = 100;
 constexpr int WARNING_SPARE_MARGIN = 10;
@@ -422,10 +421,20 @@ auto SmartService::get_smart_data(const std::string& device_path) -> SmartData {
     }
 
     if (result.available) {
-        result.status = calculate_health_status(result);
+        result.status = calculate_health_status(result, temperature_limits_for(device_path));
     }
 
     return result;
+}
+
+auto SmartService::temperature_limits_for(std::string_view device_path) -> TemperatureLimits {
+    // NVMe modules idle hot: 50 C is unremarkable for an M.2 device where it
+    // would be a warning on a rotating disk. The controller's own thermal
+    // verdict still reaches the status through the critical warning bits.
+    if (device_path.starts_with("/dev/nvme")) {
+        return NVME_TEMPERATURE_LIMITS;
+    }
+    return ATA_TEMPERATURE_LIMITS;
 }
 
 auto SmartService::is_smart_supported(const std::string& device_path) -> bool {
@@ -749,7 +758,8 @@ auto SmartService::read_mmc_health(const std::string& device_path) -> SmartData 
     return result;
 }
 
-auto SmartService::calculate_health_status(const SmartData& data) -> SmartData::HealthStatus {
+auto SmartService::calculate_health_status(const SmartData& data, TemperatureLimits limits)
+    -> SmartData::HealthStatus {
     if (!data.available) {
         return SmartData::HealthStatus::UNKNOWN;
     }
@@ -761,7 +771,7 @@ auto SmartService::calculate_health_status(const SmartData& data) -> SmartData::
 
     if (data.reallocated_sectors >= CRITICAL_REALLOCATED_SECTORS ||
         data.pending_sectors >= CRITICAL_PENDING_SECTORS ||
-        data.temperature_celsius >= CRITICAL_TEMPERATURE ||
+        data.temperature_celsius >= limits.critical ||
         data.percentage_used >= CRITICAL_PERCENTAGE_USED) {
         return SmartData::HealthStatus::CRITICAL;
     }
@@ -776,7 +786,7 @@ auto SmartService::calculate_health_status(const SmartData& data) -> SmartData::
     // Check for warning conditions
     if (data.reallocated_sectors >= WARNING_REALLOCATED_SECTORS ||
         data.pending_sectors >= WARNING_PENDING_SECTORS ||
-        data.temperature_celsius >= WARNING_TEMPERATURE || data.uncorrectable_errors > 0 ||
+        data.temperature_celsius >= limits.warning || data.uncorrectable_errors > 0 ||
         data.percentage_used >= WARNING_PERCENTAGE_USED) {
         return SmartData::HealthStatus::WARNING;
     }

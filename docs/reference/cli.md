@@ -104,6 +104,8 @@ The `smart` object contains:
 The CLI JSON listing has no `serial` field. Serial numbers are present in
 the D-Bus disk records and certificates. Partitions inherit the parent's SMART
 record. Unknown health information does not establish that a device is healthy.
+The `smart_status` label is derived by the helper from the device's own verdict
+and its attributes; see [health classification](dbus.md#health-classification).
 
 ## Certificates and cancellation
 
