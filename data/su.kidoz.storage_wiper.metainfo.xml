@@ -88,6 +88,16 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="1.5.2" date="2026-10-10">
+      <description>
+        <p>Preview release: accurate reporting when a helper from an older build is still running, and a restructured documentation set:</p>
+        <ul>
+          <li>A helper process left over from an earlier package version is reported by name, with both record types, instead of a GLib-CRITICAL and an empty device list</li>
+          <li>The Arch install hook stops an idle helper on upgrade so the next client call activates the new build, and leaves a helper that is running an operation untouched</li>
+          <li>The documentation set is organized by reader need: tutorials, how-to guides, reference, and explanation</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.5.1" date="2026-10-06">
       <description>
         <p>Reliability release: safer write recovery, stricter device and D-Bus validation:</p>
