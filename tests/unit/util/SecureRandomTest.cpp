@@ -10,6 +10,8 @@
 
 #include "util/SecureRandom.hpp"
 
+#include "algorithms/VerificationHelper.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -45,8 +47,8 @@ TEST(SecureRandom, TwoCalls_ProduceDifferentOutput) {
 }
 
 TEST(SecureRandom, LargeFill_PassesChiSquared) {
-    // Mirror VerificationHelper::verify_random's threshold: 1 MiB sample,
-    // chi-squared(255, 0.001) = 310.5. Healthy CSPRNG output passes with
+    // Share VerificationHelper::verify_random's limit: 1 MiB sample,
+    // chi-squared(255, p = 0.001) = 330.5. Healthy CSPRNG output passes with
     // overwhelming probability.
     constexpr std::size_t SIZE = 1 << 20;  // 1 MiB
     std::vector<std::byte> buf(SIZE);
@@ -64,8 +66,7 @@ TEST(SecureRandom, LargeFill_PassesChiSquared) {
         chi_squared += (diff * diff) / expected;
     }
 
-    constexpr double CRITICAL_VALUE = 310.5;
-    EXPECT_LT(chi_squared, CRITICAL_VALUE)
+    EXPECT_LT(chi_squared, verification::CHI_SQUARED_UNIFORMITY_LIMIT)
         << "1 MiB sample failed chi-squared(255, 0.001); CSPRNG output looks non-uniform.";
 
     // No single byte should dominate; healthy output is ~0.39% per value.

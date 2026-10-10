@@ -13,6 +13,16 @@
 namespace verification {
 
 /**
+ * @brief Upper limit of the chi-squared uniformity check for random-fill data
+ *
+ * The 0.001 upper-tail quantile for 255 degrees of freedom: genuine CSPRNG
+ * output falls below it in 99.9 percent of reads. It is defined here so the
+ * verification and the tests that feed it live data share one value rather than
+ * each carrying a copy that can drift.
+ */
+inline constexpr double CHI_SQUARED_UNIFORMITY_LIMIT = 330.5;
+
+/**
  * @brief Verify that a device contains all zeros
  * @param fd File descriptor (opened for reading)
  * @param size Device size in bytes

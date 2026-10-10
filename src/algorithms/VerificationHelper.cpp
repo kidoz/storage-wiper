@@ -99,10 +99,6 @@ auto verify_pattern(int fd, uint64_t size, uint8_t pattern, ProgressCallback cal
 
 auto verify_random(int fd, uint64_t size, ProgressCallback callback,
                    const std::atomic<bool>& cancel_flag) -> bool {
-    // Chi-squared critical value for 255 degrees of freedom at p = 0.001.
-    // SecureRandomTest mirrors this threshold; keep the two in sync.
-    constexpr double CHI_SQUARED_CRITICAL = 310.5;
-
     if (size == 0)
         return true;
 
@@ -141,7 +137,7 @@ auto verify_random(int fd, uint64_t size, ProgressCallback callback,
         chi_squared += (diff * diff) / expected;
     }
 
-    return chi_squared < CHI_SQUARED_CRITICAL;
+    return chi_squared < CHI_SQUARED_UNIFORMITY_LIMIT;
 }
 
 }  // namespace verification
