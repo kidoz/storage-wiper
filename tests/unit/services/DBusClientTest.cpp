@@ -8,6 +8,7 @@
 #include <chrono>
 #include <fstream>
 #include <future>
+#include <optional>
 #include <regex>
 #include <sstream>
 #include <thread>
@@ -16,19 +17,19 @@ namespace {
 
 constexpr auto NAME = "su.kidoz.storage_wiper.Helper";
 constexpr auto PATH = "/su/kidoz/storage_wiper/Helper";
-// The fake helper advertises GetDisks with the shared array type and answers it
-// with a record built through dbus_signatures::DISK_RECORD, exactly as the real
-// helper does, so the test exercises the build/parse pair end to end.
-const std::string XML = std::string{R"(<node><interface name="su.kidoz.storage_wiper.Helper">
+// A fake helper advertises GetDisks with the array type it was built against and
+// answers it with a record in that same layout, exactly as a real helper does.
+auto helper_xml(const char* disk_array_type) -> std::string {
+    return std::string{R"(<node><interface name="su.kidoz.storage_wiper.Helper">
   <method name="StartWipe">
     <arg type="s" direction="in"/><arg type="u" direction="in"/>
     <arg type="b" direction="in"/><arg type="b" direction="out"/>
     <arg type="s" direction="out"/>
   </method>
   <method name="GetDisks"><arg type=")"} +
-                        std::string{dbus_signatures::DISK_ARRAY} +
-                        R"(" direction="out"/></method>
+           disk_array_type + R"(" direction="out"/></method>
 </interface></node>)";
+}
 
 /// One fully populated disk record, built the way the privileged helper builds it
 auto make_disk_reply() -> GVariant* {
@@ -41,6 +42,21 @@ auto make_disk_reply() -> GVariant* {
     return g_variant_new(dbus_signatures::DISK_LIST_REPLY, &builder);
 }
 
+// The record layout a helper binary from an earlier package version serves: 20
+// fields, before is_partition and parent_disk were appended.
+constexpr auto LEGACY_DISK_ARRAY = "a(sssxbbsbsubbxiiiiiii)";
+constexpr auto LEGACY_DISK_RECORD = "(sssxbbsbsubbxiiiiiii)";
+
+/// One record in the older layout, as a helper an upgrade left running replies
+auto make_legacy_disk_reply() -> GVariant* {
+    GVariantBuilder builder;
+    g_variant_builder_init(&builder, G_VARIANT_TYPE(LEGACY_DISK_ARRAY));
+    g_variant_builder_add(&builder, LEGACY_DISK_RECORD, "/dev/sdb", "Legacy Model", "LEGACY1",
+                          gint64{2'048}, TRUE, TRUE, "ext4", FALSE, "", guint32{1}, TRUE, TRUE,
+                          gint64{100}, 0, 0, 30, 0, 0, 0, 0);
+    return g_variant_new("(a(sssxbbsbsubbxiiiiiii))", &builder);
+}
+
 class DBusClientTest : public testing::Test {
 protected:
     static GTestDBus* bus;
@@ -49,6 +65,10 @@ protected:
     std::thread helper_thread;
     std::unique_ptr<DBusClient> client;
     std::atomic<bool> reject{false};
+    std::string xml{helper_xml(dbus_signatures::DISK_ARRAY)};
+
+    /// The record the fake helper serves for GetDisks
+    virtual auto disk_reply() const -> GVariant* { return make_disk_reply(); }
 
     static void SetUpTestSuite() {
         bus = g_test_dbus_new(G_TEST_DBUS_NONE);
@@ -64,7 +84,7 @@ protected:
                             gpointer data) {
         const auto* self = static_cast<DBusClientTest*>(data);
         if (std::string_view{method_name} == "GetDisks") {
-            g_dbus_method_invocation_return_value(invocation, make_disk_reply());
+            g_dbus_method_invocation_return_value(invocation, self->disk_reply());
             return;
         }
         g_dbus_method_invocation_return_value(
@@ -101,7 +121,7 @@ protected:
                 static_cast<GDBusConnectionFlags>(G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
                                                   G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION),
                 nullptr, nullptr, nullptr);
-            auto* node = g_dbus_node_info_new_for_xml(XML.c_str(), nullptr);
+            auto* node = g_dbus_node_info_new_for_xml(xml.c_str(), nullptr);
             static const GDBusInterfaceVTable TABLE{method_call, nullptr, nullptr, {nullptr}};
             const auto registration = g_dbus_connection_register_object(
                 helper, PATH, node->interfaces[0], &TABLE, this, nullptr, nullptr);
@@ -197,6 +217,14 @@ TEST_F(DBusClientTest, RejectedStartDoesNotLeaveCallbackRegistered) {
     EXPECT_TRUE(pump_until([&] { return completed == 1; }));
 }
 
+/// A helper from an earlier package version: it advertises and serves the legacy
+/// 20-field record, as the helper binary an upgrade left running does.
+class LegacyHelperDBusClientTest : public DBusClientTest {
+protected:
+    LegacyHelperDBusClientTest() { xml = helper_xml(LEGACY_DISK_ARRAY); }
+    auto disk_reply() const -> GVariant* override { return make_legacy_disk_reply(); }
+};
+
 }  // namespace
 
 // Regression: 1.5.0 shipped a helper format string with one type code more than
@@ -238,6 +266,20 @@ TEST_F(DBusClientTest, GetDisksRecordRoundTripsEveryField) {
     EXPECT_EQ(disk.smart.available_spare_threshold_percent, 10);
     EXPECT_TRUE(disk.is_partition);
     EXPECT_EQ(disk.parent_disk, "/dev/sda");
+}
+
+// Regression: installing a new package does not replace a helper that is already
+// running, so a client can be answered by a helper serving the previous record
+// layout. That reply must surface as a named version skew, with both layouts in
+// the message, rather than a GLib-CRITICAL and an empty list.
+TEST_F(LegacyHelperDBusClientTest, RunningOlderHelperIsReportedAsVersionSkew) {
+    std::optional<std::expected<std::vector<DiskInfo>, util::Error>> result;
+    client->get_available_disks([&](auto value) { result = std::move(value); });
+    ASSERT_TRUE(pump_until([&] { return result.has_value(); }));
+    ASSERT_FALSE(result->has_value());
+    EXPECT_NE(result->error().message.find("older version"), std::string::npos);
+    EXPECT_NE(result->error().message.find(LEGACY_DISK_ARRAY), std::string::npos);
+    EXPECT_NE(result->error().message.find(dbus_signatures::DISK_ARRAY), std::string::npos);
 }
 
 // The shipped interface description must advertise the same GetDisks type the

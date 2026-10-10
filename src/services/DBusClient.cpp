@@ -570,72 +570,100 @@ void DBusClient::get_available_disks(
                 g_clear_error(&error);
             } else {
                 std::vector<DiskInfo> disks;
-                GVariant* array = g_variant_get_child_value(result, 0);
-                GVariantIter iter;
-                g_variant_iter_init(&iter, array);
+                GVariant* array = g_variant_n_children(result) > 0
+                                      ? g_variant_get_child_value(result, 0)
+                                      : nullptr;
+                std::string parse_error;
 
-                const gchar* path = nullptr;
-                const gchar* model = nullptr;
-                const gchar* serial = nullptr;
-                gint64 size_bytes = 0;
-                gboolean is_removable = FALSE;
-                gboolean is_ssd = FALSE;
-                const gchar* filesystem = nullptr;
-                gboolean is_mounted = FALSE;
-                const gchar* mount_point = nullptr;
-                guint32 smart_status = 0;
-                gboolean smart_available = FALSE;
-                gboolean smart_healthy = TRUE;
-                gint64 power_on_hours = -1;
-                gint32 reallocated_sectors = -1;
-                gint32 pending_sectors = -1;
-                gint32 temperature_celsius = -1;
-                gint32 uncorrectable_errors = -1;
-                gint32 percentage_used = -1;
-                gint32 available_spare = -1;
-                gint32 available_spare_threshold = -1;
-                gboolean is_partition = FALSE;
-                const gchar* parent_disk = nullptr;
+                // A helper left running by an earlier package version answers with the record
+                // layout of its own build. Handing that variant to the current format string
+                // would only raise a GLib-CRITICAL and report an empty list, so name the version
+                // skew instead.
+                if (array != nullptr &&
+                    g_variant_is_of_type(array, G_VARIANT_TYPE(dbus_signatures::DISK_ARRAY))) {
+                    GVariantIter iter;
+                    g_variant_iter_init(&iter, array);
 
-                while (g_variant_iter_next(
-                    &iter, dbus_signatures::DISK_RECORD_PARSE, &path, &model, &serial, &size_bytes,
-                    &is_removable, &is_ssd, &filesystem, &is_mounted, &mount_point, &smart_status,
-                    &smart_available, &smart_healthy, &power_on_hours, &reallocated_sectors,
-                    &pending_sectors, &temperature_celsius, &uncorrectable_errors, &percentage_used,
-                    &available_spare, &available_spare_threshold, &is_partition, &parent_disk)) {
-                    if (path) {
-                        SmartData smart;
-                        smart.status = static_cast<SmartData::HealthStatus>(smart_status);
-                        smart.available = smart_available != FALSE;
-                        smart.healthy = smart_healthy != FALSE;
-                        smart.power_on_hours = power_on_hours;
-                        smart.reallocated_sectors = reallocated_sectors;
-                        smart.pending_sectors = pending_sectors;
-                        smart.temperature_celsius = temperature_celsius;
-                        smart.uncorrectable_errors = uncorrectable_errors;
-                        smart.percentage_used = percentage_used;
-                        smart.available_spare_percent = available_spare;
-                        smart.available_spare_threshold_percent = available_spare_threshold;
+                    const gchar* path = nullptr;
+                    const gchar* model = nullptr;
+                    const gchar* serial = nullptr;
+                    gint64 size_bytes = 0;
+                    gboolean is_removable = FALSE;
+                    gboolean is_ssd = FALSE;
+                    const gchar* filesystem = nullptr;
+                    gboolean is_mounted = FALSE;
+                    const gchar* mount_point = nullptr;
+                    guint32 smart_status = 0;
+                    gboolean smart_available = FALSE;
+                    gboolean smart_healthy = TRUE;
+                    gint64 power_on_hours = -1;
+                    gint32 reallocated_sectors = -1;
+                    gint32 pending_sectors = -1;
+                    gint32 temperature_celsius = -1;
+                    gint32 uncorrectable_errors = -1;
+                    gint32 percentage_used = -1;
+                    gint32 available_spare = -1;
+                    gint32 available_spare_threshold = -1;
+                    gboolean is_partition = FALSE;
+                    const gchar* parent_disk = nullptr;
 
-                        disks.push_back(DiskInfo{.path = path,
-                                                 .model = model ? model : "",
-                                                 .serial = serial ? serial : "",
-                                                 .size_bytes = static_cast<uint64_t>(size_bytes),
-                                                 .is_removable = is_removable != FALSE,
-                                                 .is_ssd = is_ssd != FALSE,
-                                                 .filesystem = filesystem ? filesystem : "",
-                                                 .is_mounted = is_mounted != FALSE,
-                                                 .mount_point = mount_point ? mount_point : "",
-                                                 .is_lvm_pv = false,
-                                                 .is_partition = is_partition != FALSE,
-                                                 .parent_disk = parent_disk ? parent_disk : "",
-                                                 .smart = smart});
+                    while (g_variant_iter_next(
+                        &iter, dbus_signatures::DISK_RECORD_PARSE, &path, &model, &serial,
+                        &size_bytes, &is_removable, &is_ssd, &filesystem, &is_mounted, &mount_point,
+                        &smart_status, &smart_available, &smart_healthy, &power_on_hours,
+                        &reallocated_sectors, &pending_sectors, &temperature_celsius,
+                        &uncorrectable_errors, &percentage_used, &available_spare,
+                        &available_spare_threshold, &is_partition, &parent_disk)) {
+                        if (path) {
+                            SmartData smart;
+                            smart.status = static_cast<SmartData::HealthStatus>(smart_status);
+                            smart.available = smart_available != FALSE;
+                            smart.healthy = smart_healthy != FALSE;
+                            smart.power_on_hours = power_on_hours;
+                            smart.reallocated_sectors = reallocated_sectors;
+                            smart.pending_sectors = pending_sectors;
+                            smart.temperature_celsius = temperature_celsius;
+                            smart.uncorrectable_errors = uncorrectable_errors;
+                            smart.percentage_used = percentage_used;
+                            smart.available_spare_percent = available_spare;
+                            smart.available_spare_threshold_percent = available_spare_threshold;
+
+                            disks.push_back(
+                                DiskInfo{.path = path,
+                                         .model = model ? model : "",
+                                         .serial = serial ? serial : "",
+                                         .size_bytes = static_cast<uint64_t>(size_bytes),
+                                         .is_removable = is_removable != FALSE,
+                                         .is_ssd = is_ssd != FALSE,
+                                         .filesystem = filesystem ? filesystem : "",
+                                         .is_mounted = is_mounted != FALSE,
+                                         .mount_point = mount_point ? mount_point : "",
+                                         .is_lvm_pv = false,
+                                         .is_partition = is_partition != FALSE,
+                                         .parent_disk = parent_disk ? parent_disk : "",
+                                         .smart = smart});
+                        }
                     }
+                } else {
+                    parse_error = std::format(
+                        "storage-wiper-helper did not reply with {} (got {}): the running helper "
+                        "is an older version. Stop it and retry; it is D-Bus activated and starts "
+                        "again automatically: sudo pkill -f storage-wiper-helper",
+                        dbus_signatures::DISK_ARRAY,
+                        array != nullptr ? g_variant_get_type_string(array)
+                                         : "an unexpected reply");
                 }
-                g_variant_unref(array);
+
+                if (array != nullptr) {
+                    g_variant_unref(array);
+                }
                 g_variant_unref(result);
 
-                (*cb)(disks);
+                if (!parse_error.empty()) {
+                    (*cb)(std::unexpected(util::Error{std::move(parse_error)}));
+                } else {
+                    (*cb)(disks);
+                }
             }
 
             delete cb;
