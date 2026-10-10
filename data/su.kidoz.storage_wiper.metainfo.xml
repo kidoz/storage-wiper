@@ -88,6 +88,15 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="1.5.4" date="2026-10-10">
+      <description>
+        <p>Correctness fixes: good random-fill wipes are no longer reported as failed, and activating a running instance no longer cancels its work:</p>
+        <ul>
+          <li>The random-fill chi-squared limit was the p = 0.01 quantile for its 255 degrees of freedom while the code and tests labelled it 0.001, so about 1 in 100 good verified wipes reported a verification failure, exited nonzero and skipped the certificate; the limit is now the 0.001 quantile and lives in one place</li>
+          <li>Activating an already running instance presents the window it has instead of rebuilding it, which destroyed the ViewModel and cancelled every wipe in progress, and left the previous window orphaned</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.5.3" date="2026-10-10">
       <description>
         <p>Health reporting fix: an NVMe module is no longer flagged for a temperature that is normal for it:</p>
