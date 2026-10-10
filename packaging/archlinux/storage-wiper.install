@@ -1,8 +1,41 @@
 # Arch Linux package install hooks for storage-wiper
 
+# The privileged helper is D-Bus activated and keeps running between client
+# calls. Replacing its file on disk does not change the code an already running
+# helper executes, and a client from the new package would then talk to the
+# previous protocol. Stop every idle helper so the next client call activates
+# the new build; a helper that is mid-operation is left untouched.
+# Returns non-zero when a busy helper had to be left running.
+stop_idle_helper() {
+    local pid unit busy=0
+    for pid in $(pgrep -f '^/usr/lib/storage-wiper/storage-wiper-helper' 2>/dev/null); do
+        # A wipe, an erase, or a verification pass holds its block device open.
+        if ls -l "/proc/$pid/fd" 2>/dev/null |
+            grep -qE ' -> /dev/(sd|hd|vd|xvd|nvme|mmcblk|md|dm-|loop)'; then
+            busy=1
+            continue
+        fi
+        unit=$(awk -F/ 'END { print $NF }' "/proc/$pid/cgroup" 2>/dev/null)
+        case "$unit" in
+            storage-wiper-helper.service)
+                systemctl try-restart storage-wiper-helper.service 2>/dev/null || true
+                ;;
+            dbus-:*.service)
+                systemctl stop "$unit" 2>/dev/null || kill "$pid" 2>/dev/null || true
+                ;;
+            *)
+                kill "$pid" 2>/dev/null || true
+                ;;
+        esac
+    done
+    [ "$busy" -eq 0 ]
+}
+
 post_install() {
     echo ":: Reloading D-Bus configuration..."
     systemctl reload dbus.service 2>/dev/null || true
+
+    stop_idle_helper || true
 
     echo ""
     echo "Storage Wiper has been installed."
@@ -17,12 +50,22 @@ post_upgrade() {
     echo ":: Reloading D-Bus configuration..."
     systemctl reload dbus.service 2>/dev/null || true
 
-    # Leave running wipes intact; load the new helper after operations finish.
+    if stop_idle_helper; then
+        echo ":: No helper from the previous version is left running; the next client"
+        echo "   call starts version $1."
+    else
+        echo ":: A wipe or another helper operation is in progress, so the running helper"
+        echo "   was left untouched: an upgrade must not interrupt it. That helper still"
+        echo "   serves the previous protocol. After the operation finishes, restart it:"
+        echo "     sudo pkill -f storage-wiper-helper"
+        echo "   or, if you enabled the systemd unit:"
+        echo "     sudo systemctl restart storage-wiper-helper.service"
+    fi
+
     systemctl daemon-reload 2>/dev/null || true
 
     echo ""
     echo "Storage Wiper has been upgraded to version $1"
-    echo "When all wipes have finished, restart storage-wiper-helper.service to load the new version."
     echo ""
 }
 
@@ -32,7 +75,7 @@ post_remove() {
     systemctl disable storage-wiper-helper.service 2>/dev/null || true
 
     # Kill any remaining helper processes
-    pkill -f 'storage-wiper-helper' 2>/dev/null || true
+    pkill -f '^/usr/lib/storage-wiper/storage-wiper-helper' 2>/dev/null || true
 
     echo ":: Reloading D-Bus configuration..."
     systemctl reload dbus.service 2>/dev/null || true
