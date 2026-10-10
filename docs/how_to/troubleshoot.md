@@ -47,6 +47,36 @@ compilation.
 Direct D-Bus activation does not necessarily appear under the helper's systemd
 unit. See [helper activation](../explanation/architecture.md#helper-activation).
 
+## The client reports a helper from an older version
+
+An upgrade replaces the helper executable, but not a helper process that is
+already running: it keeps serving the protocol of the build it started with. A
+client that was built later detects the mismatch and names both record types, for
+example:
+
+```text
+storage-wiper-helper did not reply with a(sssxbbsbsubbxiiiiiiibs) (got a(sssxbbsbsubbxiiiiiii))
+```
+
+Clients that predate that check print a `GLib-CRITICAL` about a `GVariant`
+format string and report no devices instead.
+
+1. Stop the running helper; D-Bus activation starts the current build on the
+   next client call:
+
+   ```bash
+   sudo pkill -f storage-wiper-helper
+   ```
+
+2. If the helper runs under the systemd unit, use
+   `sudo systemctl restart storage-wiper-helper.service` instead. Only one
+   process can own the helper bus name, so a new instance gives up while an
+   older one still holds it.
+3. Repeat the failed command. Listing devices does not write to a disk.
+4. An upgrade stops an idle helper for you; a helper that was in the middle of
+   an operation is deliberately left running. See
+   [activate an upgraded helper](package_archlinux.md#activate-an-upgraded-helper).
+
 ## Authorization is denied or no password dialog appears
 
 1. Run the GUI and CLI as your normal user in a session with an available polkit

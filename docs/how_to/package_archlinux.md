@@ -70,19 +70,31 @@ For the packaging tool's options, consult the installed `makepkg(8)` manual.
 ## Activate an upgraded helper
 
 The [install hook](../../packaging/archlinux/storage-wiper.install) reloads
-D-Bus configuration and systemd unit definitions on upgrade. It leaves the
-running helper in place so an upgrade does not interrupt a wipe.
+D-Bus configuration and systemd unit definitions on upgrade, and it stops an idle
+helper. Replacing the helper executable on disk does not replace a helper that is
+already running, so without that step a client from the new package would talk to
+the previous protocol.
 
-After every wipe has reached a terminal result, restart a systemd-managed
-helper to load the new executable:
+A helper that is in the middle of an operation is deliberately left untouched,
+because an upgrade must not interrupt a wipe. That helper keeps serving the
+previous protocol until it is stopped. After the operation reaches a terminal
+result, stop it so the next client call activates the new build:
+
+```bash
+sudo pkill -f storage-wiper-helper
+```
+
+Only one process can own the helper bus name, and a new instance gives up when
+the name is taken. When the helper runs under the systemd unit, reload it through
+the unit instead:
 
 ```bash
 sudo systemctl restart storage-wiper-helper.service
 ```
 
-This command manages the systemd unit. A helper launched directly by D-Bus
-activation must also release its bus name before the new systemd instance can
-start; see [helper activation](../explanation/architecture.md#helper-activation).
+A D-Bus-activated helper does not run in that unit's sandbox, so the unit
+manages a helper only once it is running. See
+[helper activation](../explanation/architecture.md#helper-activation).
 Do not remove the package during a wipe: its removal hook stops the helper.
 
 Follow [inspect devices](../tutorials/inspect_devices.md) to check the installed

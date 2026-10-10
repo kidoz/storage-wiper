@@ -158,4 +158,11 @@ Compiled introspection uses the shared signature constants; regression tests
 also check the published XML. When changing the contract, update the helper,
 client, constants, published XML, and related tests together.
 
+The client checks reply types against those constants before parsing. A
+`WipeProgress` signal that does not match is ignored, and a `GetDisks` reply with
+an unexpected type is reported as a named version skew showing both record types
+instead of an empty device list. In practice such a reply comes from a helper
+process left over from an earlier package version; see
+[activate an upgraded helper](../how_to/package_archlinux.md#activate-an-upgraded-helper).
+
 [Reference](README.md) · [Documentation home](../README.md)
