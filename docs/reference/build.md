@@ -14,17 +14,16 @@ certificates.
 | Meson ≥ 0.59.0, Ninja, pkg-config | Configure, compile, and locate libraries |
 | `gtk4` ≥ 4.0 | GTK GUI |
 | `gtkmm-4.0` ≥ 4.6 | C++ GTK bindings |
-| `libadwaita-1` ≥ 1.0 | Adwaita GUI components |
+| `libadwaita-1` ≥ 1.5 | Adwaita GUI components |
 | `polkit-gobject-1` | Helper authorization |
+| `blkid` | Read-only filesystem and LVM signature detection |
 | `gio-2.0` | D-Bus and GLib integration |
 | D-Bus system bus and polkit service/agent | Installed device operations and interactive authorization |
 | `gtest`, `gmock` | Builds with `enable_tests=true` |
 
 Library names are pkg-config dependency names; install the corresponding
 development packages on distributions that separate them. The listed GUI
-minimums are the checks declared by Meson. The source uses newer APIs, including
-`AdwAlertDialog`, so older packages that pass those minimum checks may still lack
-required declarations. Use a recent GTK/libadwaita development stack.
+minimums match the APIs used by the source.
 
 Optional development tools: `just`, clang-format, clang-tidy, cppcheck,
 scan-build, Valgrind, and `entr` for the watch recipe.
@@ -35,7 +34,7 @@ Project-specific options:
 
 | Option | Type | Default | Effect |
 | --- | --- | --- | --- |
-| `enable_tests` | Boolean | `false` | Build and register all three test suites |
+| `enable_tests` | Boolean | `false` | Build and register the test suites |
 | `enable_clang_tidy` | Boolean | `false` | Add the `clang-tidy` target when the tool is found |
 | `enable_cppcheck` | Boolean | `false` | Add the `cppcheck` target when the tool is found |
 | `systemd_system_unit_dir` | String | Empty | Override the unit installation directory; default is `<prefix>/<libdir>/systemd/system` |
@@ -50,6 +49,8 @@ Relevant built-in Meson options:
 | `werror` | `true` | Treat compiler warnings as errors |
 | `optimization` | `3` | Default optimization setting |
 | `b_ndebug` | `if-release` | Disable assertions in release builds |
+| `b_pie` | `true` | Build position-independent executables |
+| Linker flags | `-Wl,-z,relro,-z,now` | Enable full RELRO |
 | `prefix`, `bindir`, `libdir`, `datadir` | Distribution or Meson defaults | Installation paths |
 | `b_sanitize` | `address`, `undefined`, `address,undefined`, or `thread` | Sanitizer selection |
 | `b_lundef` | Set `false` in sanitizer examples | Linker undefined-symbol checking |
@@ -72,15 +73,20 @@ the CLI without configuring the GUI dependencies.
 
 ## Test targets
 
-With `enable_tests=true`:
+With `enable_tests=true` (GTK lifecycle tests also require `xvfb-run` and
+`dbus-run-session`):
 
 | Meson test name | Executable | Coverage | Timeout |
 | --- | --- | --- | --- |
 | `unit_tests` | `storage_wiper_tests` | Algorithms on temporary files/pipes, ViewModel, services, utilities, and DI | 300 seconds |
 | `device_io_tests` | `storage_wiper_io_tests` | Real wipe service and algorithms against wrapped fake device I/O | 60 seconds |
 | `dbus_client_tests` | `storage_wiper_dbus_tests` | D-Bus client on a private test bus | 60 seconds |
+| `gtk_lifecycle_tests` | `storage_wiper_gtk_tests` under a private session bus and Xvfb | Window teardown, queued messages, close dialogs with mock services | 90 seconds |
+| `service_integration` | Python unittest | Activation wiring and package hooks with mocked systemctl | 30 seconds |
+| `helper_authorization_tests` | `storage_wiper_auth_tests` | Delayed authorization, deadlines, disconnects and limits on a private bus | 30 seconds |
+| `test_runner_environment` | Python test runner | Credential isolation and test exit-status propagation | 30 seconds |
 
-`meson test -C BUILD_DIR` runs all registered suites. Google Test case filters
+`python3 scripts/run_tests.py -C BUILD_DIR` runs all registered suites. Google Test case filters
 apply when invoking an individual executable. Tests do not need a root helper
 installation; some unit cases can inspect real device metadata without writing
 devices.

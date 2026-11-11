@@ -311,9 +311,22 @@ endif
 
 # ========== Testing Configuration ==========
 if get_option('enable_tests')
+  test_python = find_program('python3')
+  test('test_runner_environment', test_python, args: files('tests/test_run_tests.py'), timeout: 30)
+  test('service_integration', test_python, args: files('tests/test_service_integration.py'), timeout: 30)
+
   # Google Test dependencies
   gtest_dep = dependency('gtest', required: true)
   gmock_dep = dependency('gmock', required: true)
+
+  auth_test_exe = executable(
+    'storage_wiper_auth_tests',
+    files('tests/test_main.cpp', 'tests/unit/services/HelperAuthorizationTest.cpp'),
+    include_directories: include_directories('src', 'tests'),
+    dependencies: [gtest_dep, gmock_dep, gio_dep, polkit_dep],
+    install: false
+  )
+  test('helper_authorization_tests', auth_test_exe, timeout: 30)
 
   # Test sources
   test_sources = files(
@@ -330,6 +343,8 @@ if get_option('enable_tests')
     'tests/unit/algorithms/NvmeSanitizeTest.cpp',
     'tests/unit/algorithms/VerificationHelperTest.cpp',
     'tests/unit/services/WipeServiceTest.cpp',
+    'tests/unit/services/WipePlanTest.cpp',
+    'tests/unit/services/WipeJobTest.cpp',
     'tests/unit/services/DiskServiceTest.cpp',
     'tests/unit/services/DevicePathMatcherTest.cpp',
     'tests/unit/services/SmartServiceTest.cpp',
@@ -344,6 +359,29 @@ if get_option('enable_tests')
 
   # Test include directories
   test_inc = include_directories('src', 'tests')
+
+  # Run real window teardown and dialog callbacks against mock services.
+  xvfb_run = find_program('xvfb-run', required: false)
+  dbus_run_session = find_program('dbus-run-session', required: false)
+  if xvfb_run.found() and dbus_run_session.found()
+    gtk_test_exe = executable(
+      'storage_wiper_gtk_tests',
+      files('tests/test_main.cpp', 'tests/gtk/MainWindowLifecycleTest.cpp',
+            'src/views/MainWindow.cpp', 'src/views/MainWindowContent.cpp',
+            'src/views/DiskRow.cpp', 'src/views/AlgorithmRow.cpp',
+            'src/viewmodels/MainViewModel.cpp', 'src/util/AppSettings.cpp',
+            'src/util/WipeCertificate.cpp', 'src/util/Logger.cpp'),
+      resources,
+      include_directories: test_inc,
+      dependencies: [gtest_dep, gmock_dep, gtkmm_dep, adwaita_dep, gio_dep],
+      install: false
+    )
+    test('gtk_lifecycle_tests', xvfb_run,
+      args: ['-a', dbus_run_session.full_path(), '--', gtk_test_exe], timeout: 90,
+      env: ['LSAN_OPTIONS=suppressions=' + meson.project_source_root() / 'tests/gtk/lsan.supp'])
+  else
+    warning('GTK lifecycle tests require xvfb-run and dbus-run-session')
+  endif
 
   # Additional sources needed for tests (not in shared_sources)
   test_extra_sources = files(
