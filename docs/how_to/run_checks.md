@@ -4,6 +4,11 @@ Use these commands from the repository root to validate a change. Install the
 [test and analysis dependencies](../reference/build.md#dependencies) for the
 checks you choose. Run tests as a normal user.
 
+Use `scripts/run_tests.py` instead of invoking `meson test` directly. Meson saves
+its inherited environment in text and JSON logs. The wrapper passes only PATH,
+HOME, LANG, LC_ALL, and TMPDIR, excluding authentication credentials. It does not
+scrub older logs; remove environment records before sharing those artifacts.
+
 ## Run all test suites
 
 For a new build directory:
@@ -11,23 +16,28 @@ For a new build directory:
 ```bash
 meson setup build-checks --buildtype=debug -Denable_tests=true
 meson compile -C build-checks
-meson test -C build-checks --print-errorlogs
+python3 scripts/run_tests.py -C build-checks --print-errorlogs
 ```
 
 For an existing build, enable tests with
 `meson configure build-checks -Denable_tests=true`, then compile and test.
-Meson runs the unit, simulated device-I/O, and private-bus D-Bus suites. See
+Meson runs unit, simulated device-I/O, private-bus D-Bus, authorization, service
+integration, and test-environment isolation suites. When `xvfb-run` and
+`dbus-run-session` are installed, it also runs real GTK lifecycle tests with mock
+services on an isolated display. See
 [test targets](../reference/build.md#test-targets) for their scope.
+The GTK suite suppresses only Fontconfig process-global cache leaks via
+`tests/gtk/lsan.supp`; application leak checks, ASan, and UBSan remain enabled.
 
 The command-runner equivalent is `just test`, which configures tests in its
-selected build directory, builds, and runs all three suites.
+selected build directory, builds, and runs all registered suites.
 
 ## Focus a regression check
 
 ```bash
 ./build-checks/storage_wiper_tests --gtest_list_tests
 ./build-checks/storage_wiper_tests --gtest_filter='*MainViewModel*'
-meson test -C build-checks device_io_tests dbus_client_tests --print-errorlogs
+python3 scripts/run_tests.py -C build-checks device_io_tests dbus_client_tests --print-errorlogs
 ```
 
 Google Test filtering applies to the executable you invoke. `just test-filter`
@@ -59,6 +69,9 @@ meson compile -C build-analysis clang-tidy
 meson compile -C build-analysis cppcheck
 ```
 
+Clang-tidy limits header diagnostics to project `src/` headers; dependency headers
+are still parsed. `just lint` propagates failures.
+
 The tools must be installed for their targets to exist. Inspect analyzer
 diagnostics as well as command status. For strict automation, invoke the tools
 or Meson targets directly: some convenience `just` recipes print a fallback
@@ -73,7 +86,7 @@ build:
 meson setup build-sanitized --buildtype=debug -Denable_tests=true \
   -Db_sanitize=address,undefined -Db_lundef=false
 meson compile -C build-sanitized
-meson test -C build-sanitized --print-errorlogs
+python3 scripts/run_tests.py -C build-sanitized --print-errorlogs
 ```
 
 ThreadSanitizer requires its own build with `-Db_sanitize=thread`. Do not combine

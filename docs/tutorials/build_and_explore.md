@@ -73,7 +73,7 @@ You have exercised algorithm code without selecting a `/dev/` device.
 ## 6. Run the simulated service tests
 
 ```bash
-meson test -C build-tutorial device_io_tests dbus_client_tests --print-errorlogs
+python3 scripts/run_tests.py -C build-tutorial device_io_tests dbus_client_tests --print-errorlogs
 ```
 
 Meson reports two successful test suites. The device-I/O suite substitutes

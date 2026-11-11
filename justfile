@@ -124,14 +124,14 @@ test:
     @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}} -Denable_tests=true; fi
     @meson configure {{build_dir}} -Denable_tests=true >/dev/null
     meson compile -C {{build_dir}}
-    meson test -C {{build_dir}}
+    python3 scripts/run_tests.py -C {{build_dir}}
 
 # Run tests with verbose output
 test-verbose:
     @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}} -Denable_tests=true; fi
     @meson configure {{build_dir}} -Denable_tests=true >/dev/null
     meson compile -C {{build_dir}}
-    meson test -C {{build_dir}} -v
+    python3 scripts/run_tests.py -C {{build_dir}} -v
 
 # Run tests matching a pattern (e.g., just test-filter "ZeroFill")
 test-filter pattern:
