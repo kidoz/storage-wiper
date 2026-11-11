@@ -31,6 +31,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <blkid/blkid.h>
 #include <mntent.h>
 
 // Linux-specific headers
@@ -191,8 +192,12 @@ auto DiskService::get_available_disks_sync() -> std::vector<DiskInfo> {
             if (smart_service_ && SmartService::is_smart_supported(device_path)) {
                 smart_eligible_paths.push_back(device_path);
             }
+            const size_t first_index = disks.size();
             disks.emplace_back(std::move(info));
             append_partitions(disks, entry.path().string(), mount_cache);
+            if (disks[first_index].size_bytes == 0) {
+                disks.erase(disks.begin() + static_cast<std::ptrdiff_t>(first_index), disks.end());
+            }
         }
     }
 
@@ -318,6 +323,35 @@ auto DiskService::parse_mount_table() -> MountCache {
     }
 
     return cache;
+}
+
+auto DiskService::probe_lvm_pv(const std::string& device_path) -> std::expected<bool, util::Error> {
+    const util::FileDescriptor fd{open(device_path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW)};
+    if (!fd) {
+        return std::unexpected(util::Error{"Cannot open device for LVM signature inspection"});
+    }
+    const std::unique_ptr<blkid_struct_probe, decltype(&blkid_free_probe)> probe{blkid_new_probe(),
+                                                                                 &blkid_free_probe};
+    if (!probe || blkid_probe_set_device(probe.get(), fd.get(), 0, 0) != 0 ||
+        blkid_probe_enable_partitions(probe.get(), 0) != 0 ||
+        blkid_probe_enable_superblocks(probe.get(), 1) != 0 ||
+        blkid_probe_set_superblocks_flags(probe.get(), BLKID_SUBLKS_TYPE) != 0) {
+        return std::unexpected(util::Error{"Cannot initialize LVM signature inspection"});
+    }
+    const int result = blkid_do_safeprobe(probe.get());
+    if (result == 1) {
+        return false;
+    }
+    if (result != 0) {
+        return std::unexpected(util::Error{"Device signatures are unreadable or ambiguous"});
+    }
+    const char* type = nullptr;
+    size_t length = 0;
+    if (blkid_probe_lookup_value(probe.get(), "TYPE", &type, &length) != 0 || !type) {
+        return false;
+    }
+    const std::string_view signature{type};
+    return signature == "LVM2_member" || signature == "LVM1_member";
 }
 
 auto DiskService::collect_dm_holders(const std::string& sys_path, const std::string& device_name)
@@ -597,7 +631,16 @@ auto DiskService::parse_disk_info(const std::string& device_path, const MountCac
 
     // Collect device-mapper (dm-*) holders for this device and its partitions
     auto dm_holders = collect_dm_holders(sys_path, device_name);
-    info.is_lvm_pv = !dm_holders.empty();
+    info.has_dm_holders = !dm_holders.empty();
+    const auto lvm = probe_lvm_pv(device_path);
+    if (!lvm) {
+        LOG_WARNING("DiskService", lvm.error().message + ": " + device_path);
+        // An unreadable or ambiguous backing-store signature is not a safe
+        // target to offer for confirmation. Enumeration skips zero-size entries.
+        info.size_bytes = 0;
+        return info;
+    }
+    info.is_lvm_pv = *lvm;
 
     // OPTIMIZATION: Use pre-parsed mount cache instead of re-reading /proc/mounts
     if (auto mount = mount_cache.find_mount_for_device(device_path, dm_holders)) {
@@ -637,7 +680,14 @@ auto DiskService::parse_partition_info(const std::string& device_path,
     // dm holders of the partition itself (e.g., LVM PV on a partition)
     const auto part_name = fs::path{device_path}.filename().string();
     const auto dm_holders = collect_dm_holders(part_sys_path, part_name);
-    info.is_lvm_pv = !dm_holders.empty();
+    info.has_dm_holders = !dm_holders.empty();
+    const auto lvm = probe_lvm_pv(device_path);
+    if (!lvm) {
+        LOG_WARNING("DiskService", lvm.error().message + ": " + device_path);
+        info.size_bytes = 0;
+        return info;
+    }
+    info.is_lvm_pv = *lvm;
 
     // Exact mount match: a partition is not a parent device, and matching
     // "partitions of the partition" would let /dev/sda1 adopt /dev/sda12's
@@ -657,6 +707,7 @@ auto DiskService::parse_partition_info(const std::string& device_path,
 void DiskService::append_partitions(std::vector<DiskInfo>& disks, const std::string& disk_sys_path,
                                     const MountCache& mount_cache) {
     const DiskInfo parent = disks.back();
+    const size_t parent_index = disks.size() - 1;
     std::error_code iter_ec;
     for (fs::directory_iterator it{disk_sys_path, iter_ec}, end; it != end && !iter_ec;
          it.increment(iter_ec)) {
@@ -679,7 +730,13 @@ void DiskService::append_partitions(std::vector<DiskInfo>& disks, const std::str
 
         if (auto part = parse_partition_info(part_path, it->path().string(), parent, mount_cache);
             part.size_bytes > 0) {
+            disks[parent_index].is_lvm_pv = disks[parent_index].is_lvm_pv || part.is_lvm_pv;
+            disks[parent_index].has_dm_holders =
+                disks[parent_index].has_dm_holders || part.has_dm_holders;
             disks.push_back(std::move(part));
+        } else {
+            // The whole-disk target would also destroy the uninspected child.
+            disks[parent_index].size_bytes = 0;
         }
     }
 }

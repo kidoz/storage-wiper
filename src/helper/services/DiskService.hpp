@@ -142,10 +142,10 @@ private:
      * @param mount_cache Pre-parsed mount table
      * @return DiskInfo with is_partition = true
      */
-    [[nodiscard]] static auto parse_partition_info(const std::string& device_path,
-                                                   const std::string& part_sys_path,
-                                                   const DiskInfo& parent,
-                                                   const MountCache& mount_cache) -> DiskInfo;
+    [[nodiscard]] auto parse_partition_info(const std::string& device_path,
+                                            const std::string& part_sys_path,
+                                            const DiskInfo& parent, const MountCache& mount_cache)
+        -> DiskInfo;
 
     /**
      * @brief Append all partitions of a disk to the disk list
@@ -180,6 +180,9 @@ private:
     [[nodiscard]] static auto collect_dm_holders(const std::string& sys_path,
                                                  const std::string& device_name)
         -> std::vector<std::string>;
+
+    [[nodiscard]] virtual auto probe_lvm_pv(const std::string& device_path)
+        -> std::expected<bool, util::Error>;
 
     // shared_ptr: detached SMART query threads that outlive the collection
     // budget capture these, so they must survive DiskService destruction.

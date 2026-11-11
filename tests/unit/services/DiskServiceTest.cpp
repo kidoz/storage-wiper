@@ -14,8 +14,36 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+
+namespace {
+auto lvm_label() -> std::array<uint8_t, 512> {
+    std::array<uint8_t, 512> label{};
+    constexpr std::string_view id = "LABELONE";
+    constexpr std::string_view type = "LVM2 001";
+    std::ranges::copy(id, label.begin());
+    label[8] = 1;    // Label occupies sector 1.
+    label[20] = 32;  // PV header offset, little endian.
+    std::ranges::copy(type, label.begin() + 24);
+    std::fill_n(label.begin() + 32, 32, static_cast<uint8_t>('a'));
+    // LVM label CRC covers bytes 20..511, with its documented seed.
+    uint32_t crc = 0xf597'a6cf;
+    for (size_t index = 20; index < label.size(); ++index) {
+        crc ^= label[index];
+        for (int bit = 0; bit < 8; ++bit) {
+            crc = (crc >> 1) ^ ((crc & 1U) != 0 ? 0xedb8'8320U : 0U);
+        }
+    }
+    for (unsigned int index = 0; index < 4; ++index) {
+        label[16 + index] = static_cast<uint8_t>(crc >> (index * 8));
+    }
+    return label;
+}
+}  // namespace
 
 class DiskServiceTest : public ::testing::Test {
 protected:
@@ -24,9 +52,50 @@ protected:
                                   const std::string& directory, const MountCache& mounts) {
         instance.append_partitions(disks, directory, mounts);
     }
+    auto probe_lvm(const std::string& path) -> std::expected<bool, util::Error> {
+        return service.probe_lvm_pv(path);
+    }
 };
 
 // ========== validate_device_path Tests ==========
+
+TEST_F(DiskServiceTest, DetectsInactiveLvmSignatureWithoutDeviceMapperHolders) {
+    TempTestFile file;
+    ASSERT_TRUE(file.valid());
+    ASSERT_EQ(ftruncate(file.fd(), 8 << 20), 0);
+    const auto label = lvm_label();
+    ASSERT_EQ(pwrite(file.fd(), label.data(), label.size(), 512), 512);
+    const auto detected = probe_lvm(file.path());
+    ASSERT_TRUE(detected) << detected.error().message;
+    EXPECT_TRUE(*detected);
+    std::array<uint8_t, 512> after{};
+    ASSERT_EQ(pread(file.fd(), after.data(), after.size(), 512), 512);
+    EXPECT_EQ(after, label);  // Probe leaves the source bytes unchanged.
+}
+
+TEST_F(DiskServiceTest, BlankMediaAndInvalidLvmChecksumAreNotPhysicalVolumes) {
+    TempTestFile file;
+    ASSERT_TRUE(file.valid());
+    ASSERT_EQ(ftruncate(file.fd(), 8 << 20), 0);
+    ASSERT_TRUE(probe_lvm(file.path()).has_value());
+    EXPECT_FALSE(*probe_lvm(file.path()));
+    auto label = lvm_label();
+    label[16] ^= 0xff;
+    ASSERT_EQ(pwrite(file.fd(), label.data(), label.size(), 512), 512);
+    const auto detected = probe_lvm(file.path());
+    ASSERT_TRUE(detected);
+    EXPECT_FALSE(*detected);
+}
+
+TEST_F(DiskServiceTest, SignatureProbeReportsMissingAndSymlinkTargets) {
+    TempTestFile file;
+    ASSERT_TRUE(file.valid());
+    const auto link = file.path() + "-link";
+    std::filesystem::create_symlink(file.path(), link);
+    EXPECT_FALSE(probe_lvm(link));
+    std::filesystem::remove(link);
+    EXPECT_FALSE(probe_lvm(link));
+}
 
 TEST_F(DiskServiceTest, ValidateDevicePath_ValidSataPath_ReturnsSuccess) {
     // Note: This test will fail if /dev/sda doesn't exist on the system
@@ -219,6 +288,9 @@ TEST_F(DiskServiceTest, GetAvailableDisks_HasNonZeroSize) {
 TEST_F(DiskServiceTest, EveryPartitionRetainsOriginalDiskParent) {
     class TestDiskService : public DiskService {
     public:
+        auto probe_lvm_pv(const std::string& path) -> std::expected<bool, util::Error> override {
+            return path.ends_with("sda1");
+        }
         auto validate_device_path(const std::string&) -> std::expected<void, util::Error> override {
             return {};
         }
@@ -238,16 +310,21 @@ TEST_F(DiskServiceTest, EveryPartitionRetainsOriginalDiskParent) {
         std::ofstream{path + "/size"} << "8";
     }
     auto parent = MockDiskService::CreateTestDisk("/dev/sda", 16'384);
+    std::filesystem::create_directories(directory + "/sda2/holders/dm-0");
     parent.model = "Parent model";
     std::vector<DiskInfo> disks{parent};
     MountCache mounts{{{.device = "/dev/sda2", .mount_point = "/mnt/test", .filesystem = "ext4"}}};
     append_partitions(instance, disks, directory, mounts);
     ASSERT_EQ(disks.size(), 4u);
+    EXPECT_TRUE(disks.front().is_lvm_pv);
+    EXPECT_TRUE(disks.front().has_dm_holders);
     for (size_t i = 1; i < disks.size(); ++i) {
         EXPECT_EQ(disks[i].parent_disk, "/dev/sda");
         EXPECT_EQ(disks[i].model, parent.model);
         EXPECT_EQ(disks[i].serial, parent.serial);
         EXPECT_TRUE(disks[i].is_partition);
+        EXPECT_EQ(disks[i].is_lvm_pv, disks[i].path == "/dev/sda1");
+        EXPECT_EQ(disks[i].has_dm_holders, disks[i].path == "/dev/sda2");
         EXPECT_EQ(disks[i].is_mounted, disks[i].path == "/dev/sda2");
     }
 }

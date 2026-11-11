@@ -83,7 +83,9 @@ void DiskRow::populate_from_disk_info() {
     }
 
     if (disk_.is_lvm_pv) {
-        info_text += " - LVM physical volume";
+        info_text += " - Contains LVM physical volume data";
+    } else if (disk_.has_dm_holders) {
+        info_text += " - Device-mapper backing device";
     }
 
     if (disk_.is_removable) {
