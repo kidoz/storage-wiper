@@ -64,6 +64,15 @@ inline constexpr char DISK_ARRAY[] = "a(sssxbbsbsubbxiiiiiiibs)";
 /// Complete method reply: a single-element tuple holding the array
 inline constexpr char DISK_LIST_REPLY[] = "(a(sssxbbsbsubbxiiiiiiibs))";
 
+// Additive v2 method: legacy GetDisks keeps its original wire contract.
+inline constexpr unsigned int DISK_CONTRACT_VERSION = 2;
+inline constexpr char DISK_RECORD_V2[] = "(sssxbbsbsubbxiiiiiiibsbb)";
+inline constexpr char DISK_RECORD_PARSE_V2[] = "(&s&s&sxbb&sb&subbxiiiiiiib&sbb)";
+inline constexpr char DISK_ARRAY_V2[] = "a(sssxbbsbsubbxiiiiiiibsbb)";
+inline constexpr char DISK_LIST_REPLY_V2[] = "(ua(sssxbbsbsubbxiiiiiiibsbb))";
+static_assert(type_code_count(DISK_RECORD_V2) == DISK_RECORD_FIELDS + 2);
+static_assert(type_code_count(DISK_RECORD_PARSE_V2) == DISK_RECORD_FIELDS + 2);
+
 static_assert(type_code_count(DISK_RECORD) == DISK_RECORD_FIELDS,
               "GetDisks build format must name exactly one type code per field");
 static_assert(type_code_count(DISK_RECORD_PARSE) == DISK_RECORD_FIELDS,
@@ -102,6 +111,7 @@ inline constexpr char CANCEL_WIPE_REPLY[] = "(b)";
 
 inline constexpr std::size_t WIPE_PROGRESS_FIELDS = 17;
 inline constexpr char WIPE_PROGRESS[] = "(sdiisbbstttxbbbdt)";
+inline constexpr char PREPARED_WIPE_PROGRESS[] = "(s(sdiisbbstttxbbbdt))";
 inline constexpr char WIPE_PROGRESS_PARSE[] = "(&sdii&sbb&stttxbbbdt)";
 
 static_assert(type_code_count(WIPE_PROGRESS) == WIPE_PROGRESS_FIELDS);

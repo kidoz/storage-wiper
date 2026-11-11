@@ -42,6 +42,13 @@
       -->
     </method>
 
+    <!-- Version 2 adds positive LVM-signature and device-mapper-backing flags.
+         Clients must reject unsupported contract versions. -->
+    <method name="GetDisks2">
+      <arg name="version" type="u" direction="out"/>
+      <arg name="disks" type="a(sssxbbsbsubbxiiiiiiibsbb)" direction="out"/>
+    </method>
+
     <!--
       GetDiskSMART:
       Returns the full SMART health record for a single device.
@@ -121,19 +128,43 @@
       -->
     </method>
 
+    <method name="GetWipeJobs">
+      <arg name="jobs" type="aa{sv}" direction="out"/>
+    </method>
+    <method name="CancelPreparedWipe">
+      <arg name="plan_id" type="s" direction="in"/>
+      <arg name="cancelled" type="b" direction="out"/>
+    </method>
+
     <!--
-      StartWipe:
-      Begin wiping a disk with the specified algorithm.
-      Progress is reported via the WipeProgress signal.
+      PrepareWipe:
+      Discover identity and firmware scope without writing to the device.
+      StartPreparedWipe consumes the confirmed plan ID.
+      Progress is reported via PreparedWipeProgress.
 
       Authorization: su.kidoz.storage_wiper.wipe-disk
     -->
+    <method name="PrepareWipe">
+      <arg name="device_path" type="s" direction="in"/>
+      <arg name="algorithm_id" type="u" direction="in"/>
+      <arg name="verify" type="b" direction="in"/>
+      <arg name="plan" type="a{sv}" direction="out"/>
+    </method>
+    <method name="StartPreparedWipe">
+      <arg name="plan_id" type="s" direction="in"/>
+      <arg name="started" type="b" direction="out"/>
+      <arg name="error_message" type="s" direction="out"/>
+    </method>
+    <method name="DiscardWipePlan">
+      <arg name="plan_id" type="s" direction="in"/>
+      <arg name="discarded" type="b" direction="out"/>
+    </method>
     <method name="StartWipe">
       <arg name="device_path" type="s" direction="in"/>
       <arg name="algorithm_id" type="u" direction="in"/>
       <arg name="verify" type="b" direction="in"/>
-      <!-- verify: request post-wipe verification. Ignored (reported back as
-           verification_enabled=false) for algorithms that do not support it. -->
+      <!-- Legacy path-only entrypoint: always rejects. Use PrepareWipe and
+           StartPreparedWipe with an explicitly confirmed plan instead. -->
       <arg name="started" type="b" direction="out"/>
       <arg name="error_message" type="s" direction="out"/>
     </method>
@@ -152,9 +183,13 @@
     </method>
 
     <!--
-      WipeProgress:
-      Signal emitted during wipe operation to report progress.
+      PreparedWipeProgress binds progress to a single-use plan ID.
+      Legacy WipeProgress is retained in introspection but is not emitted.
     -->
+    <signal name="PreparedWipeProgress">
+      <arg name="plan_id" type="s"/>
+      <arg name="progress" type="(sdiisbbstttxbbbdt)"/>
+    </signal>
     <signal name="WipeProgress">
       <arg name="device_path" type="s"/>
       <arg name="percentage" type="d"/>

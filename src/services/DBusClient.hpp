@@ -108,6 +108,14 @@ public:
     void invalidate_cache() override;
 
     // IWipeService interface
+    [[nodiscard]] auto prepare_wipe(const std::string& path, WipeAlgorithm algorithm, bool verify)
+        -> std::expected<WipePlan, util::Error> override;
+    auto start_prepared_wipe(const WipePlan& plan, ProgressCallback callback) -> bool override;
+    void discard_wipe_plan(const std::string& id) override;
+    [[nodiscard]] auto get_wipe_jobs()
+        -> std::expected<std::vector<WipeJobSnapshot>, util::Error> override;
+    auto observe_wipe_job(const WipePlan& plan, ProgressCallback callback) -> bool override;
+    auto cancel_prepared_wipe(const std::string& plan_id) -> bool override;
     auto wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm, ProgressCallback callback)
         -> bool override;
     auto wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm, ProgressCallback callback,
@@ -129,6 +137,8 @@ private:
     // One progress callback per device so several concurrent wipes can be
     // routed to their own caller by the signal's device_path argument.
     std::map<std::string, std::shared_ptr<ProgressCallback>> progress_callbacks_;
+    std::map<std::string, std::string> progress_plan_ids_;
+    std::map<std::string, std::pair<std::string, WipeProgress>> pending_progress_;
     mutable std::mutex callback_mutex_;
 
     // Algorithm info cache (fetched once from helper)

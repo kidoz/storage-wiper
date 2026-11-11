@@ -45,8 +45,11 @@ it can fall back to cryptographic Format NVM if the controller advertises the
 required capability. Unsupported hardware fails the operation rather than
 starting a software overwrite.
 
-Hardware erase cannot target a partition. The helper treats NVMe hardware
-erase as controller-wide for mount checks and exclusion of concurrent wipes;
+Hardware erase cannot target a partition. The helper prepares the method and
+actual scope before confirmation: Sanitize covers the subsystem, while secure
+Format NVM follows the controller's FNA secure-erase scope bit. Mount checks and
+exclusive claims follow that plan. Subsystem-wide operations are rejected when
+the helper cannot establish a single local namespace and controller;
 see [device scope](../explanation/device_scope.md#nvme-namespaces).
 
 For choosing a procedure, see [wipe a device](../how_to/wipe_device.md) and

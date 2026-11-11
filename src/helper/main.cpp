@@ -10,21 +10,31 @@
  * Authorization is handled via polkit.
  */
 
+#include "helper/services/AsyncAuthorization.hpp"
 #include "helper/services/DiskService.hpp"
+#include "helper/services/WipeJobRegistry.hpp"
+#include "helper/services/WipePlanRegistry.hpp"
 #include "helper/services/WipeService.hpp"
 #include "services/DBusSignatures.hpp"
 #include "services/DevicePolicy.hpp"
+#include "services/WipeJobVariant.hpp"
+#include "services/WipePlanVariant.hpp"
 #include "util/Logger.hpp"
 
 #include <gio/gio.h>
+#include <glib-unix.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <csignal>
 #include <cstddef>
 #include <format>
+#include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <polkit/polkit.h>
 
@@ -44,6 +54,10 @@ GDBusConnection* g_connection = nullptr;
 GMainLoop* g_main_loop = nullptr;
 std::shared_ptr<DiskService> g_disk_service;
 std::unique_ptr<WipeService> g_wipe_service;
+WipePlanRegistry g_wipe_plans;
+WipeJobRegistry g_wipe_jobs;
+bool g_stopping = false;
+guint g_shutdown_poll = 0;
 
 // D-Bus introspection XML
 // GetDisks return type: dbus_signatures::DISK_ARRAY (see DBusSignatures.hpp)
@@ -74,6 +88,11 @@ constexpr char INTROSPECTION_HEAD[] = R"XML(
 <node>
   <interface name="su.kidoz.storage_wiper.Helper">
     <method name="GetDisks">
+      <arg name="disks" type=")XML";
+constexpr char INTROSPECTION_MIDDLE[] = R"XML(" direction="out"/>
+    </method>
+    <method name="GetDisks2">
+      <arg name="version" type="u" direction="out"/>
       <arg name="disks" type=")XML";
 constexpr char INTROSPECTION_TAIL[] = R"XML(" direction="out"/>
     </method>
@@ -108,6 +127,28 @@ constexpr char INTROSPECTION_TAIL[] = R"XML(" direction="out"/>
     <method name="GetAlgorithms">
       <arg name="algorithms" type="a(ussi)" direction="out"/>
     </method>
+    <method name="PrepareWipe">
+      <arg name="device_path" type="s" direction="in"/>
+      <arg name="algorithm_id" type="u" direction="in"/>
+      <arg name="verify" type="b" direction="in"/>
+      <arg name="plan" type="a{sv}" direction="out"/>
+    </method>
+    <method name="StartPreparedWipe">
+      <arg name="plan_id" type="s" direction="in"/>
+      <arg name="started" type="b" direction="out"/>
+      <arg name="error_message" type="s" direction="out"/>
+    </method>
+    <method name="DiscardWipePlan">
+      <arg name="plan_id" type="s" direction="in"/>
+      <arg name="discarded" type="b" direction="out"/>
+    </method>
+    <method name="GetWipeJobs">
+      <arg name="jobs" type="aa{sv}" direction="out"/>
+    </method>
+    <method name="CancelPreparedWipe">
+      <arg name="plan_id" type="s" direction="in"/>
+      <arg name="cancelled" type="b" direction="out"/>
+    </method>
     <method name="StartWipe">
       <arg name="device_path" type="s" direction="in"/>
       <arg name="algorithm_id" type="u" direction="in"/>
@@ -119,6 +160,10 @@ constexpr char INTROSPECTION_TAIL[] = R"XML(" direction="out"/>
       <arg name="device_path" type="s" direction="in"/>
       <arg name="cancelled" type="b" direction="out"/>
     </method>
+    <signal name="PreparedWipeProgress">
+      <arg name="plan_id" type="s"/>
+      <arg name="progress" type="(sdiisbbstttxbbbdt)"/>
+    </signal>
     <signal name="WipeProgress">
       <arg name="device_path" type="s"/>
       <arg name="percentage" type="d"/>
@@ -145,7 +190,8 @@ constexpr char INTROSPECTION_TAIL[] = R"XML(" direction="out"/>
 }  // namespace
 
 constexpr auto introspection_xml =
-    concat_literals(INTROSPECTION_HEAD, dbus_signatures::DISK_ARRAY, INTROSPECTION_TAIL);
+    concat_literals(INTROSPECTION_HEAD, dbus_signatures::DISK_ARRAY, INTROSPECTION_MIDDLE,
+                    dbus_signatures::DISK_ARRAY_V2, INTROSPECTION_TAIL);
 
 auto is_supported_algorithm(WipeAlgorithm algorithm) -> bool {
     constexpr std::array supported_algorithms = {
@@ -157,68 +203,17 @@ auto is_supported_algorithm(WipeAlgorithm algorithm) -> bool {
            supported_algorithms.end();
 }
 
-/**
- * Check polkit authorization for the calling process
- */
-auto check_authorization(GDBusMethodInvocation* invocation, const char* action_id) -> bool {
-    GError* error = nullptr;
-
-    // Get the sender's credentials
-    const char* sender = g_dbus_method_invocation_get_sender(invocation);
-    if (!sender) {
-        g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_AUTH_FAILED,
-                                              "Could not determine caller");
-        return false;
-    }
-
-    // Create polkit authority
-    PolkitAuthority* authority = polkit_authority_get_sync(nullptr, &error);
-    if (!authority) {
-        g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_AUTH_FAILED,
-                                              "Could not get polkit authority: %s",
-                                              error ? error->message : "unknown error");
-        g_clear_error(&error);
-        return false;
-    }
-
-    // Create subject from the D-Bus sender
-    PolkitSubject* subject = polkit_system_bus_name_new(sender);
-
-    // Check authorization
-    PolkitAuthorizationResult* result = polkit_authority_check_authorization_sync(
-        authority, subject, action_id,
-        nullptr,  // details
-        POLKIT_CHECK_AUTHORIZATION_FLAGS_ALLOW_USER_INTERACTION,
-        nullptr,  // cancellable
-        &error);
-
-    g_object_unref(subject);
-    g_object_unref(authority);
-
-    if (!result) {
-        g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_AUTH_FAILED,
-                                              "Authorization check failed: %s",
-                                              error ? error->message : "unknown error");
-        g_clear_error(&error);
-        return false;
-    }
-
-    bool authorized = polkit_authorization_result_get_is_authorized(result);
-    g_object_unref(result);
-
-    if (!authorized) {
-        g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_ACCESS_DENIED,
-                                              "Not authorized for action: %s", action_id);
-        return false;
-    }
-
-    return true;
-}
+using async_authorization::authorize_method;
+using async_authorization::cancel_authorizations;
 
 /**
  * Emit WipeProgress signal on D-Bus
  */
-void emit_wipe_progress(const std::string& device_path, const WipeProgress& progress) {
+void emit_wipe_progress(const std::string& plan_id, const std::string& device_path,
+                        const WipeProgress& progress) {
+    if (!g_wipe_jobs.update(plan_id, progress)) {
+        return;
+    }
     if (!g_connection)
         return;
 
@@ -226,18 +221,21 @@ void emit_wipe_progress(const std::string& device_path, const WipeProgress& prog
     g_dbus_connection_emit_signal(
         g_connection,
         nullptr,  // broadcast to all
-        DBUS_PATH, DBUS_INTERFACE, "WipeProgress",
-        g_variant_new(dbus_signatures::WIPE_PROGRESS, device_path.c_str(), progress.percentage,
-                      progress.current_pass, progress.total_passes, progress.status.c_str(),
-                      progress.is_complete ? TRUE : FALSE, progress.has_error ? TRUE : FALSE,
-                      progress.error_message.c_str(), static_cast<guint64>(progress.bytes_written),
-                      static_cast<guint64>(progress.total_bytes),
-                      static_cast<guint64>(progress.speed_bytes_per_sec),
-                      static_cast<gint64>(progress.estimated_seconds_remaining),
-                      progress.verification_enabled ? TRUE : FALSE,
-                      progress.verification_in_progress ? TRUE : FALSE,
-                      progress.verification_passed ? TRUE : FALSE, progress.verification_percentage,
-                      static_cast<guint64>(progress.bad_block_count)),
+        DBUS_PATH, DBUS_INTERFACE, "PreparedWipeProgress",
+        g_variant_new(
+            "(s@(sdiisbbstttxbbbdt))", plan_id.c_str(),
+            g_variant_new(
+                dbus_signatures::WIPE_PROGRESS, device_path.c_str(), progress.percentage,
+                progress.current_pass, progress.total_passes, progress.status.c_str(),
+                progress.is_complete ? TRUE : FALSE, progress.has_error ? TRUE : FALSE,
+                progress.error_message.c_str(), static_cast<guint64>(progress.bytes_written),
+                static_cast<guint64>(progress.total_bytes),
+                static_cast<guint64>(progress.speed_bytes_per_sec),
+                static_cast<gint64>(progress.estimated_seconds_remaining),
+                progress.verification_enabled ? TRUE : FALSE,
+                progress.verification_in_progress ? TRUE : FALSE,
+                progress.verification_passed ? TRUE : FALSE, progress.verification_percentage,
+                static_cast<guint64>(progress.bad_block_count))),
         &error);
 
     if (error) {
@@ -249,44 +247,41 @@ void emit_wipe_progress(const std::string& device_path, const WipeProgress& prog
 /**
  * Handle GetDisks method call
  */
-void handle_get_disks(GDBusMethodInvocation* invocation) {
-    if (!check_authorization(invocation, POLKIT_ACTION_LIST_DISKS)) {
-        return;
-    }
-
+void handle_get_disks(GDBusMethodInvocation* invocation, bool version2 = false) {
     auto disks = g_disk_service->get_available_disks_sync();
 
     GVariantBuilder builder;
-    g_variant_builder_init(&builder, G_VARIANT_TYPE(dbus_signatures::DISK_ARRAY));
+    g_variant_builder_init(&builder, G_VARIANT_TYPE(version2 ? dbus_signatures::DISK_ARRAY_V2
+                                                             : dbus_signatures::DISK_ARRAY));
 
     for (const auto& disk : disks) {
         // Convert SmartData::HealthStatus to uint32
         auto smart_status = static_cast<guint32>(disk.smart.status);
         g_variant_builder_add(
-            &builder, dbus_signatures::DISK_RECORD, disk.path.c_str(), disk.model.c_str(),
-            disk.serial.c_str(), static_cast<gint64>(disk.size_bytes),
-            disk.is_removable ? TRUE : FALSE, disk.is_ssd ? TRUE : FALSE, disk.filesystem.c_str(),
-            disk.is_mounted ? TRUE : FALSE, disk.mount_point.c_str(), smart_status,
-            disk.smart.available ? TRUE : FALSE, disk.smart.healthy ? TRUE : FALSE,
-            static_cast<gint64>(disk.smart.power_on_hours), disk.smart.reallocated_sectors,
-            disk.smart.pending_sectors, disk.smart.temperature_celsius,
-            disk.smart.uncorrectable_errors, disk.smart.percentage_used,
-            disk.smart.available_spare_percent, disk.smart.available_spare_threshold_percent,
-            disk.is_partition ? TRUE : FALSE, disk.parent_disk.c_str());
+            &builder, version2 ? dbus_signatures::DISK_RECORD_V2 : dbus_signatures::DISK_RECORD,
+            disk.path.c_str(), disk.model.c_str(), disk.serial.c_str(),
+            static_cast<gint64>(disk.size_bytes), disk.is_removable ? TRUE : FALSE,
+            disk.is_ssd ? TRUE : FALSE, disk.filesystem.c_str(), disk.is_mounted ? TRUE : FALSE,
+            disk.mount_point.c_str(), smart_status, disk.smart.available ? TRUE : FALSE,
+            disk.smart.healthy ? TRUE : FALSE, static_cast<gint64>(disk.smart.power_on_hours),
+            disk.smart.reallocated_sectors, disk.smart.pending_sectors,
+            disk.smart.temperature_celsius, disk.smart.uncorrectable_errors,
+            disk.smart.percentage_used, disk.smart.available_spare_percent,
+            disk.smart.available_spare_threshold_percent, disk.is_partition ? TRUE : FALSE,
+            disk.parent_disk.c_str(), disk.is_lvm_pv ? TRUE : FALSE,
+            disk.has_dm_holders ? TRUE : FALSE);
     }
 
     g_dbus_method_invocation_return_value(
-        invocation, g_variant_new(dbus_signatures::DISK_LIST_REPLY, &builder));
+        invocation, version2 ? g_variant_new(dbus_signatures::DISK_LIST_REPLY_V2,
+                                             dbus_signatures::DISK_CONTRACT_VERSION, &builder)
+                             : g_variant_new(dbus_signatures::DISK_LIST_REPLY, &builder));
 }
 
 /**
  * Handle GetDiskSMART method call
  */
 void handle_get_disk_smart(GDBusMethodInvocation* invocation, GVariant* parameters) {
-    if (!check_authorization(invocation, POLKIT_ACTION_LIST_DISKS)) {
-        return;
-    }
-
     const char* path = nullptr;
     g_variant_get(parameters, "(&s)", &path);
 
@@ -306,10 +301,6 @@ void handle_get_disk_smart(GDBusMethodInvocation* invocation, GVariant* paramete
  * Handle ValidateDevicePath method call
  */
 void handle_validate_device_path(GDBusMethodInvocation* invocation, GVariant* parameters) {
-    if (!check_authorization(invocation, POLKIT_ACTION_LIST_DISKS)) {
-        return;
-    }
-
     const char* path = nullptr;
     g_variant_get(parameters, "(&s)", &path);
 
@@ -324,10 +315,6 @@ void handle_validate_device_path(GDBusMethodInvocation* invocation, GVariant* pa
  * Handle IsDeviceWritable method call
  */
 void handle_is_device_writable(GDBusMethodInvocation* invocation, GVariant* parameters) {
-    if (!check_authorization(invocation, POLKIT_ACTION_LIST_DISKS)) {
-        return;
-    }
-
     const char* path = nullptr;
     g_variant_get(parameters, "(&s)", &path);
 
@@ -342,9 +329,6 @@ void handle_is_device_writable(GDBusMethodInvocation* invocation, GVariant* para
  */
 void handle_unmount_device(GDBusMethodInvocation* invocation, GVariant* parameters) {
     // Use wipe-disk authorization since unmount is a precursor to wiping
-    if (!check_authorization(invocation, POLKIT_ACTION_WIPE_DISK)) {
-        return;
-    }
 
     const char* path = nullptr;
     g_variant_get(parameters, "(&s)", &path);
@@ -360,10 +344,6 @@ void handle_unmount_device(GDBusMethodInvocation* invocation, GVariant* paramete
  * Handle GetAlgorithms method call
  */
 void handle_get_algorithms(GDBusMethodInvocation* invocation) {
-    if (!check_authorization(invocation, POLKIT_ACTION_LIST_DISKS)) {
-        return;
-    }
-
     GVariantBuilder builder;
     g_variant_builder_init(&builder, G_VARIANT_TYPE("a(ussi)"));
 
@@ -385,63 +365,91 @@ void handle_get_algorithms(GDBusMethodInvocation* invocation) {
 /**
  * Handle StartWipe method call
  */
-void handle_start_wipe(GDBusMethodInvocation* invocation, GVariant* parameters) {
-    if (!check_authorization(invocation, POLKIT_ACTION_WIPE_DISK)) {
-        return;
-    }
-
-    const char* device_path = nullptr;
+void handle_prepare_wipe(GDBusMethodInvocation* invocation, GVariant* parameters) {
+    const char* path = nullptr;
     guint32 algorithm_id = 0;
     gboolean verify = FALSE;
-    g_variant_get(parameters, dbus_signatures::START_WIPE_PARSE, &device_path, &algorithm_id,
-                  &verify);
-
-    const std::string device{device_path ? device_path : ""};
-
-    // Validate algorithm
-    auto algorithm = static_cast<WipeAlgorithm>(algorithm_id);
+    g_variant_get(parameters, "(&sub)", &path, &algorithm_id, &verify);
+    const auto algorithm = static_cast<WipeAlgorithm>(algorithm_id);
     if (!is_supported_algorithm(algorithm)) {
-        g_dbus_method_invocation_return_value(
-            invocation,
-            g_variant_new(dbus_signatures::START_WIPE_REPLY, FALSE, "Unsupported wipe algorithm"));
+        g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                                              "Unsupported wipe algorithm");
         return;
     }
-
-    if (auto eligible = device_policy::resolve_wipe_targets(*g_disk_service, device, algorithm);
-        !eligible) {
-        g_dbus_method_invocation_return_value(
-            invocation, g_variant_new(dbus_signatures::START_WIPE_REPLY, FALSE,
-                                      eligible.error().message.c_str()));
+    auto plan = g_wipe_service->prepare_plan(path, algorithm, verify != FALSE);
+    if (!plan) {
+        g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_FAILED, "%s",
+                                              plan.error().message.c_str());
         return;
     }
-
-    // Wipes on different devices run in parallel; this only rejects a device
-    // that is already being wiped.
-    if (g_wipe_service->is_operation_in_progress(device)) {
-        g_dbus_method_invocation_return_value(
-            invocation, g_variant_new(dbus_signatures::START_WIPE_REPLY, FALSE,
-                                      "A wipe operation is already in progress on this device"));
+    auto* id = g_uuid_string_random();
+    plan->id = id;
+    g_free(id);
+    auto stored = g_wipe_plans.insert(g_dbus_method_invocation_get_sender(invocation), *plan);
+    if (!stored) {
+        g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
+                                              G_DBUS_ERROR_LIMITS_EXCEEDED, "%s",
+                                              stored.error().message.c_str());
         return;
     }
+    g_dbus_method_invocation_return_value(
+        invocation, g_variant_new("(@a{sv})", wipe_plan_variant::encode(*plan)));
+}
 
+void handle_discard_plan(GDBusMethodInvocation* invocation, GVariant* parameters) {
+    const char* id = nullptr;
+    g_variant_get(parameters, "(&s)", &id);
+    const auto discarded =
+        g_wipe_plans.discard({.sender = g_dbus_method_invocation_get_sender(invocation), .id = id});
+    g_dbus_method_invocation_return_value(invocation, g_variant_new("(b)", discarded));
+}
+
+void handle_start_wipe(GDBusMethodInvocation* invocation, GVariant*) {
+    g_dbus_method_invocation_return_value(
+        invocation, g_variant_new("(bs)", FALSE,
+                                  "Path-only StartWipe is disabled. Update the client and prepare "
+                                  "and confirm a wipe plan."));
+}
+
+void handle_start_prepared_wipe(GDBusMethodInvocation* invocation, GVariant* parameters) {
+    const char* id = nullptr;
+    g_variant_get(parameters, "(&s)", &id);
+    auto plan =
+        g_wipe_plans.take({.sender = g_dbus_method_invocation_get_sender(invocation), .id = id});
+    if (!plan) {
+        g_dbus_method_invocation_return_value(
+            invocation, g_variant_new("(bs)", FALSE, plan.error().message.c_str()));
+        return;
+    }
+    if (auto registered = g_wipe_jobs.begin(*plan); !registered) {
+        g_dbus_method_invocation_return_value(
+            invocation, g_variant_new("(bs)", FALSE, registered.error().message.c_str()));
+        return;
+    }
+    const auto device = plan->device.disk.path;
     // The device path travels with every progress callback so concurrent
     // wipes are distinguishable on the bus.
-    auto progress_callback = [device](const WipeProgress& progress) {
+    auto progress_callback = [device, plan_id = plan->id](const WipeProgress& progress) {
         // Schedule signal emission on main thread
-        auto* payload = new std::pair<std::string, WipeProgress>(device, progress);
+        struct Payload {
+            std::string id;
+            std::string device;
+            WipeProgress progress;
+        };
+        auto* payload = new Payload{plan_id, device, progress};
         g_idle_add(
             [](gpointer data) -> gboolean {
-                auto* pair = static_cast<std::pair<std::string, WipeProgress>*>(data);
-                emit_wipe_progress(pair->first, pair->second);
-                delete pair;
+                auto* event = static_cast<Payload*>(data);
+                emit_wipe_progress(event->id, event->device, event->progress);
+                delete event;
                 return G_SOURCE_REMOVE;
             },
             payload);
     };
 
-    const auto started =
-        g_wipe_service->start_wipe(device, algorithm, progress_callback, verify != FALSE);
+    const auto started = g_wipe_service->start_prepared(*plan, progress_callback);
     if (!started) {
+        g_wipe_jobs.abandon(plan->id);
         g_dbus_method_invocation_return_value(
             invocation, g_variant_new(dbus_signatures::START_WIPE_REPLY, FALSE,
                                       started.error().message.c_str()));
@@ -455,29 +463,74 @@ void handle_start_wipe(GDBusMethodInvocation* invocation, GVariant* parameters) 
 /**
  * Handle CancelWipe method call
  */
-void handle_cancel_wipe(GDBusMethodInvocation* invocation, GVariant* parameters) {
-    if (!check_authorization(invocation, POLKIT_ACTION_WIPE_DISK)) {
+void handle_cancel_wipe(GDBusMethodInvocation* invocation, GVariant*) {
+    // A reusable path cannot identify the job the caller meant to cancel.
+    g_dbus_method_invocation_return_value(invocation, g_variant_new("(b)", FALSE));
+}
+
+void handle_get_wipe_jobs(GDBusMethodInvocation* invocation) {
+    GVariantBuilder jobs;
+    g_variant_builder_init(&jobs, G_VARIANT_TYPE("aa{sv}"));
+    for (const auto& job : g_wipe_jobs.snapshots()) {
+        g_variant_builder_add_value(&jobs, wipe_job_variant::encode(job));
+    }
+    g_dbus_method_invocation_return_value(invocation, g_variant_new("(aa{sv})", &jobs));
+}
+
+void handle_cancel_prepared_wipe(GDBusMethodInvocation* invocation, GVariant* parameters) {
+    const char* id = nullptr;
+    g_variant_get(parameters, "(&s)", &id);
+    const auto target = g_wipe_jobs.cancellation_target(id);
+    const bool cancelled = target && g_wipe_service->cancel_operation(*target);
+    g_dbus_method_invocation_return_value(invocation, g_variant_new("(b)", cancelled));
+}
+
+void begin_shutdown() {
+    if (g_stopping) {
         return;
     }
-
-    const char* device_path = nullptr;
-    g_variant_get(parameters, dbus_signatures::CANCEL_WIPE_PARSE, &device_path);
-
-    const bool cancelled = g_wipe_service->cancel_operation(device_path ? device_path : "");
-
-    g_dbus_method_invocation_return_value(
-        invocation, g_variant_new(dbus_signatures::CANCEL_WIPE_REPLY, cancelled ? TRUE : FALSE));
+    g_stopping = true;
+    cancel_authorizations();
+    for (const auto& id : g_wipe_jobs.cancellable_jobs()) {
+        if (const auto path = g_wipe_jobs.cancellation_target(id)) {
+            g_wipe_service->cancel_operation(*path);
+        }
+    }
+    LOG_INFO("Helper", "Stopping: waiting for active wipes and firmware monitoring to finish");
+    if (g_wipe_jobs.active_count() == 0) {
+        g_main_loop_quit(g_main_loop);
+        return;
+    }
+    g_shutdown_poll = g_timeout_add(
+        100,
+        [](gpointer) -> gboolean {
+            if (g_wipe_jobs.active_count() != 0) {
+                return G_SOURCE_CONTINUE;
+            }
+            g_shutdown_poll = 0;
+            g_main_loop_quit(g_main_loop);
+            return G_SOURCE_REMOVE;
+        },
+        nullptr);
 }
 
 /**
  * D-Bus method call handler
  */
-void handle_method_call(GDBusConnection* /*connection*/, const gchar* /*sender*/,
-                        const gchar* /*object_path*/, const gchar* /*interface_name*/,
-                        const gchar* method_name, GVariant* parameters,
-                        GDBusMethodInvocation* invocation, gpointer /*user_data*/) {
+void dispatch_authorized(const gchar* method_name, GVariant* parameters,
+                         GDBusMethodInvocation* invocation) {
+    if (g_stopping && (g_strcmp0(method_name, "PrepareWipe") == 0 ||
+                       g_strcmp0(method_name, "StartPreparedWipe") == 0 ||
+                       g_strcmp0(method_name, "UnmountDevice") == 0)) {
+        g_dbus_method_invocation_return_error(
+            invocation, G_DBUS_ERROR, G_DBUS_ERROR_NO_SERVER,
+            "The helper is stopping; no new destructive work is accepted");
+        return;
+    }
     if (g_strcmp0(method_name, "GetDisks") == 0) {
         handle_get_disks(invocation);
+    } else if (g_strcmp0(method_name, "GetDisks2") == 0) {
+        handle_get_disks(invocation, true);
     } else if (g_strcmp0(method_name, "GetDiskSMART") == 0) {
         handle_get_disk_smart(invocation, parameters);
     } else if (g_strcmp0(method_name, "ValidateDevicePath") == 0) {
@@ -488,10 +541,46 @@ void handle_method_call(GDBusConnection* /*connection*/, const gchar* /*sender*/
         handle_unmount_device(invocation, parameters);
     } else if (g_strcmp0(method_name, "GetAlgorithms") == 0) {
         handle_get_algorithms(invocation);
+    } else if (g_strcmp0(method_name, "PrepareWipe") == 0) {
+        handle_prepare_wipe(invocation, parameters);
+    } else if (g_strcmp0(method_name, "StartPreparedWipe") == 0) {
+        handle_start_prepared_wipe(invocation, parameters);
+    } else if (g_strcmp0(method_name, "DiscardWipePlan") == 0) {
+        handle_discard_plan(invocation, parameters);
     } else if (g_strcmp0(method_name, "StartWipe") == 0) {
         handle_start_wipe(invocation, parameters);
+    } else if (g_strcmp0(method_name, "GetWipeJobs") == 0) {
+        handle_get_wipe_jobs(invocation);
+    } else if (g_strcmp0(method_name, "CancelPreparedWipe") == 0) {
+        handle_cancel_prepared_wipe(invocation, parameters);
     } else if (g_strcmp0(method_name, "CancelWipe") == 0) {
         handle_cancel_wipe(invocation, parameters);
+    } else {
+        g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD,
+                                              "Unknown method: %s", method_name);
+    }
+}
+
+void handle_method_call(GDBusConnection*, const gchar*, const gchar*, const gchar*,
+                        const gchar* method_name, GVariant* parameters,
+                        GDBusMethodInvocation* invocation, gpointer) {
+    const std::string_view method{method_name};
+    if (g_stopping &&
+        (method == "PrepareWipe" || method == "StartPreparedWipe" || method == "UnmountDevice")) {
+        dispatch_authorized(method_name, parameters, invocation);
+        return;
+    }
+    if (method == "StartWipe" || method == "DiscardWipePlan") {
+        dispatch_authorized(method_name, parameters, invocation);
+    } else if (method == "PrepareWipe" || method == "StartPreparedWipe" || method == "CancelWipe" ||
+               method == "UnmountDevice" || method == "CancelPreparedWipe") {
+        authorize_method(invocation, parameters, method_name, POLKIT_ACTION_WIPE_DISK,
+                         dispatch_authorized);
+    } else if (method == "GetDisks" || method == "GetDiskSMART" || method == "ValidateDevicePath" ||
+               method == "IsDeviceWritable" || method == "GetAlgorithms" || method == "GetDisks2" ||
+               method == "GetWipeJobs") {
+        authorize_method(invocation, parameters, method_name, POLKIT_ACTION_LIST_DISKS,
+                         dispatch_authorized);
     } else {
         g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD,
                                               "Unknown method: %s", method_name);
@@ -543,6 +632,19 @@ void on_name_acquired(GDBusConnection* connection, const gchar* name, gpointer /
         return;
     }
 
+    g_dbus_connection_signal_subscribe(
+        connection, "org.freedesktop.DBus", "org.freedesktop.DBus", "NameOwnerChanged",
+        "/org/freedesktop/DBus", nullptr, G_DBUS_SIGNAL_FLAGS_NONE,
+        [](GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar*,
+           GVariant* parameters, gpointer) {
+            const char *name = nullptr, *old_owner = nullptr, *new_owner = nullptr;
+            g_variant_get(parameters, "(&s&s&s)", &name, &old_owner, &new_owner);
+            if (name[0] == ':' && old_owner[0] != '\0' && new_owner[0] == '\0') {
+                g_wipe_plans.remove_sender(name);
+                cancel_authorizations(name);
+            }
+        },
+        nullptr, nullptr);
     LOG_INFO("Helper", std::format("D-Bus object registered at {}", DBUS_PATH));
 }
 
@@ -551,7 +653,8 @@ void on_name_acquired(GDBusConnection* connection, const gchar* name, gpointer /
  */
 void on_name_lost(GDBusConnection* /*connection*/, const gchar* name, gpointer /*user_data*/) {
     LOG_ERROR("Helper", std::format("Lost D-Bus name: {}", name));
-    g_main_loop_quit(g_main_loop);
+    g_connection = nullptr;
+    begin_shutdown();
 }
 
 /**
@@ -592,10 +695,24 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
                                     nullptr   // user_data_free_func
     );
 
+    const auto signal_handler = [](gpointer) -> gboolean {
+        begin_shutdown();
+        return G_SOURCE_CONTINUE;
+    };
+    const guint term_source = g_unix_signal_add(SIGTERM, signal_handler, nullptr);
+    const guint int_source = g_unix_signal_add(SIGINT, signal_handler, nullptr);
+
     // Run main loop
     g_main_loop_run(g_main_loop);
 
     // Cleanup
+    g_source_remove(term_source);
+    g_source_remove(int_source);
+    if (g_shutdown_poll != 0) {
+        g_source_remove(g_shutdown_poll);
+        g_shutdown_poll = 0;
+    }
+    cancel_authorizations();
     g_bus_unown_name(owner_id);
     g_main_loop_unref(g_main_loop);
     g_wipe_service.reset();

@@ -2,7 +2,7 @@
 
 Selecting a path is only the first step in understanding what will be erased.
 Storage Wiper distinguishes a partition's address range, a whole disk, and
-firmware operations whose scope can extend across an NVMe controller.
+firmware operations whose scope can extend across an NVMe subsystem.
 
 ## Eligible devices
 
@@ -53,15 +53,26 @@ The wipe service also holds exclusive device claims for its operation lifetime.
 
 These checks address known conflicts. They do not decide whether you intended
 to select the device, whether a backup is adequate, or whether an external
-storage stack is still relying on it. Device identities and mount state can
-change between discovery and use, which is why target selection and the
-helper's fresh checks both matter.
+storage stack is still relying on it. The helper prepares a snapshot before confirmation and validates the opened
+device's kernel disk sequence, device number, size, and partition offset again
+before writes. A replacement under the same path is rejected. Devices lacking
+`BLKGETDISKSEQ` support cannot be wiped. Firmware commands use the same validated
+descriptor rather than reopening the path.
 
 ## LVM and device-mapper
 
 Physical disks that contain LVM physical volumes can appear in the list. Their
 device-mapper logical volumes, such as `/dev/dm-0` or `/dev/mapper/vg-lv`, are
 excluded.
+
+The helper probes LVM1/LVM2 signatures with read-only libblkid inspection, so
+inactive physical volumes are detected even when no logical volume is mapped.
+A whole-disk entry is marked when a child partition contains a physical volume.
+Device-mapper holders are reported separately: encryption mappings are not
+automatically labeled as LVM. Both flags reach the GUI and CLI through the
+versioned `GetDisks2` contract and remain in the prepared confirmation snapshot.
+Unreadable or ambiguous signatures prevent offering that target; an uninspected
+partition also prevents offering its whole disk.
 
 Erasing an underlying physical volume can destroy LVM metadata and data used
 by the volume group, potentially affecting logical volumes spanning multiple
@@ -76,15 +87,17 @@ An NVMe controller can expose multiple namespaces, each shown as a block device.
 A software overwrite operates on the selected namespace or partition. Firmware
 operations can have a broader scope.
 
-Storage Wiper treats an NVMe hardware erase conservatively as controller-wide:
-the confirmation names the wider scope, every namespace must be unmounted, and
-overlapping wipes on the controller are rejected. Device claims span the
-hardware operation. A free selected namespace alone is insufficient if a
-sibling is mounted or busy.
+The helper determines the actual method and scope before confirmation.
+Sanitize affects the subsystem. Cryptographic Format NVM affects the selected
+namespace when FNA bit 1 is clear; when set it affects all allocated namespaces.
+The prepared method and scope appear in confirmation and certificates. They are
+checked again before execution; a changed capability requires a new confirmation.
 
-The CLI's `--force-unmount` applies to the selected mounted target; it does not
-automatically prepare every sibling namespace for controller erase. Read the
-scope statement and prepare the entire controller before confirming.
+Subsystem operations currently require a provable local, unshared,
+single-controller, single-namespace topology. Ambiguous, multipath, shared, or
+larger layouts are rejected. Namespace-only Format remains available when its
+scope can be established, without claiming sibling namespaces. The CLI's
+`--force-unmount` applies only to the selected target.
 
 Sources: [WipeService](../../src/helper/services/WipeService.cpp),
 [NVMe helpers](../../src/algorithms/NvmeSanitize.cpp), and

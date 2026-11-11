@@ -8,7 +8,10 @@
 
 #pragma once
 
+#include "models/WipeJobSnapshot.hpp"
+#include "models/WipePlan.hpp"
 #include "models/WipeTypes.hpp"
+#include "util/Result.hpp"
 
 #include <string>
 
@@ -19,6 +22,22 @@
 class IWipeService {
 public:
     virtual ~IWipeService() = default;
+
+    [[nodiscard]] virtual auto prepare_wipe(const std::string&, WipeAlgorithm, bool)
+        -> std::expected<WipePlan, util::Error> {
+        return std::unexpected(util::Error{"Prepared wipes are not supported by this service"});
+    }
+
+    virtual auto start_prepared_wipe(const WipePlan&, ProgressCallback) -> bool { return false; }
+
+    virtual void discard_wipe_plan(const std::string&) {}
+
+    [[nodiscard]] virtual auto get_wipe_jobs()
+        -> std::expected<std::vector<WipeJobSnapshot>, util::Error> {
+        return std::vector<WipeJobSnapshot>{};
+    }
+    virtual auto observe_wipe_job(const WipePlan&, ProgressCallback) -> bool { return false; }
+    virtual auto cancel_prepared_wipe(const std::string&) -> bool { return false; }
 
     /**
      * @brief Wipe a disk with the specified algorithm

@@ -14,6 +14,16 @@
 
 class MockWipeService : public IWipeService {
 public:
+    MOCK_METHOD((std::expected<std::vector<WipeJobSnapshot>, util::Error>), get_wipe_jobs, (),
+                (override));
+    MOCK_METHOD(bool, observe_wipe_job, (const WipePlan& plan, ProgressCallback callback),
+                (override));
+    MOCK_METHOD(bool, cancel_prepared_wipe, (const std::string& id), (override));
+    MOCK_METHOD((std::expected<WipePlan, util::Error>), prepare_wipe,
+                (const std::string& path, WipeAlgorithm algorithm, bool verify), (override));
+    MOCK_METHOD(bool, start_prepared_wipe, (const WipePlan& plan, ProgressCallback callback),
+                (override));
+    MOCK_METHOD(void, discard_wipe_plan, (const std::string& id), (override));
     MOCK_METHOD(bool, wipe_disk,
                 (const std::string& disk_path, WipeAlgorithm algorithm, ProgressCallback callback),
                 (override));

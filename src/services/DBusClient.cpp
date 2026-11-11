@@ -1,10 +1,11 @@
+#include "services/WipeJobVariant.hpp"
+#include "services/WipePlanVariant.hpp"
 /**
  * @file DBusClient.cpp
  * @brief Implementation of D-Bus client for storage-wiper-helper
  */
 
 #include "services/DBusClient.hpp"
-
 #include "services/DBusSignatures.hpp"
 #include "util/Logger.hpp"
 
@@ -224,7 +225,8 @@ auto DBusClient::attempt_reconnect() -> bool {
     if (!connection_) {
         connection_ = g_bus_get_sync(bus_type_, nullptr, &error);
         if (!connection_) {
-            std::string msg = error ? error->message : "unknown error";
+            LOG_ERROR("DBusClient", std::format("Failed to reconnect to system bus: {}",
+                                                error ? error->message : "unknown error"));
             g_clear_error(&error);
             schedule_reconnect();
             return false;
@@ -238,7 +240,8 @@ auto DBusClient::attempt_reconnect() -> bool {
                               DBUS_INTERFACE, nullptr, &error);
 
     if (!new_proxy) {
-        std::string msg = error ? error->message : "unknown error";
+        LOG_ERROR("DBusClient", std::format("Failed to recreate helper proxy: {}",
+                                            error ? error->message : "unknown error"));
         g_clear_error(&error);
         schedule_reconnect();
         return false;
@@ -271,7 +274,8 @@ void DBusClient::reset_reconnect_state() {
 
 auto DBusClient::get_retry_delay_ms() -> int {
     // Exponential backoff: 500ms, 1s, 2s, 4s, 8s... up to 30s
-    int base_delay = INITIAL_RETRY_DELAY_MS * (1 << reconnect_attempts_);
+    int base_delay = INITIAL_RETRY_DELAY_MS *
+                     static_cast<int>(1U << static_cast<unsigned int>(reconnect_attempts_));
     base_delay = std::min(base_delay, MAX_RETRY_DELAY_MS);
 
     // Add jitter (±25% of delay)
@@ -352,10 +356,13 @@ void DBusClient::on_name_vanished(GDBusConnection* /*connection*/, const gchar* 
         {
             std::lock_guard lock(self->callback_mutex_);
             callbacks.swap(self->progress_callbacks_);
+            self->progress_plan_ids_.clear();
+            self->pending_progress_.clear();
         }
         WipeProgress failure{};
         failure.is_complete = true;
         failure.has_error = true;
+        failure.outcome_known = false;
         failure.status = "Helper connection lost";
         failure.error_message = "Helper service stopped; wipe outcome is unknown.";
         for (const auto& [path, callback] : callbacks) {
@@ -450,7 +457,7 @@ void DBusClient::setup_signal_handler() {
         return;
 
     signal_subscription_id_ = g_dbus_connection_signal_subscribe(
-        connection_, DBUS_NAME, DBUS_INTERFACE, "WipeProgress", DBUS_PATH,
+        connection_, DBUS_NAME, DBUS_INTERFACE, "PreparedWipeProgress", DBUS_PATH,
         nullptr,  // arg0
         G_DBUS_SIGNAL_FLAGS_NONE, on_signal_received, this,
         nullptr   // user_data_free_func
@@ -463,16 +470,19 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/, const gchar
                                     gpointer user_data) {
     auto* self = static_cast<DBusClient*>(user_data);
 
-    if (g_strcmp0(signal_name, "WipeProgress") != 0)
+    if (g_strcmp0(signal_name, "PreparedWipeProgress") != 0)
         return;
 
     // Reject malformed payloads before calling the variadic parser.
-    if (!parameters ||
-        !g_variant_is_of_type(parameters, G_VARIANT_TYPE(dbus_signatures::WIPE_PROGRESS))) {
+    if (!parameters || !g_variant_is_of_type(
+                           parameters, G_VARIANT_TYPE(dbus_signatures::PREPARED_WIPE_PROGRESS))) {
         LOG_WARNING("DBusClient", "Ignoring malformed WipeProgress signal");
         return;
     }
 
+    const char* plan_id = nullptr;
+    g_variant_get_child(parameters, 0, "&s", &plan_id);
+    auto* progress_value = g_variant_get_child_value(parameters, 1);
     // Parse progress signal
     const gchar* device_path = nullptr;
     gdouble percentage = 0.0;
@@ -492,13 +502,14 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/, const gchar
     gdouble verification_percentage = 0.0;
     guint64 bad_block_count = 0;
 
-    g_variant_get(parameters, dbus_signatures::WIPE_PROGRESS_PARSE, &device_path, &percentage,
+    g_variant_get(progress_value, dbus_signatures::WIPE_PROGRESS_PARSE, &device_path, &percentage,
                   &current_pass, &total_passes, &status, &is_complete, &has_error, &error_message,
                   &bytes_written, &total_bytes, &speed_bytes_per_sec, &estimated_seconds_remaining,
                   &verification_enabled, &verification_in_progress, &verification_passed,
                   &verification_percentage, &bad_block_count);
 
     if (!device_path || !*device_path) {
+        g_variant_unref(progress_value);
         return;
     }
 
@@ -526,13 +537,29 @@ void DBusClient::on_signal_received(GDBusConnection* /*connection*/, const gchar
     {
         std::lock_guard lock(self->callback_mutex_);
         if (const auto it = self->progress_callbacks_.find(std::string{device_path});
-            it != self->progress_callbacks_.end()) {
+            it != self->progress_callbacks_.end() &&
+            self->progress_plan_ids_.at(device_path) == plan_id) {
             callback = *it->second;
             if (progress.is_complete) {
                 self->progress_callbacks_.erase(it);
+                self->progress_plan_ids_.erase(device_path);
+            }
+        } else {
+            // Signals may arrive between reconnect enumeration and callback
+            // registration. Preserve the terminal outcome across that gap.
+            constexpr size_t MAX_PENDING_PROGRESS = 256;
+            if (self->pending_progress_.size() >= MAX_PENDING_PROGRESS &&
+                !self->pending_progress_.contains(plan_id)) {
+                self->pending_progress_.erase(self->pending_progress_.begin());
+            }
+            const auto pending = self->pending_progress_.find(plan_id);
+            if (pending == self->pending_progress_.end() || !pending->second.second.is_complete) {
+                self->pending_progress_.insert_or_assign(
+                    plan_id, std::make_pair(std::string{device_path}, progress));
             }
         }
     }
+    g_variant_unref(progress_value);
     if (callback) {
         callback(progress);
     }
@@ -556,7 +583,7 @@ void DBusClient::get_available_disks(
         std::move(callback));
 
     g_dbus_proxy_call(
-        proxy_copy, "GetDisks", nullptr, G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr,
+        proxy_copy, "GetDisks2", nullptr, G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr,
         [](GObject* source_object, GAsyncResult* res, gpointer user_data) {
             auto* proxy = G_DBUS_PROXY(source_object);
             auto* cb = static_cast<
@@ -570,8 +597,14 @@ void DBusClient::get_available_disks(
                 g_clear_error(&error);
             } else {
                 std::vector<DiskInfo> disks;
-                GVariant* array = g_variant_n_children(result) > 0
-                                      ? g_variant_get_child_value(result, 0)
+                guint32 version = 0;
+                const bool correct_reply = g_variant_is_of_type(
+                    result, G_VARIANT_TYPE(dbus_signatures::DISK_LIST_REPLY_V2));
+                if (correct_reply) {
+                    g_variant_get_child(result, 0, "u", &version);
+                }
+                GVariant* array = g_variant_n_children(result) > 1
+                                      ? g_variant_get_child_value(result, 1)
                                       : nullptr;
                 std::string parse_error;
 
@@ -579,8 +612,9 @@ void DBusClient::get_available_disks(
                 // layout of its own build. Handing that variant to the current format string
                 // would only raise a GLib-CRITICAL and report an empty list, so name the version
                 // skew instead.
-                if (array != nullptr &&
-                    g_variant_is_of_type(array, G_VARIANT_TYPE(dbus_signatures::DISK_ARRAY))) {
+                if (correct_reply && version == dbus_signatures::DISK_CONTRACT_VERSION &&
+                    array != nullptr &&
+                    g_variant_is_of_type(array, G_VARIANT_TYPE(dbus_signatures::DISK_ARRAY_V2))) {
                     GVariantIter iter;
                     g_variant_iter_init(&iter, array);
 
@@ -606,14 +640,16 @@ void DBusClient::get_available_disks(
                     gint32 available_spare_threshold = -1;
                     gboolean is_partition = FALSE;
                     const gchar* parent_disk = nullptr;
+                    gboolean is_lvm_pv = FALSE, has_dm_holders = FALSE;
 
                     while (g_variant_iter_next(
-                        &iter, dbus_signatures::DISK_RECORD_PARSE, &path, &model, &serial,
+                        &iter, dbus_signatures::DISK_RECORD_PARSE_V2, &path, &model, &serial,
                         &size_bytes, &is_removable, &is_ssd, &filesystem, &is_mounted, &mount_point,
                         &smart_status, &smart_available, &smart_healthy, &power_on_hours,
                         &reallocated_sectors, &pending_sectors, &temperature_celsius,
                         &uncorrectable_errors, &percentage_used, &available_spare,
-                        &available_spare_threshold, &is_partition, &parent_disk)) {
+                        &available_spare_threshold, &is_partition, &parent_disk, &is_lvm_pv,
+                        &has_dm_holders)) {
                         if (path) {
                             SmartData smart;
                             smart.status = static_cast<SmartData::HealthStatus>(smart_status);
@@ -638,7 +674,8 @@ void DBusClient::get_available_disks(
                                          .filesystem = filesystem ? filesystem : "",
                                          .is_mounted = is_mounted != FALSE,
                                          .mount_point = mount_point ? mount_point : "",
-                                         .is_lvm_pv = false,
+                                         .is_lvm_pv = is_lvm_pv != FALSE,
+                                         .has_dm_holders = has_dm_holders != FALSE,
                                          .is_partition = is_partition != FALSE,
                                          .parent_disk = parent_disk ? parent_disk : "",
                                          .smart = smart});
@@ -648,8 +685,8 @@ void DBusClient::get_available_disks(
                     parse_error = std::format(
                         "storage-wiper-helper did not reply with {} (got {}): the running helper "
                         "is an older version. Stop it and retry; it is D-Bus activated and starts "
-                        "again automatically: sudo pkill -f storage-wiper-helper",
-                        dbus_signatures::DISK_ARRAY,
+                        "again automatically. Finish active jobs before restarting the helper.",
+                        dbus_signatures::DISK_ARRAY_V2,
                         array != nullptr ? g_variant_get_type_string(array)
                                          : "an unexpected reply");
                 }
@@ -849,8 +886,187 @@ auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm
     return wipe_disk(disk_path, algorithm, std::move(callback), false);
 }
 
-auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm,
-                           ProgressCallback callback, bool verify) -> bool {
+auto DBusClient::wipe_disk(const std::string&, WipeAlgorithm, ProgressCallback callback, bool)
+    -> bool {
+    if (callback) {
+        WipeProgress progress{};
+        progress.has_error = true;
+        progress.is_complete = true;
+        progress.error_message = "Prepare and confirm a wipe plan before starting a wipe";
+        callback(progress);
+    }
+    return false;
+}
+
+auto DBusClient::prepare_wipe(const std::string& path, WipeAlgorithm algorithm, bool verify)
+    -> std::expected<WipePlan, util::Error> {
+    GDBusProxy* proxy_copy = nullptr;
+    {
+        std::lock_guard lock(proxy_mutex_);
+        if (!proxy_) {
+            return std::unexpected(util::Error{"Not connected to helper"});
+        }
+        proxy_copy = proxy_;
+        g_object_ref(proxy_copy);
+    }
+    ProxyRefGuard proxy_guard{proxy_copy};
+    GError* error = nullptr;
+    auto* reply = g_dbus_proxy_call_sync(
+        proxy_copy, "PrepareWipe",
+        g_variant_new("(sub)", path.c_str(), static_cast<guint32>(algorithm), verify),
+        G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
+    if (!reply) {
+        const std::string message = error ? error->message : "PrepareWipe failed";
+        g_clear_error(&error);
+        return std::unexpected(util::Error{message});
+    }
+    if (!g_variant_is_of_type(reply, G_VARIANT_TYPE("(a{sv})"))) {
+        g_variant_unref(reply);
+        return std::unexpected(util::Error{"Unsupported helper plan contract; update the helper"});
+    }
+    auto* dictionary = g_variant_get_child_value(reply, 0);
+    auto plan = wipe_plan_variant::decode(dictionary);
+    g_variant_unref(dictionary);
+    g_variant_unref(reply);
+    if (plan && (plan->device.disk.path != path || plan->algorithm != algorithm)) {
+        discard_wipe_plan(plan->id);
+        return std::unexpected(util::Error{"Helper returned a plan for a different request"});
+    }
+    return plan;
+}
+
+void DBusClient::discard_wipe_plan(const std::string& id) {
+    std::lock_guard lock(proxy_mutex_);
+    if (proxy_) {
+        // Releasing a confirmation must not block the GTK main loop.
+        g_dbus_proxy_call(proxy_, "DiscardWipePlan", g_variant_new("(s)", id.c_str()),
+                          G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, nullptr, nullptr);
+    }
+}
+
+auto DBusClient::get_wipe_jobs() -> std::expected<std::vector<WipeJobSnapshot>, util::Error> {
+    GDBusProxy* proxy_copy = nullptr;
+    {
+        std::lock_guard lock(proxy_mutex_);
+        if (!proxy_) {
+            return std::unexpected(util::Error{"Not connected"});
+        }
+        proxy_copy = proxy_;
+        g_object_ref(proxy_copy);
+    }
+    ProxyRefGuard proxy_guard{proxy_copy};
+    {
+        std::lock_guard lock(callback_mutex_);
+        pending_progress_.clear();
+    }
+    GError* error = nullptr;
+    auto* reply = g_dbus_proxy_call_sync(proxy_copy, "GetWipeJobs", nullptr, G_DBUS_CALL_FLAGS_NONE,
+                                         DBUS_TIMEOUT_MS, nullptr, &error);
+    if (!reply) {
+        const std::string message = error ? error->message : "Could not list wipe jobs";
+        g_clear_error(&error);
+        return std::unexpected(util::Error{message});
+    }
+    if (!g_variant_is_of_type(reply, G_VARIANT_TYPE("(aa{sv})"))) {
+        g_variant_unref(reply);
+        return std::unexpected(util::Error{"Invalid wipe-job list reply"});
+    }
+    auto* array = g_variant_get_child_value(reply, 0);
+    std::vector<WipeJobSnapshot> jobs;
+    const auto count = g_variant_n_children(array);
+    if (count > 64) {
+        g_variant_unref(array);
+        g_variant_unref(reply);
+        return std::unexpected(util::Error{"Wipe-job reply exceeds supported limit"});
+    }
+    std::string parse_error;
+    for (gsize index = 0; index < count; ++index) {
+        auto* value = g_variant_get_child_value(array, index);
+        auto job = wipe_job_variant::decode(value);
+        g_variant_unref(value);
+        if (!job) {
+            parse_error = job.error().message;
+            break;
+        }
+        jobs.push_back(std::move(*job));
+    }
+    g_variant_unref(array);
+    g_variant_unref(reply);
+    if (!parse_error.empty()) {
+        return std::unexpected(util::Error{parse_error});
+    }
+    {
+        std::lock_guard lock(callback_mutex_);
+        for (auto& job : jobs) {
+            auto it = pending_progress_.find(job.plan.id);
+            // Keep the authoritative snapshot's progress and timestamps. Retain
+            // a concurrent terminal signal solely for observe(), without merging
+            // it into a snapshot whose completion timestamp is still unknown.
+            if (it == pending_progress_.end() || !it->second.second.is_complete ||
+                job.progress.is_complete) {
+                pending_progress_.insert_or_assign(
+                    job.plan.id, std::make_pair(job.plan.device.disk.path, job.progress));
+            }
+        }
+    }
+    return jobs;
+}
+
+auto DBusClient::observe_wipe_job(const WipePlan& plan, ProgressCallback callback) -> bool {
+    std::optional<WipeProgress> buffered;
+    {
+        std::scoped_lock lock(proxy_mutex_, callback_mutex_);
+        const auto& path = plan.device.disk.path;
+        if (!proxy_ || progress_callbacks_.contains(path)) {
+            return false;
+        }
+        if (auto it = pending_progress_.find(plan.id); it != pending_progress_.end()) {
+            if (it->second.first != path) {
+                return false;
+            }
+            buffered = it->second.second;
+            pending_progress_.erase(it);
+        }
+        if (!buffered || !buffered->is_complete) {
+            progress_callbacks_.emplace(path, std::make_shared<ProgressCallback>(callback));
+            progress_plan_ids_.emplace(path, plan.id);
+        }
+    }
+    if (buffered && buffered->is_complete && callback) {
+        callback(*buffered);
+    }
+    return true;
+}
+
+auto DBusClient::cancel_prepared_wipe(const std::string& plan_id) -> bool {
+    GDBusProxy* proxy_copy = nullptr;
+    {
+        std::lock_guard lock(proxy_mutex_);
+        if (!proxy_ || !g_uuid_string_is_valid(plan_id.c_str())) {
+            return false;
+        }
+        proxy_copy = proxy_;
+        g_object_ref(proxy_copy);
+    }
+    ProxyRefGuard proxy_guard{proxy_copy};
+    GError* error = nullptr;
+    auto* reply = g_dbus_proxy_call_sync(proxy_copy, "CancelPreparedWipe",
+                                         g_variant_new("(s)", plan_id.c_str()),
+                                         G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
+    if (!reply) {
+        g_clear_error(&error);
+        return false;
+    }
+    gboolean cancelled = FALSE;
+    if (g_variant_is_of_type(reply, G_VARIANT_TYPE("(b)"))) {
+        g_variant_get(reply, "(b)", &cancelled);
+    }
+    g_variant_unref(reply);
+    return cancelled != FALSE;
+}
+
+auto DBusClient::start_prepared_wipe(const WipePlan& plan, ProgressCallback callback) -> bool {
+    const auto& disk_path = plan.device.disk.path;
     GDBusProxy* proxy_copy = nullptr;
     auto registered_callback = std::make_shared<ProgressCallback>(std::move(callback));
     {
@@ -861,31 +1077,66 @@ auto DBusClient::wipe_disk(const std::string& disk_path, WipeAlgorithm algorithm
         proxy_copy = proxy_;
         g_object_ref(proxy_copy);
         progress_callbacks_.emplace(disk_path, registered_callback);
+        progress_plan_ids_.emplace(disk_path, plan.id);
     }
     ProxyRefGuard proxy_guard{proxy_copy};
-    const auto remove_callback = [&]() {
+    const auto remove_callback = [&]() -> bool {
         std::lock_guard lock(callback_mutex_);
         auto it = progress_callbacks_.find(disk_path);
-        if (it != progress_callbacks_.end() && it->second == registered_callback) {
-            progress_callbacks_.erase(it);
+        if (it == progress_callbacks_.end() || it->second != registered_callback) {
+            return false;
         }
+        progress_callbacks_.erase(it);
+        progress_plan_ids_.erase(disk_path);
+        return true;
+    };
+    const auto report_unknown = [&]() {
+        if (remove_callback() && registered_callback && *registered_callback) {
+            WipeProgress progress{};
+            progress.is_complete = true;
+            progress.has_error = true;
+            progress.outcome_known = false;
+            progress.error_message =
+                "The wipe start reply was lost and the helper job could not be restored.";
+            (*registered_callback)(progress);
+        }
+    };
+    const auto reconcile_start = [&]() -> bool {
+        auto jobs = get_wipe_jobs();
+        if (!jobs) {
+            report_unknown();
+            return true;
+        }
+        for (const auto& job : *jobs) {
+            if (job.plan.id != plan.id) {
+                continue;
+            }
+            if (job.progress.is_complete && remove_callback() && registered_callback &&
+                *registered_callback) {
+                (*registered_callback)(job.progress);
+            }
+            return true;
+        }
+        remove_callback();
+        return false;
     };
 
     GError* error = nullptr;
     GVariant* result = g_dbus_proxy_call_sync(
-        proxy_copy, "StartWipe",
-        g_variant_new(dbus_signatures::START_WIPE_REQUEST, disk_path.c_str(),
-                      static_cast<guint32>(algorithm), verify ? TRUE : FALSE),
+        proxy_copy, "StartPreparedWipe", g_variant_new("(s)", plan.id.c_str()),
         G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
 
     if (!result) {
         LOG_ERROR("DBusClient",
-                  std::format("StartWipe failed: {}", error ? error->message : "unknown"));
+                  std::format("StartPreparedWipe failed: {}", error ? error->message : "unknown"));
         g_clear_error(&error);
-        remove_callback();
-        return false;
+        return reconcile_start();
     }
 
+    if (!g_variant_is_of_type(result, G_VARIANT_TYPE(dbus_signatures::START_WIPE_REPLY))) {
+        g_variant_unref(result);
+        return reconcile_start();
+    }
     gboolean started = FALSE;
     const gchar* error_message = nullptr;
     g_variant_get(result, dbus_signatures::START_WIPE_REPLY_PARSE, &started, &error_message);
@@ -948,32 +1199,16 @@ auto DBusClient::supports_verification(WipeAlgorithm algo) -> bool {
 }
 
 auto DBusClient::cancel_operation(const std::string& device_path) -> bool {
-    GDBusProxy* proxy_copy = nullptr;
+    std::string plan_id;
     {
-        std::lock_guard lock(proxy_mutex_);
-        if (!proxy_)
+        std::lock_guard lock(callback_mutex_);
+        const auto it = progress_plan_ids_.find(device_path);
+        if (it == progress_plan_ids_.end()) {
             return false;
-        proxy_copy = proxy_;
-        g_object_ref(proxy_copy);
+        }
+        plan_id = it->second;
     }
-    ProxyRefGuard proxy_guard{proxy_copy};
-
-    GError* error = nullptr;
-    GVariant* result = g_dbus_proxy_call_sync(
-        proxy_copy, "CancelWipe",
-        g_variant_new(dbus_signatures::CANCEL_WIPE_REQUEST, device_path.c_str()),
-        G_DBUS_CALL_FLAGS_NONE, DBUS_TIMEOUT_MS, nullptr, &error);
-
-    if (!result) {
-        g_clear_error(&error);
-        return false;
-    }
-
-    gboolean cancelled = FALSE;
-    g_variant_get(result, dbus_signatures::CANCEL_WIPE_REPLY, &cancelled);
-    g_variant_unref(result);
-
-    return cancelled != FALSE;
+    return cancel_prepared_wipe(plan_id);
 }
 
 void DBusClient::invalidate_cache() {

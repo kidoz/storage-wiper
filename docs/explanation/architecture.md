@@ -61,12 +61,13 @@ This matters because a service result can arrive after a window closes.
 
 ## A wipe's lifecycle
 
-1. The client identifies the target, presents its scope, and sends the selected
-   algorithm and verification request.
-2. The helper authorizes the caller and validates the path and current mount
-   state. Hardware erase also checks its wider affected scope.
+1. The helper prepares an immutable device identity, method, and scope. The
+   client presents that plan and sends its one-shot ID after confirmation.
+2. The helper authorizes asynchronously with a deadline, then revalidates the
+   plan, current mount state, and affected scope.
 3. `WipeService` reserves the operation and claims the device with exclusive
-   access. Overlapping operations are rejected.
+   access. It checks the opened device generation and size against the confirmed
+   snapshot before writing. Overlapping operations are rejected.
 4. A worker executes the algorithm, reports progress, and observes its
    cancellation flag. Software writes use synchronous device I/O.
 5. Supported verification runs when requested. Successful non-rotational
