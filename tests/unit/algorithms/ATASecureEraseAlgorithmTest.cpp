@@ -107,3 +107,15 @@ TEST_F(ATASecureEraseAlgorithmTest, NvmePartitionCannotReachController) {
     EXPECT_TRUE(captured_progress.back().has_error);
     EXPECT_NE(captured_progress.back().error_message.find("Cannot determine"), std::string::npos);
 }
+
+TEST_F(ATASecureEraseAlgorithmTest, PrepareFirmwareRejectsInvalidDescriptor) {
+    EXPECT_FALSE(ATASecureEraseAlgorithm::prepare_firmware(-1, "/dev/nvme999n1"));
+    EXPECT_FALSE(ATASecureEraseAlgorithm::prepare_firmware(-1, "/dev/sdz"));
+}
+
+TEST_F(ATASecureEraseAlgorithmTest, PreparedExecutionRejectsInvalidDescriptor) {
+    const FirmwarePlan plan{.method = "nvme-format-crypto", .scope = "device"};
+    EXPECT_FALSE(algorithm.execute_prepared(-1, plan, CreateCapturingCallback(), cancel_flag));
+    ASSERT_FALSE(captured_progress.empty());
+    EXPECT_TRUE(captured_progress.back().has_error);
+}

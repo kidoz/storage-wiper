@@ -6,6 +6,8 @@
 #pragma once
 
 #include "IWipeAlgorithm.hpp"
+#include "models/WipePlan.hpp"
+#include "util/Result.hpp"
 
 #include <cstdint>
 #include <string>
@@ -61,6 +63,13 @@ struct ATASecurityInfo {
  */
 class ATASecureEraseAlgorithm : public IWipeAlgorithm {
 public:
+    // Both APIs borrow the caller's claimed descriptor; execution never reopens a path.
+    [[nodiscard]] static auto prepare_firmware(int fd, const std::string& device_path)
+        -> std::expected<FirmwarePlan, util::Error>;
+
+    [[nodiscard]] bool execute_prepared(int fd, const FirmwarePlan& plan, ProgressCallback callback,
+                                        const std::atomic<bool>& cancel_flag);
+
     /**
      * @brief Not used - hardware secure erase requires device-level access
      */
@@ -105,6 +114,11 @@ public:
     static bool is_device_frozen(const std::string& device_path);
 
 private:
+    static auto prepare_nvme(int fd) -> std::expected<FirmwarePlan, util::Error>;
+    static auto prepare_ata(int fd) -> std::expected<FirmwarePlan, util::Error>;
+    static ATASecurityInfo get_security_info(int fd);
+    bool ata_secure_erase(int fd, const FirmwarePlan& plan, ProgressCallback& callback,
+                          const std::atomic<bool>& cancel_flag);
     // ATA command codes
     static constexpr uint8_t ATA_OP_IDENTIFY = 0xEC;
     static constexpr uint8_t ATA_OP_SECURITY_SET_PASSWORD = 0xF1;
@@ -139,6 +153,8 @@ private:
      */
     bool disable_security_password(int fd, const char* password, bool master = false);
 
+    [[nodiscard]] bool clear_security_password(int fd);
+
     /**
      * @brief Prepare for security erase
      */
@@ -151,9 +167,9 @@ private:
                              bool master = false);
 
     /**
-     * @brief Erase an NVMe drive through its controller (Sanitize or Format)
+     * @brief Issue NVMe firmware commands through the claimed namespace descriptor
      */
-    bool nvme_secure_erase(const std::string& device_path, ProgressCallback& callback,
+    bool nvme_secure_erase(int fd, const FirmwarePlan& plan, ProgressCallback& callback,
                            const std::atomic<bool>& cancel_flag);
 
     /**
@@ -163,7 +179,7 @@ private:
 
     /**
      * @brief Read the Identify Namespace structure for one namespace
-     * @param fd Open controller character device
+     * @param fd Open namespace block device
      * @param nsid Namespace ID
      * @param out 4096-byte destination buffer
      * @return 0 on success, the NVMe status code when positive, -1 on ioctl failure
@@ -185,8 +201,7 @@ private:
     /**
      * @brief Run a blocking Format NVM with cryptographic erase on a namespace
      */
-    bool nvme_format_crypto_erase(const std::string& device_path, int ctrl_fd,
-                                  ProgressCallback& callback);
+    bool nvme_format_crypto_erase(int fd, ProgressCallback& callback);
 
     /**
      * @brief Format a seconds count as "1h 05m" / "2m 30s" / "45s"

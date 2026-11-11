@@ -39,63 +39,134 @@ bool ATASecureEraseAlgorithm::execute_on_device(const std::string& device_path,
                                                 [[maybe_unused]] uint64_t size,
                                                 ProgressCallback callback,
                                                 const std::atomic<bool>& cancel_flag) {
-    // NVMe drives take the Sanitize/Format path through the controller
+    if (device_path.starts_with("/dev/nvme") && !nvme_sanitize::controller_path_of(device_path)) {
+        report_progress(callback, 0, "Error", true, true,
+                        "Cannot determine the NVMe namespace device for " + device_path);
+        return false;
+    }
+    const util::FileDescriptor fd(open(device_path.c_str(), O_RDWR | O_NONBLOCK));
+    if (!fd) {
+        report_progress(callback, 0, "Error", true, true,
+                        "Failed to open device: " + std::string(strerror(errno)));
+        return false;
+    }
+    const auto plan = prepare_firmware(fd.get(), device_path);
+    if (!plan) {
+        report_progress(callback, 0, "Error", true, true, plan.error().message);
+        return false;
+    }
+    return execute_prepared(fd.get(), *plan, std::move(callback), cancel_flag);
+}
+
+auto ATASecureEraseAlgorithm::prepare_firmware(int fd, const std::string& device_path)
+    -> std::expected<FirmwarePlan, util::Error> {
     if (device_path.starts_with("/dev/nvme")) {
-        return nvme_secure_erase(device_path, callback, cancel_flag);
+        if (!nvme_sanitize::controller_path_of(device_path)) {
+            return std::unexpected(util::Error{"Cannot determine the NVMe namespace device"});
+        }
+        return prepare_nvme(fd);
     }
+    return prepare_ata(fd);
+}
 
-    report_progress(callback, 0, "Checking ATA Security support...");
+auto ATASecureEraseAlgorithm::prepare_nvme(int fd) -> std::expected<FirmwarePlan, util::Error> {
+    const int namespace_id = ioctl(fd, NVME_IOCTL_ID);
+    if (namespace_id <= 0) {
+        return std::unexpected(util::Error{"Failed to read the NVMe namespace ID"});
+    }
+    std::array<uint8_t, 4'096> identify{};
+    if (const int result = nvme_identify_controller(fd, identify.data()); result != 0) {
+        return std::unexpected(
+            util::Error{"Failed to read NVMe capabilities: " + nvme_error_text(result)});
+    }
+    const auto caps = nvme_sanitize::parse_capabilities(identify.data());
+    const auto selected = nvme_sanitize::choose_erase_plan(caps);
+    FirmwarePlan plan{.method = "", .scope = "nvme-subsystem", .cancellable = false};
+    switch (selected) {
+        case nvme_sanitize::ErasePlan::SANITIZE_CRYPTO_ERASE:
+            plan.method = "nvme-sanitize-crypto";
+            break;
+        case nvme_sanitize::ErasePlan::SANITIZE_BLOCK_ERASE:
+            plan.method = "nvme-sanitize-block";
+            break;
+        case nvme_sanitize::ErasePlan::SANITIZE_OVERWRITE:
+            plan.method = "nvme-sanitize-overwrite";
+            break;
+        case nvme_sanitize::ErasePlan::FORMAT_CRYPTO_ERASE:
+            plan.method = "nvme-format-crypto";
+            // With SES != 0 the specification uses FNA bit 1, ignoring bit 0.
+            plan.scope = caps.format_secure_erase_all_namespaces ? "nvme-subsystem" : "device";
+            break;
+        case nvme_sanitize::ErasePlan::UNSUPPORTED:
+            return std::unexpected(util::Error{
+                "This NVMe controller supports neither Sanitize nor cryptographic Format NVM"});
+    }
+    if (plan.scope == "nvme-subsystem" && (caps.namespace_count != 1 || namespace_id != 1)) {
+        return std::unexpected(util::Error{
+            "Subsystem-wide firmware erase requires exactly one allocated namespace (NSID 1)"});
+    }
+    if (plan.scope == "nvme-subsystem") {
+        // Sysfs can only enumerate controllers attached to this host. CMIC and
+        // NMIC also reject subsystems/namespaces that can be shared elsewhere.
+        constexpr size_t ID_CTRL_CMIC = 76;
+        constexpr size_t ID_NS_NMIC = 30;
+        if ((identify[ID_CTRL_CMIC] & 0x03U) != 0) {
+            return std::unexpected(util::Error{
+                "Subsystem-wide erase of multi-port or multi-controller NVMe is unsupported"});
+        }
+        std::array<uint8_t, 4'096> namespace_identify{};
+        if (nvme_identify_namespace(fd, static_cast<uint32_t>(namespace_id),
+                                    namespace_identify.data()) != 0 ||
+            (namespace_identify[ID_NS_NMIC] & 0x01U) != 0) {
+            return std::unexpected(util::Error{
+                "Cannot establish an unshared NVMe namespace for subsystem-wide erase"});
+        }
+    }
+    return plan;
+}
 
-    // Open device
-    int fd = open(device_path.c_str(), O_RDWR | O_NONBLOCK);
-    if (fd < 0) {
-        std::string error = "Failed to open device: " + std::string(strerror(errno));
-        report_progress(callback, 0, "Error", true, true, error);
+auto ATASecureEraseAlgorithm::prepare_ata(int fd) -> std::expected<FirmwarePlan, util::Error> {
+    const auto info = get_security_info(fd);
+    if (!info.supported) {
+        return std::unexpected(util::Error{"Device does not support ATA Security"});
+    }
+    if (info.frozen || info.locked || info.count_expired || info.enabled) {
+        return std::unexpected(util::Error{
+            "ATA security is frozen, locked, already enabled, or its attempt count expired"});
+    }
+    return FirmwarePlan{.method = info.enhanced_erase_supported ? "ata-enhanced-security-erase"
+                                                                : "ata-security-erase",
+                        .scope = "device",
+                        .cancellable = false};
+}
+
+bool ATASecureEraseAlgorithm::execute_prepared(int fd, const FirmwarePlan& plan,
+                                               ProgressCallback callback,
+                                               const std::atomic<bool>& cancel_flag) {
+    if (cancel_flag.load()) {
+        report_progress(callback, 0, "Cancelled", true, true, "Operation was cancelled by user");
         return false;
     }
-
-    // Get security info
-    ATASecurityInfo security_info = get_security_info(device_path);
-
-    if (!security_info.supported) {
-        close(fd);
+    // Reprobe through the claimed descriptor. A changed method or scope requires
+    // a new confirmation; never silently switch firmware operations.
+    const bool nvme = plan.method.starts_with("nvme-");
+    const auto current = nvme ? prepare_nvme(fd) : prepare_ata(fd);
+    if (!current || *current != plan) {
         report_progress(callback, 0, "Error", true, true,
-                        "Device does not support ATA Security feature. "
-                        "This may be a USB device or older hardware. "
-                        "Consider using Zero Fill or Random Data instead.");
+                        current ? "Firmware erase plan changed; confirm the device again"
+                                : current.error().message);
         return false;
     }
+    return nvme ? nvme_secure_erase(fd, plan, callback, cancel_flag)
+                : ata_secure_erase(fd, plan, callback, cancel_flag);
+}
 
-    if (security_info.frozen) {
-        close(fd);
-        report_progress(callback, 0, "Error", true, true,
-                        "Device security is frozen. To unfreeze:\n"
-                        "1. Suspend the system (sleep)\n"
-                        "2. Wake it up\n"
-                        "3. Run secure erase immediately\n\n"
-                        "Alternatively, a cold boot without BIOS freeze may work.");
-        return false;
-    }
-
-    if (security_info.locked) {
-        close(fd);
-        report_progress(callback, 0, "Error", true, true,
-                        "Device is locked with a security password. "
-                        "You must unlock it first with the correct password.");
-        return false;
-    }
-
-    if (security_info.count_expired) {
-        close(fd);
-        report_progress(callback, 0, "Error", true, true,
-                        "Security attempt count expired. "
-                        "The device has been locked due to too many failed attempts.");
-        return false;
-    }
-
+bool ATASecureEraseAlgorithm::ata_secure_erase(int fd, const FirmwarePlan& plan,
+                                               ProgressCallback& callback,
+                                               const std::atomic<bool>& cancel_flag) {
+    const auto security_info = get_security_info(fd);
     // Check for cancellation
     if (cancel_flag.load()) {
-        close(fd);
         report_progress(callback, 0, "Cancelled", true, true, "Operation was cancelled by user");
         return false;
     }
@@ -122,19 +193,27 @@ bool ATASecureEraseAlgorithm::execute_on_device(const std::string& device_path,
 
     // Step 1: Set security password
     if (!set_security_password(fd, TEMP_PASSWORD, false)) {
-        close(fd);
         report_progress(callback, 5, "Error", true, true,
                         "Failed to set security password. The device may not accept "
                         "password commands or may require specific conditions.");
         return false;
     }
 
+    constexpr auto RECOVERY_WARNING =
+        " The temporary ATA security password could not be disabled, or its removal could not be "
+        "confirmed. The drive may remain security-enabled; recovery may require the temporary "
+        "password 'StorageWiper'.";
+
+    auto report_cancellation = [&](double percentage, const char* cleaned_status) {
+        const bool cleared = clear_security_password(fd);
+        report_progress(
+            callback, percentage, cleared ? cleaned_status : "Cancellation incomplete", true, true,
+            cleared ? "Operation was cancelled by user"
+                    : "Operation was cancelled by user." + std::string{RECOVERY_WARNING});
+    };
+
     if (cancel_flag.load()) {
-        // Try to disable password before exiting
-        disable_security_password(fd, TEMP_PASSWORD, false);
-        close(fd);
-        report_progress(callback, 5, "Cancelled - password disabled", true, true,
-                        "Operation was cancelled by user");
+        report_cancellation(5, "Cancelled - password disabled");
         return false;
     }
 
@@ -142,19 +221,18 @@ bool ATASecureEraseAlgorithm::execute_on_device(const std::string& device_path,
 
     // Step 2: Security erase prepare
     if (!security_erase_prepare(fd)) {
-        // Try to disable password
-        disable_security_password(fd, TEMP_PASSWORD, false);
-        close(fd);
-        report_progress(callback, 10, "Error", true, true,
-                        "Failed to prepare for security erase. "
-                        "The device rejected the SECURITY ERASE PREPARE command.");
+        std::string message =
+            "Failed to prepare for security erase. The device rejected the SECURITY ERASE PREPARE "
+            "command.";
+        if (!clear_security_password(fd)) {
+            message += RECOVERY_WARNING;
+        }
+        report_progress(callback, 10, "Error", true, true, message);
         return false;
     }
 
     if (cancel_flag.load()) {
-        disable_security_password(fd, TEMP_PASSWORD, false);
-        close(fd);
-        report_progress(callback, 10, "Cancelled", true, true, "Operation was cancelled by user");
+        report_cancellation(10, "Cancelled");
         return false;
     }
 
@@ -162,43 +240,33 @@ bool ATASecureEraseAlgorithm::execute_on_device(const std::string& device_path,
 
     // Step 3: Execute secure erase
     // This command can take a very long time (minutes to hours)
-    bool use_enhanced = security_info.enhanced_erase_supported;
+    const bool use_enhanced = plan.method == "ata-enhanced-security-erase";
     auto start_time = std::chrono::steady_clock::now();
 
     if (!security_erase_unit(fd, TEMP_PASSWORD, use_enhanced, false)) {
-        // The erase may have failed but password should be cleared on success
-        // Try to disable password in case it's still set
-        disable_security_password(fd, TEMP_PASSWORD, false);
-        close(fd);
-        report_progress(callback, 15, "Error", true, true,
-                        "Secure erase command failed. The device may have:\n"
-                        "- Timed out (erase takes too long)\n"
-                        "- Rejected the command\n"
-                        "- Encountered a hardware error\n\n"
-                        "Check dmesg for more information.");
+        std::string message =
+            "Secure erase command failed. The device may have timed out, rejected "
+            "the command, or encountered a hardware error. Check dmesg for more "
+            "information.";
+        if (!clear_security_password(fd)) {
+            message += RECOVERY_WARNING;
+        }
+        report_progress(callback, 15, "Error", true, true, message);
         return false;
     }
 
     auto end_time = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time);
 
-    // Verify the erase completed and password was cleared
-    close(fd);
-
-    // Reopen to check status
-    fd = open(device_path.c_str(), O_RDWR | O_NONBLOCK);
-    if (fd >= 0) {
-        ATASecurityInfo post_info = get_security_info(device_path);
-        close(fd);
-
-        if (post_info.enabled) {
-            // Password still set - try to disable it
-            fd = open(device_path.c_str(), O_RDWR | O_NONBLOCK);
-            if (fd >= 0) {
-                disable_security_password(fd, TEMP_PASSWORD, false);
-                close(fd);
-            }
+    // Keep using the claimed descriptor even if its device path is recycled.
+    const auto post_info = get_security_info(fd);
+    if (!post_info.supported || post_info.enabled) {
+        std::string message = "Could not confirm ATA security was disabled after erase";
+        if (post_info.enabled && !clear_security_password(fd)) {
+            message += RECOVERY_WARNING;
         }
+        report_progress(callback, 100, "Error", true, true, message);
+        return false;
     }
 
     std::string completion_msg = "ATA Secure Erase completed successfully in " +
@@ -212,12 +280,12 @@ bool ATASecureEraseAlgorithm::execute_on_device(const std::string& device_path,
 }
 
 ATASecurityInfo ATASecureEraseAlgorithm::get_security_info(const std::string& device_path) {
-    ATASecurityInfo info{};
+    const util::FileDescriptor fd(open(device_path.c_str(), O_RDONLY | O_NONBLOCK));
+    return fd ? get_security_info(fd.get()) : ATASecurityInfo{};
+}
 
-    int fd = open(device_path.c_str(), O_RDONLY | O_NONBLOCK);
-    if (fd < 0) {
-        return info;
-    }
+ATASecurityInfo ATASecureEraseAlgorithm::get_security_info(int fd) {
+    ATASecurityInfo info{};
 
     // Try to get IDENTIFY data using hdparm-style ioctl
     uint16_t identify_data[256];
@@ -229,17 +297,19 @@ ATASecurityInfo ATASecureEraseAlgorithm::get_security_info(const std::string& de
         // Parse security word (word 128)
         uint16_t security_word = identify_data[SECURITY_WORD];
 
-        info.supported = (security_word & SECURITY_SUPPORTED) != 0;
-        info.enabled = (security_word & SECURITY_ENABLED) != 0;
-        info.locked = (security_word & SECURITY_LOCKED) != 0;
-        info.frozen = (security_word & SECURITY_FROZEN) != 0;
-        info.count_expired = (security_word & SECURITY_COUNT_EXPIRED) != 0;
-        info.enhanced_erase_supported = (security_word & SECURITY_ENHANCED_ERASE) != 0;
+        const auto security = static_cast<uint32_t>(security_word);
+        info.supported = (security & SECURITY_SUPPORTED) != 0;
+        info.enabled = (security & SECURITY_ENABLED) != 0;
+        info.locked = (security & SECURITY_LOCKED) != 0;
+        info.frozen = (security & SECURITY_FROZEN) != 0;
+        info.count_expired = (security & SECURITY_COUNT_EXPIRED) != 0;
+        info.enhanced_erase_supported = (security & SECURITY_ENHANCED_ERASE) != 0;
 
         // Get erase times (words 89 and 90)
         info.erase_time_normal = identify_data[ERASE_TIME_WORD];
         info.erase_time_enhanced = identify_data[ENHANCED_ERASE_TIME_WORD];
-        info.master_password_revision = identify_data[MASTER_PASSWORD_REV_WORD] & 0xFF;
+        info.master_password_revision =
+            static_cast<uint8_t>(identify_data[MASTER_PASSWORD_REV_WORD] & 0xFFU);
 
         // Determine state
         if (!info.supported) {
@@ -257,7 +327,6 @@ ATASecurityInfo ATASecureEraseAlgorithm::get_security_info(const std::string& de
         }
     }
 
-    close(fd);
     return info;
 }
 
@@ -278,8 +347,8 @@ bool ATASecureEraseAlgorithm::set_security_password(int fd, const char* password
 
     // Control word
     uint16_t control = master ? 0x0001 : 0x0000;
-    buffer[0] = control & 0xFF;
-    buffer[1] = (control >> 8) & 0xFF;
+    buffer[0] = static_cast<uint8_t>(static_cast<uint32_t>(control) & 0xFFU);
+    buffer[1] = static_cast<uint8_t>((static_cast<uint32_t>(control) >> 8U) & 0xFFU);
 
     // Copy password (max 32 bytes)
     size_t pwd_len = std::strlen(password);
@@ -313,8 +382,8 @@ bool ATASecureEraseAlgorithm::disable_security_password(int fd, const char* pass
     std::memset(buffer, 0, sizeof(buffer));
 
     uint16_t control = master ? 0x0001 : 0x0000;
-    buffer[0] = control & 0xFF;
-    buffer[1] = (control >> 8) & 0xFF;
+    buffer[0] = static_cast<uint8_t>(static_cast<uint32_t>(control) & 0xFFU);
+    buffer[1] = static_cast<uint8_t>((static_cast<uint32_t>(control) >> 8U) & 0xFFU);
 
     size_t pwd_len = std::strlen(password);
     size_t copy_len = std::min(pwd_len, size_t(32));
@@ -329,6 +398,14 @@ bool ATASecureEraseAlgorithm::disable_security_password(int fd, const char* pass
     std::memcpy(&cmd_data[4], buffer, 512);
 
     return ioctl(fd, HDIO_DRIVE_CMD, cmd_data) == 0;
+}
+
+bool ATASecureEraseAlgorithm::clear_security_password(int fd) {
+    if (!disable_security_password(fd, TEMP_PASSWORD, false)) {
+        return false;
+    }
+    const auto current = get_security_info(fd);
+    return current.supported && !current.enabled;
 }
 
 bool ATASecureEraseAlgorithm::security_erase_prepare(int fd) {
@@ -349,12 +426,12 @@ bool ATASecureEraseAlgorithm::security_erase_unit(int fd, const char* password, 
     // Bit 1: 0=normal erase, 1=enhanced erase
     uint16_t control = 0;
     if (master)
-        control |= 0x0001;
+        control |= 0x0001U;
     if (enhanced)
-        control |= 0x0002;
+        control |= 0x0002U;
 
-    buffer[0] = control & 0xFF;
-    buffer[1] = (control >> 8) & 0xFF;
+    buffer[0] = static_cast<uint8_t>(static_cast<uint32_t>(control) & 0xFFU);
+    buffer[1] = static_cast<uint8_t>((static_cast<uint32_t>(control) >> 8U) & 0xFFU);
 
     size_t pwd_len = std::strlen(password);
     size_t copy_len = std::min(pwd_len, size_t(32));
@@ -431,28 +508,16 @@ int ATASecureEraseAlgorithm::nvme_get_sanitize_log(int fd, uint8_t* out) {
     cmd.nsid = 0xFFFF'FFFF;
     cmd.addr = reinterpret_cast<uint64_t>(out);
     cmd.data_len = nvme_sanitize::SANITIZE_LOG_SIZE;
-    cmd.cdw10 = nvme_sanitize::SANITIZE_LOG_ID |
-                (static_cast<uint32_t>((nvme_sanitize::SANITIZE_LOG_SIZE / 4) - 1) << 16);
+    cmd.cdw10 = static_cast<uint32_t>(nvme_sanitize::SANITIZE_LOG_ID) |
+                (static_cast<uint32_t>((nvme_sanitize::SANITIZE_LOG_SIZE / 4U) - 1U) << 16U);
 
     return ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd);
 }
 
-bool ATASecureEraseAlgorithm::nvme_format_crypto_erase(const std::string& device_path, int ctrl_fd,
-                                                       ProgressCallback& callback) {
-    // Format NVM is namespaced, so it needs the namespace ID of the device
-    // being wiped. Sanitize by contrast is controller-wide and takes none.
-    const util::FileDescriptor ns_fd(open(device_path.c_str(), O_RDONLY | O_NONBLOCK));
-    if (!ns_fd) {
-        report_progress(callback, 0, "Error", true, true,
-                        "Failed to open NVMe namespace to read its namespace ID: " +
-                            std::string(strerror(errno)));
-        return false;
-    }
-
-    const int namespace_id = ioctl(ns_fd.get(), NVME_IOCTL_ID);
+bool ATASecureEraseAlgorithm::nvme_format_crypto_erase(int fd, ProgressCallback& callback) {
+    const int namespace_id = ioctl(fd, NVME_IOCTL_ID);
     if (namespace_id <= 0) {
-        report_progress(callback, 0, "Error", true, true,
-                        "Failed to read the NVMe namespace ID of " + device_path);
+        report_progress(callback, 0, "Error", true, true, "Failed to read the NVMe namespace ID");
         return false;
     }
 
@@ -461,11 +526,11 @@ bool ATASecureEraseAlgorithm::nvme_format_crypto_erase(const std::string& device
     // Read the namespace's current LBA format so the erase preserves it. A
     // Format that changes the LBA size is a different, riskier operation.
     std::array<uint8_t, 4'096> identify_ns{};
-    const int identify_result = nvme_identify_namespace(ctrl_fd, nsid, identify_ns.data());
+    const int identify_result = nvme_identify_namespace(fd, nsid, identify_ns.data());
     if (identify_result != 0) {
         report_progress(callback, 40, "Error", true, true,
-                        std::format("Failed to read Identify Namespace data for {}: {}",
-                                    device_path, nvme_error_text(identify_result)));
+                        std::format("Failed to read Identify Namespace data: {}",
+                                    nvme_error_text(identify_result)));
         return false;
     }
     const uint8_t flbas = identify_ns[nvme_sanitize::ID_NS_OFFSET_FLBAS];
@@ -480,7 +545,7 @@ bool ATASecureEraseAlgorithm::nvme_format_crypto_erase(const std::string& device
     cmd.cdw10 = nvme_sanitize::format_cdw10(flbas, nvme_sanitize::FORMAT_SES_CRYPTO_ERASE);
     cmd.timeout_ms = 3'600'000;  // Format is blocking; allow up to one hour
 
-    const int format_result = ioctl(ctrl_fd, NVME_IOCTL_ADMIN_CMD, &cmd);
+    const int format_result = ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd);
     if (format_result != 0) {
         report_progress(callback, 40, "Error", true, true,
                         std::format("NVMe Format failed: {} (check dmesg for details)",
@@ -491,62 +556,36 @@ bool ATASecureEraseAlgorithm::nvme_format_crypto_erase(const std::string& device
     return true;
 }
 
-bool ATASecureEraseAlgorithm::nvme_secure_erase(const std::string& device_path,
+bool ATASecureEraseAlgorithm::nvme_secure_erase(int fd, const FirmwarePlan& firmware,
                                                 ProgressCallback& callback,
                                                 const std::atomic<bool>& cancel_flag) {
-    if (cancel_flag.load()) {
-        report_progress(callback, 0, "Cancelled", true, true, "Operation was cancelled by user");
-        return false;
-    }
-
-    const auto ctrl_path = nvme_sanitize::controller_path_of(device_path);
-    if (!ctrl_path) {
-        report_progress(callback, 0, "Error", true, true,
-                        "Cannot determine the NVMe controller device for " + device_path);
-        return false;
-    }
-
-    const util::FileDescriptor ctrl_fd(open(ctrl_path->c_str(), O_RDWR | O_NONBLOCK));
-    if (!ctrl_fd) {
-        report_progress(callback, 0, "Error", true, true,
-                        "Failed to open NVMe controller " + *ctrl_path + ": " +
-                            std::string(strerror(errno)));
-        return false;
-    }
-
-    report_progress(callback, 0, "Reading NVMe controller capabilities...");
-
-    std::array<uint8_t, 4'096> identify{};
-    if (const int result = nvme_identify_controller(ctrl_fd.get(), identify.data()); result != 0) {
-        report_progress(callback, 0, "Error", true, true,
-                        "Failed to read Identify Controller data from " + *ctrl_path + ": " +
-                            nvme_error_text(result));
-        return false;
-    }
-
-    const auto caps = nvme_sanitize::parse_capabilities(identify.data());
-    const auto plan = nvme_sanitize::choose_erase_plan(caps);
-    if (plan == nvme_sanitize::ErasePlan::UNSUPPORTED) {
-        report_progress(callback, 0, "Error", true, true,
-                        "This NVMe controller supports neither the Sanitize command nor "
-                        "cryptographic Format NVM. Use a software overwrite algorithm "
-                        "(Zero Fill or Random Data) instead.");
-        return false;
-    }
-
+    const auto plan =
+        firmware.method == "nvme-sanitize-crypto"  ? nvme_sanitize::ErasePlan::SANITIZE_CRYPTO_ERASE
+        : firmware.method == "nvme-sanitize-block" ? nvme_sanitize::ErasePlan::SANITIZE_BLOCK_ERASE
+        : firmware.method == "nvme-sanitize-overwrite"
+            ? nvme_sanitize::ErasePlan::SANITIZE_OVERWRITE
+            : nvme_sanitize::ErasePlan::FORMAT_CRYPTO_ERASE;
     report_progress(callback, 5,
-                    std::format("Firmware erase: {} (erases all namespaces on {})",
-                                nvme_sanitize::erase_plan_name(plan), *ctrl_path));
+                    std::format("Firmware erase: {} ({})", nvme_sanitize::erase_plan_name(plan),
+                                firmware.scope == "nvme-subsystem"
+                                    ? "erases all namespaces in the NVMe subsystem"
+                                    : "erases only the selected namespace"));
 
     // Refuse to queue behind an already running sanitize - it would fail
     // anyway, and the log status is how completion is detected below.
     std::array<uint8_t, nvme_sanitize::SANITIZE_LOG_SIZE> log{};
     bool prior_run_succeeded = false;
-    if (nvme_get_sanitize_log(ctrl_fd.get(), log.data()) == 0) {
+    const int initial_status_result = nvme_get_sanitize_log(fd, log.data());
+    if (nvme_sanitize::is_sanitize_plan(plan) && initial_status_result != 0) {
+        report_progress(callback, 5, "Error", true, true,
+                        "Cannot establish the initial NVMe sanitize status; refusing to start");
+        return false;
+    }
+    if (initial_status_result == 0) {
         const auto status = nvme_sanitize::parse_log_page(log.data()).status;
         if (status == nvme_sanitize::SanitizeStatus::IN_PROGRESS) {
             report_progress(callback, 5, "Error", true, true,
-                            "A sanitize operation is already in progress on " + *ctrl_path);
+                            "A sanitize operation is already in progress");
             return false;
         }
         // Remembered so a success left over from an earlier sanitize is not
@@ -574,7 +613,7 @@ bool ATASecureEraseAlgorithm::nvme_secure_erase(const std::string& device_path,
         // other actions. Zero is a fine pattern; the pass count is in CDW10.
         cmd.cdw11 = 0;
 
-        if (const int result = ioctl(ctrl_fd.get(), NVME_IOCTL_ADMIN_CMD, &cmd); result != 0) {
+        if (const int result = ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd); result != 0) {
             report_progress(callback, 10, "Error", true, true,
                             std::format("Failed to start NVMe sanitize: {} (check dmesg for "
                                         "details)",
@@ -603,7 +642,7 @@ bool ATASecureEraseAlgorithm::nvme_secure_erase(const std::string& device_path,
                 return false;
             }
 
-            if (nvme_get_sanitize_log(ctrl_fd.get(), log.data()) != 0) {
+            if (nvme_get_sanitize_log(fd, log.data()) != 0) {
                 if (++failed_reads >= STATUS_READ_RETRIES) {
                     report_progress(callback, 10, "Error", true, true,
                                     "Lost access to the NVMe sanitize status log");
@@ -692,7 +731,7 @@ bool ATASecureEraseAlgorithm::nvme_secure_erase(const std::string& device_path,
     }
 
     // FORMAT_CRYPTO_ERASE: blocking command with no progress reporting
-    if (nvme_format_crypto_erase(device_path, ctrl_fd.get(), callback)) {
+    if (nvme_format_crypto_erase(fd, callback)) {
         report_progress(callback, 100,
                         "NVMe Format with cryptographic erase completed successfully", true, false,
                         "");

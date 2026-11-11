@@ -1,5 +1,6 @@
 #include "helper/services/WipeService.hpp"
 
+#include "helper/services/DeviceIdentity.hpp"
 #include "services/DevicePolicy.hpp"
 #include "util/FileDescriptor.hpp"
 
@@ -18,8 +19,10 @@
 
 // Standard library
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <deque>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -191,7 +194,7 @@ auto issue_trim_if_ssd(int fd, const std::string& disk_path, uint64_t device_siz
         return false;
     }
 
-    constexpr uint64_t DISCARD_CHUNK = uint64_t{1} << 30;  // 1 GiB per request
+    constexpr uint64_t DISCARD_CHUNK = 1'073'741'824ULL;  // 1 GiB per request
     uint64_t offset = 0;
     bool supported = true;
 
@@ -219,25 +222,19 @@ WipeService::WipeService(std::shared_ptr<IDiskService> disk_service)
 }
 
 WipeService::~WipeService() {
-    // Snapshot the operations so workers, which never touch the map, are safe
-    std::map<std::string, std::shared_ptr<Operation>> ops;
     {
         std::lock_guard lock(operations_mutex_);
-        ops = operations_;
-    }
-
-    // Ask every live operation to stop
-    for (auto& [path, op] : ops) {
-        if (op->state->operation_in_progress.load()) {
-            op->state->cancel_requested.store(true);
+        for (auto& [path, op] : operations_) {
+            if (op->state->operation_in_progress.load()) {
+                op->state->cancel_requested.store(true);
+            }
         }
     }
 
-    // Wait (bounded) for the cancellations to take effect
     const auto start = std::chrono::steady_clock::now();
     for (;;) {
         bool all_stopped = true;
-        for (auto& [path, op] : ops) {
+        for (auto& [path, op] : operations_) {
             if (op->state->operation_in_progress.load()) {
                 all_stopped = false;
                 break;
@@ -248,26 +245,23 @@ WipeService::~WipeService() {
         }
         const auto elapsed = std::chrono::steady_clock::now() - start;
         if (elapsed >= SHUTDOWN_TIMEOUT) {
-            // Log critical warning but still wait for join
-            // Better to block shutdown than corrupt data by detaching
-            LOG_ERROR(
-                "WipeService",
-                std::format(
-                    "Shutdown - some operations did not respond to cancel within "
-                    "{}s timeout. Waiting for their threads to complete to prevent "
-                    "data corruption.",
-                    std::chrono::duration_cast<std::chrono::seconds>(SHUTDOWN_TIMEOUT).count()));
+            const int log_result =
+                std::fputs("WipeService shutdown: operations did not respond to cancellation; "
+                           "waiting for worker completion to prevent data corruption.\n",
+                           stderr);
+            (void)log_result;
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds{100});
     }
 
-    for (auto& [path, op] : ops) {
+    for (auto& [path, op] : operations_) {
         if (op->thread.joinable()) {
-            // Always join - never detach. If a thread is stuck, we wait.
-            // Detaching a wipe thread can lead to data corruption if the
-            // process exits while writing to disk.
-            op->thread.join();
+            try {
+                op->thread.join();
+            } catch (...) {
+                std::terminate();
+            }
         }
     }
 
@@ -312,8 +306,8 @@ auto WipeService::cancel_operation(const std::string& disk_path) -> bool {
     return true;
 }
 
-auto WipeService::prepare_wipe(const std::string& disk_path, WipeAlgorithm algorithm,
-                               const ProgressCallback& callback)
+auto WipeService::reserve_operation(const std::string& disk_path, WipeAlgorithm algorithm,
+                                    const ProgressCallback& callback, bool expand_nvme_scope)
     -> std::expected<WipePreparation, util::Error> {
     // Claim the per-device operation slot. Wipes on different devices run in
     // parallel; a second wipe on the same device is rejected until the first
@@ -339,7 +333,8 @@ auto WipeService::prepare_wipe(const std::string& disk_path, WipeAlgorithm algor
         return std::unexpected(util::Error{"Disk service not configured"});
     }
 
-    auto targets = device_policy::resolve_wipe_targets(*disk_service_, disk_path, algorithm);
+    auto targets = device_policy::resolve_wipe_targets(*disk_service_, disk_path, algorithm,
+                                                       expand_nvme_scope);
     if (!targets) {
         if (callback) {
             WipeProgress progress{};
@@ -405,7 +400,7 @@ auto WipeService::build_completion_status(bool wipe_result, bool do_verify, bool
     -> WipeProgress {
     WipeProgress final_progress{};
     final_progress.is_complete = true;
-    final_progress.has_error = !wipe_result || (do_verify && !verify_result);
+    final_progress.has_error = !wipe_result || (do_verify && !verify_result) || bad_blocks > 0;
     final_progress.percentage = wipe_result ? 100.0 : 0.0;
     final_progress.verification_enabled = do_verify;
     final_progress.verification_passed = verify_result;
@@ -430,6 +425,14 @@ auto WipeService::build_completion_status(bool wipe_result, bool do_verify, bool
     } else if (wipe_result && do_verify && !verify_result) {
         final_progress.status = "Wipe completed but verification failed";
         final_progress.error_message = "Verification failed: data does not match expected pattern";
+    } else if (wipe_result && bad_blocks > 0) {
+        final_progress.status = do_verify
+                                    ? "Wipe and verification completed with unwritable sectors"
+                                    : "Wipe completed with unwritable sectors";
+        final_progress.status += success_note();
+        final_progress.error_message = std::format(
+            "{} bad sectors could not be overwritten; data in them may survive an overwrite wipe.",
+            bad_blocks);
     } else if (wipe_result) {
         if (do_verify) {
             final_progress.status =
@@ -504,10 +507,125 @@ auto WipeService::wipe_disk(const std::string& disk_path, WipeAlgorithm algorith
 auto WipeService::start_wipe(const std::string& disk_path, WipeAlgorithm algorithm,
                              ProgressCallback callback, bool verify)
     -> std::expected<void, util::Error> {
+    return start_internal(disk_path, algorithm, std::move(callback), verify, std::nullopt);
+}
+
+auto WipeService::prepare_plan(const std::string& disk_path, WipeAlgorithm algorithm, bool verify)
+    -> std::expected<WipePlan, util::Error> {
+    if (!disk_service_ || !get_algorithm(algorithm)) {
+        return std::unexpected(util::Error{"Disk service or algorithm unavailable"});
+    }
+    const auto targets =
+        device_policy::resolve_wipe_targets(*disk_service_, disk_path, algorithm, false);
+    if (!targets) {
+        return std::unexpected(targets.error());
+    }
+    WipePlan plan;
+    plan.algorithm = algorithm;
+    plan.verify = verify && supports_verification(algorithm);
+    plan.firmware = {.method = "overwrite", .scope = "device", .cancellable = true};
+    for (const auto& path : *targets) {
+        const util::FileDescriptor fd{open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC)};
+        if (!fd) {
+            return std::unexpected(util::Error{"Cannot open device to prepare wipe"});
+        }
+        const auto initial = device_identity::capture_kernel(fd.get());
+        if (!initial) {
+            return std::unexpected(initial.error());
+        }
+        // Read the displayed metadata while retaining the generation sampled
+        // above, then prove that the locator still names that same generation.
+        disk_service_->invalidate_cache();
+        const auto disks = disk_service_->get_available_disks_blocking();
+        if (!disks) {
+            return std::unexpected(disks.error());
+        }
+        const auto disk = std::ranges::find(*disks, path, &DiskInfo::path);
+        if (disk == disks->end()) {
+            return std::unexpected(util::Error{"Device disappeared while preparing wipe"});
+        }
+        auto identity = device_identity::capture(fd.get(), *disk);
+        if (!identity) {
+            return std::unexpected(identity.error());
+        }
+        if (identity->disk_sequence != initial->disk_sequence ||
+            identity->device_number != initial->device_number ||
+            identity->disk.size_bytes != initial->disk.size_bytes) {
+            return std::unexpected(util::Error{"Device changed while preparing confirmation"});
+        }
+        if (algorithm == WipeAlgorithm::ATA_SECURE_ERASE) {
+            auto firmware = ATASecureEraseAlgorithm::prepare_firmware(fd.get(), path);
+            if (!firmware) {
+                return std::unexpected(firmware.error());
+            }
+            plan.firmware = std::move(*firmware);
+            if (plan.firmware.scope == "nvme-subsystem") {
+                if (auto topology = device_identity::validate_firmware_topology(path); !topology) {
+                    return std::unexpected(topology.error());
+                }
+                const auto expanded =
+                    device_policy::resolve_wipe_targets(*disk_service_, disk_path, algorithm, true);
+                if (!expanded || *expanded != *targets) {
+                    return std::unexpected(util::Error{
+                        "Subsystem erase currently requires exactly one visible namespace"});
+                }
+            }
+        }
+        if (auto valid = device_identity::validate(fd.get(), *identity); !valid) {
+            return std::unexpected(valid.error());
+        }
+        const util::FileDescriptor current{open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC)};
+        if (!current) {
+            return std::unexpected(util::Error{"Device disappeared while preparing confirmation"});
+        }
+        if (auto valid = device_identity::validate(current.get(), *identity); !valid) {
+            return std::unexpected(valid.error());
+        }
+        plan.targets.push_back(std::move(*identity));
+    }
+    plan.device = plan.targets.front();
+    return plan;
+}
+
+auto WipeService::start_prepared(const WipePlan& plan, ProgressCallback callback,
+                                 std::chrono::steady_clock::time_point deadline)
+    -> std::expected<void, util::Error> {
+    if (plan.version != WipePlan::VERSION || plan.targets.empty() ||
+        plan.targets.front() != plan.device) {
+        return std::unexpected(util::Error{"Invalid prepared wipe plan"});
+    }
+    return start_internal(plan.device.disk.path, plan.algorithm, std::move(callback), plan.verify,
+                          plan, deadline);
+}
+
+auto WipeService::start_internal(const std::string& disk_path, WipeAlgorithm algorithm,
+                                 ProgressCallback callback, bool verify,
+                                 std::optional<WipePlan> plan,
+                                 std::chrono::steady_clock::time_point deadline)
+    -> std::expected<void, util::Error> {
     // Validate and prepare for wipe
-    auto preparation = prepare_wipe(disk_path, algorithm, callback);
+    auto preparation = reserve_operation(disk_path, algorithm, callback,
+                                         !plan || plan->firmware.scope == "nvme-subsystem");
     if (!preparation) {
         return std::unexpected(preparation.error());
+    }
+
+    if (plan) {
+        std::vector<std::string> expected_targets;
+        for (const auto& target : plan->targets) {
+            expected_targets.push_back(target.disk.path);
+        }
+        if (preparation->operation->targets != expected_targets) {
+            preparation->operation->state->operation_in_progress.store(false);
+            return std::unexpected(util::Error{"Affected devices changed; confirm again"});
+        }
+    }
+
+    // Bound post-authorization validation as well: the client's transport
+    // timeout must never turn a reported start failure into a later wipe.
+    if (std::chrono::steady_clock::now() >= deadline) {
+        preparation->operation->state->operation_in_progress.store(false);
+        return std::unexpected(util::Error{"Wipe start validation timed out; prepare again"});
     }
 
     // Check if verification is requested but not supported
@@ -528,48 +646,77 @@ auto WipeService::start_wipe(const std::string& disk_path, WipeAlgorithm algorit
         // Publish the thread under the same lock used by the reaper. Even a
         // worker that finishes immediately cannot be reaped before assignment.
         std::scoped_lock lock(operations_mutex_);
-        operation->thread = create_worker_thread(
-            [disk_path, callback, operation, algorithm_ptr = preparation->algorithm,
-             requires_device_access = preparation->requires_device_access, do_verify]() {
-                const auto& state = operation->state;
-                bool wipe_result = false;
-                bool verify_result = false;
-                bool trim_issued = false;
-                uint64_t device_size = 0;
-                WipeProgress last_write{};
-                std::string error_message;
-                ProgressTracker tracker(callback);
-                auto tracked_callback = [&](const WipeProgress& progress) {
-                    WipeProgress p = progress;
-                    if (!p.error_message.empty()) {
-                        error_message = p.error_message;
-                    }
-                    if (!p.verification_in_progress && !p.has_error) {
-                        last_write = p;
-                    }
-                    p.is_complete = false;
-                    p.verification_enabled = do_verify;
-                    p.bad_block_count = last_write.bad_block_count;
-                    tracker.report(p);
-                };
+        operation->thread = create_worker_thread([disk_path, callback, operation,
+                                                  plan = std::move(plan),
+                                                  algorithm_ptr = preparation->algorithm,
+                                                  requires_device_access =
+                                                      preparation->requires_device_access,
+                                                  do_verify]() {
+            const auto& state = operation->state;
+            bool wipe_result = false;
+            bool verify_result = false;
+            bool trim_issued = false;
+            uint64_t device_size = 0;
+            WipeProgress last_write{};
+            std::string error_message;
+            ProgressTracker tracker(callback);
+            auto tracked_callback = [&](const WipeProgress& progress) {
+                WipeProgress p = progress;
+                if (!p.error_message.empty()) {
+                    error_message = p.error_message;
+                }
+                if (!p.verification_in_progress && !p.has_error) {
+                    last_write = p;
+                }
+                p.is_complete = false;
+                p.verification_enabled = do_verify;
+                p.bad_block_count = last_write.bad_block_count;
+                tracker.report(p);
+            };
 
-                // Keep every exclusive claim alive until the operation finishes.
-                // Firmware commands reopen devices internally, but these retained
-                // claims prevent mounts throughout that interval as well.
-                std::vector<util::FileDescriptor> claims;
-                try {
-                    for (const auto& target : operation->targets) {
-                        claims.emplace_back(open(target.c_str(), O_RDWR | O_SYNC | O_EXCL));
-                        if (!claims.back()) {
-                            throw std::runtime_error("Cannot exclusively claim " + target + ": " +
-                                                     std::string(strerror(errno)));
+            // Retain every exclusive claim through verification and completion.
+            // Prepared firmware operations use these same descriptors.
+            std::vector<util::FileDescriptor> claims;
+            try {
+                for (const auto& target : operation->targets) {
+                    claims.emplace_back(
+                        open(target.c_str(), O_RDWR | O_SYNC | O_EXCL | O_NOFOLLOW | O_CLOEXEC));
+                    if (!claims.back()) {
+                        throw std::runtime_error("Cannot exclusively claim " + target + ": " +
+                                                 std::string(strerror(errno)));
+                    }
+                    if (plan) {
+                        const auto& identity = plan->targets[claims.size() - 1];
+                        if (auto valid = device_identity::validate(claims.back().get(), identity);
+                            !valid) {
+                            throw std::runtime_error(valid.error().message);
                         }
                     }
-                    const int fd = claims.front().get();
-                    if (ioctl(fd, BLKGETSIZE64, &device_size) == -1 || device_size == 0) {
-                        throw std::runtime_error("Failed to get a nonzero device size");
-                    }
-                    if (!state->cancel_requested.load()) {
+                }
+                const int fd = claims.front().get();
+                if (ioctl(fd, BLKGETSIZE64, &device_size) == -1 || device_size == 0) {
+                    throw std::runtime_error("Failed to get a nonzero device size");
+                }
+                if (!state->cancel_requested.load()) {
+                    if (plan && requires_device_access) {
+                        if (plan->firmware.scope == "nvme-subsystem") {
+                            if (auto topology =
+                                    device_identity::validate_firmware_topology(disk_path);
+                                !topology) {
+                                throw std::runtime_error(topology.error().message);
+                            }
+                        }
+                        auto firmware = ATASecureEraseAlgorithm::prepare_firmware(fd, disk_path);
+                        if (!firmware || *firmware != plan->firmware) {
+                            throw std::runtime_error(
+                                "Firmware method or scope changed; confirm again");
+                        }
+                        // Firmware execution uses this retained, validated claim;
+                        // no pathname is reopened after identity validation.
+                        wipe_result = static_cast<ATASecureEraseAlgorithm&>(*algorithm_ptr)
+                                          .execute_prepared(fd, plan->firmware, tracked_callback,
+                                                            state->cancel_requested);
+                    } else {
                         wipe_result =
                             requires_device_access
                                 ? algorithm_ptr->execute_on_device(disk_path, device_size,
@@ -577,44 +724,49 @@ auto WipeService::start_wipe(const std::string& disk_path, WipeAlgorithm algorit
                                                                    state->cancel_requested)
                                 : algorithm_ptr->execute(fd, device_size, tracked_callback,
                                                          state->cancel_requested);
-                        if (!requires_device_access && fsync(fd) != 0) {
-                            throw std::runtime_error("Failed to flush data to disk: " +
-                                                     std::string(strerror(errno)));
-                        }
                     }
-
-                    if (do_verify && wipe_result && !state->cancel_requested.load()) {
-                        auto verify_callback = [&](const WipeProgress& progress) {
-                            WipeProgress p = progress;
-                            p.verification_in_progress = true;
-                            p.status = "Verifying wipe...";
-                            tracked_callback(p);
-                        };
-                        verify_result = algorithm_ptr->verify(fd, device_size, verify_callback,
-                                                              state->cancel_requested);
+                    if (!requires_device_access && fsync(fd) != 0) {
+                        throw std::runtime_error("Failed to flush data to disk: " +
+                                                 std::string(strerror(errno)));
                     }
-                    if (wipe_result && (!do_verify || verify_result) &&
-                        !state->cancel_requested.load()) {
-                        trim_issued = issue_trim_if_ssd(fd, disk_path, device_size);
-                    }
-                } catch (const std::exception& error) {
-                    error_message = error.what();
-                    wipe_result = false;
                 }
 
-                auto final_progress = build_completion_status(
-                    wipe_result, do_verify, verify_result, state->cancel_requested.load(),
-                    last_write.bad_block_count, trim_issued);
-                final_progress.total_bytes = device_size;
-                final_progress.bytes_written = last_write.bytes_written;
-                final_progress.total_passes = algorithm_ptr->get_pass_count();
-                final_progress.current_pass = last_write.current_pass;
-                if (final_progress.has_error && !error_message.empty()) {
-                    final_progress.error_message = error_message;
+                if (do_verify && wipe_result && !state->cancel_requested.load()) {
+                    auto verify_callback = [&](const WipeProgress& progress) {
+                        WipeProgress p = progress;
+                        p.verification_in_progress = true;
+                        p.status = "Verifying wipe...";
+                        tracked_callback(p);
+                    };
+                    verify_result = algorithm_ptr->verify(fd, device_size, verify_callback,
+                                                          state->cancel_requested);
                 }
-                tracker.report(final_progress);
-                state->operation_in_progress.store(false);
-            });
+                if (wipe_result && (!do_verify || verify_result) &&
+                    !state->cancel_requested.load()) {
+                    trim_issued = issue_trim_if_ssd(fd, disk_path, device_size);
+                }
+            } catch (const std::exception& error) {
+                error_message = error.what();
+                wipe_result = false;
+            }
+
+            // Firmware may finish successfully after a cancellation request that
+            // it cannot honor. Preserve the actual completed outcome in reports.
+            const bool cancelled = state->cancel_requested.load() &&
+                                   !(plan && !plan->firmware.cancellable && wipe_result);
+            auto final_progress =
+                build_completion_status(wipe_result, do_verify, verify_result, cancelled,
+                                        last_write.bad_block_count, trim_issued);
+            final_progress.total_bytes = device_size;
+            final_progress.bytes_written = last_write.bytes_written;
+            final_progress.total_passes = algorithm_ptr->get_pass_count();
+            final_progress.current_pass = last_write.current_pass;
+            if (final_progress.has_error && !error_message.empty()) {
+                final_progress.error_message = error_message;
+            }
+            tracker.report(final_progress);
+            state->operation_in_progress.store(false);
+        });
     } catch (const std::exception& error) {
         operation->state->operation_in_progress.store(false);
         const auto message = std::format("Failed to start wipe worker: {}", error.what());

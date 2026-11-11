@@ -215,3 +215,28 @@ TEST_F(WipeServiceTest, AlgorithmNames_AreUnique) {
         EXPECT_TRUE(names.insert(name).second) << "Duplicate algorithm name: " << name;
     }
 }
+
+TEST(WipeProgressOutcomeTest, SuccessRequiresCompleteKnownVerifiedResultWithoutBadSectors) {
+    WipeProgress progress{};
+    EXPECT_FALSE(wipe_succeeded(progress));
+
+    progress.is_complete = true;
+    EXPECT_TRUE(wipe_succeeded(progress));
+
+    progress.bad_block_count = 1;
+    EXPECT_FALSE(wipe_succeeded(progress));
+
+    progress.bad_block_count = 0;
+    progress.verification_enabled = true;
+    EXPECT_FALSE(wipe_succeeded(progress));
+
+    progress.verification_passed = true;
+    EXPECT_TRUE(wipe_succeeded(progress));
+
+    progress.outcome_known = false;
+    EXPECT_FALSE(wipe_succeeded(progress));
+
+    progress.outcome_known = true;
+    progress.has_error = true;
+    EXPECT_FALSE(wipe_succeeded(progress));
+}

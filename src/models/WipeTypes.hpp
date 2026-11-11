@@ -65,6 +65,9 @@ struct WipeProgress {
     std::string status;
     bool is_complete = false;
     bool has_error = false;
+    // Local transport failures are not an authoritative device-job outcome.
+    // This marker is not part of the helper's progress wire format.
+    bool outcome_known = true;
     std::string error_message;
     uint64_t speed_bytes_per_sec = 0;          ///< Current write speed in bytes/sec
     int64_t estimated_seconds_remaining = -1;  ///< ETA in seconds, -1 if unknown
@@ -83,6 +86,12 @@ struct WipeProgress {
 
     auto operator==(const WipeProgress&) const -> bool = default;
 };
+
+[[nodiscard]] constexpr auto wipe_succeeded(const WipeProgress& progress) -> bool {
+    return progress.is_complete && progress.outcome_known && !progress.has_error &&
+           progress.bad_block_count == 0 &&
+           (!progress.verification_enabled || progress.verification_passed);
+}
 
 /**
  * @brief Callback type for progress reporting

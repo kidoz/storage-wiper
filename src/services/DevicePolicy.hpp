@@ -10,7 +10,7 @@
 namespace device_policy {
 
 inline auto resolve_wipe_targets(IDiskService& disk_service, const std::string& path,
-                                 WipeAlgorithm algorithm)
+                                 WipeAlgorithm algorithm, bool expand_nvme_scope = true)
     -> std::expected<std::vector<std::string>, util::Error> {
     if (path.empty()) {
         return std::unexpected(util::Error{"Device path is empty"});
@@ -42,7 +42,7 @@ inline auto resolve_wipe_targets(IDiskService& disk_service, const std::string& 
 
     std::vector<std::string> targets{path};
     const auto controller = nvme_sanitize::controller_path_of(path);
-    if (hardware && controller) {
+    if (hardware && controller && expand_nvme_scope) {
         for (const auto& disk : disks) {
             if (!disk.is_partition && disk.path != path &&
                 nvme_sanitize::controller_path_of(disk.path) == controller) {

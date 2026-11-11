@@ -1,5 +1,6 @@
 #pragma once
 
+#include "models/WipePlan.hpp"
 #include "services/IDiskService.hpp"
 #include "services/IWipeService.hpp"
 
@@ -32,6 +33,14 @@ public:
                                   ProgressCallback callback, bool verify)
         -> std::expected<void, util::Error>;
 
+    [[nodiscard]] auto prepare_plan(const std::string& disk_path, WipeAlgorithm algorithm,
+                                    bool verify) -> std::expected<WipePlan, util::Error>;
+    [[nodiscard]] auto start_prepared(
+        const WipePlan& plan, ProgressCallback callback,
+        std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() +
+                                                         std::chrono::seconds{5})
+        -> std::expected<void, util::Error>;
+
     [[nodiscard]] auto supports_verification(WipeAlgorithm algo) -> bool override;
     [[nodiscard]] auto get_algorithm_name(WipeAlgorithm algo) -> std::string override;
     [[nodiscard]] auto get_algorithm_description(WipeAlgorithm algo) -> std::string override;
@@ -43,6 +52,12 @@ protected:
     virtual auto create_worker_thread(std::function<void()> worker) -> std::thread;
 
 private:
+    [[nodiscard]] auto start_internal(const std::string& disk_path, WipeAlgorithm algorithm,
+                                      ProgressCallback callback, bool verify,
+                                      std::optional<WipePlan> plan,
+                                      std::chrono::steady_clock::time_point deadline =
+                                          std::chrono::steady_clock::time_point::max())
+        -> std::expected<void, util::Error>;
     static constexpr auto SHUTDOWN_TIMEOUT = std::chrono::seconds{5};
 
     struct ThreadState {
@@ -101,8 +116,9 @@ private:
      * @param callback Progress callback
      * @return WipePreparation if valid, otherwise the start rejection reason
      */
-    [[nodiscard]] auto prepare_wipe(const std::string& disk_path, WipeAlgorithm algorithm,
-                                    const ProgressCallback& callback)
+    [[nodiscard]] auto reserve_operation(const std::string& disk_path, WipeAlgorithm algorithm,
+                                         const ProgressCallback& callback,
+                                         bool expand_nvme_scope = true)
         -> std::expected<WipePreparation, util::Error>;
 
     /**

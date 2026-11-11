@@ -4,6 +4,7 @@
 
 #include <fcntl.h>
 #include <linux/fs.h>
+#include <linux/hdreg.h>
 #include <linux/nvme_ioctl.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -33,7 +34,11 @@ auto FakeDeviceIO::open(const char* path, int flags) -> int {
         ++device.claims;
     }
     const int fd = next_fd_++;
-    descriptors_[fd] = {.path = path, .flags = flags};
+    ++opens;
+    descriptors_[fd] = {.path = path,
+                        .flags = flags,
+                        .device_number = device.device_number,
+                        .disk_sequence = device.disk_sequence};
     return fd;
 }
 
@@ -110,6 +115,14 @@ auto FakeDeviceIO::flush(int fd) -> int {
     return 0;
 }
 
+auto FakeDeviceIO::stat(int fd, struct stat64* status) -> int {
+    std::lock_guard lock(mutex_);
+    *status = {};
+    status->st_mode = S_IFBLK | 0600;
+    status->st_rdev = static_cast<dev_t>(descriptors_.at(fd).device_number);
+    return 0;
+}
+
 auto FakeDeviceIO::ioctl(int fd, unsigned long request, void* argument) -> int {
     if (request == NVME_IOCTL_ID) {
         return namespace_id;
@@ -118,7 +131,63 @@ auto FakeDeviceIO::ioctl(int fd, unsigned long request, void* argument) -> int {
         before_identify) {
         before_identify();
     }
+    if (request == NVME_IOCTL_ADMIN_CMD && during_firmware_command) {
+        const auto opcode = static_cast<nvme_admin_cmd*>(argument)->opcode;
+        if (opcode == 0x80 || opcode == 0x84) {
+            during_firmware_command();
+        }
+    }
+    if (request == HDIO_DRIVE_CMD && during_ata_command) {
+        during_ata_command(*static_cast<uint8_t*>(argument));
+    }
     std::lock_guard lock(mutex_);
+    if (request == HDIO_GET_IDENTITY) {
+        auto* identify = static_cast<uint16_t*>(argument);
+        std::memset(identify, 0, 512);
+        identify[128] = 0x0021U | (ata_password_enabled ? 0x0002U : 0U);
+        return 0;
+    }
+    if (request == HDIO_DRIVE_CMD) {
+        const auto command = *static_cast<uint8_t*>(argument);
+        switch (command) {
+            case 0xF1:
+                ata_password_enabled = true;
+                return 0;
+            case 0xF3:
+                if (fail_ata_prepare) {
+                    errno = EIO;
+                    return -1;
+                }
+                return 0;
+            case 0xF4:
+                if (fail_ata_erase) {
+                    errno = EIO;
+                    return -1;
+                }
+                ata_password_enabled = false;
+                return 0;
+            case 0xF6:
+                ++ata_disable_attempts;
+                if (fail_ata_disable_password) {
+                    errno = EIO;
+                    return -1;
+                }
+                ata_password_enabled = false;
+                return 0;
+            default:
+                errno = ENOTTY;
+                return -1;
+        }
+    }
+    if (request == BLKGETDISKSEQ) {
+        const auto& device = devices.at(descriptors_.at(fd).path);
+        if (!device.disk_sequence_supported) {
+            errno = ENOTTY;
+            return -1;
+        }
+        *static_cast<uint64_t*>(argument) = descriptors_.at(fd).disk_sequence;
+        return 0;
+    }
     if (request == BLKGETSIZE64) {
         *static_cast<uint64_t*>(argument) = devices.at(descriptors_.at(fd).path).bytes.size();
         return 0;
@@ -133,14 +202,22 @@ auto FakeDeviceIO::ioctl(int fd, unsigned long request, void* argument) -> int {
         std::memset(data, 0, cmd.data_len);
         if (cmd.cdw10 == 1) {
             data[nvme_sanitize::ID_CTRL_OFFSET_OACS] = 2;
-            data[nvme_sanitize::ID_CTRL_OFFSET_FNA] = 4;
+            data[nvme_sanitize::ID_CTRL_OFFSET_FNA] = format_attributes;
             data[nvme_sanitize::ID_CTRL_OFFSET_SANICAP] = format_only ? 0 : 1;
+            std::memcpy(data + 516, &namespace_count, sizeof(namespace_count));
+            data[76] = controller_multipath;
         } else {
             data[nvme_sanitize::ID_NS_OFFSET_FLBAS] = 3;
+            data[30] = namespace_sharing;
         }
     } else if (cmd.opcode == 0x02) {
+        ++sanitize_log_reads;
+        if (fail_first_sanitize_log_read && sanitize_log_reads == 1) {
+            errno = EIO;
+            return -1;
+        }
         std::memset(data, 0, cmd.data_len);
-        data[2] = sanitize_commands > 0 ? 1 : 0;
+        data[2] = previous_sanitize_succeeded ? 1 : (sanitize_commands > 0 ? 1 : 0);
     } else if (cmd.opcode == 0x84 || cmd.opcode == 0x80) {
         all_namespaces_claimed = true;
         for (const auto& [path, device] : devices) {
@@ -169,6 +246,12 @@ ssize_t __real_read(int, void*, size_t);
 off_t __real_lseek64(int, off_t, int);
 int __real_fsync(int);
 int __real_ioctl(int, unsigned long, ...);
+int __real_fstat64(int, struct stat64*);
+
+int __wrap_fstat64(int fd, struct stat64* status) {
+    return fd >= FakeDeviceIO::FIRST_FD ? FakeDeviceIO::active->stat(fd, status)
+                                        : __real_fstat64(fd, status);
+}
 
 int __wrap_open64(const char* path, int flags, ...) {
     if (FakeDeviceIO::active && FakeDeviceIO::active->devices.contains(path)) {

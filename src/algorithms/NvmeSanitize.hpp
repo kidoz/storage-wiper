@@ -22,6 +22,7 @@ namespace nvme_sanitize {
 constexpr size_t ID_CTRL_OFFSET_OACS = 256;     ///< Optional Admin Command Support (u16)
 constexpr size_t ID_CTRL_OFFSET_SANICAP = 328;  ///< Sanitize Capabilities (u32)
 constexpr size_t ID_CTRL_OFFSET_FNA = 524;      ///< Format NVM Attributes (u8)
+constexpr size_t ID_CTRL_OFFSET_NN = 516;       ///< Number of Namespaces (u32)
 
 /// Byte offset of FLBAS (Formatted LBA Size) inside Identify Namespace data
 constexpr size_t ID_NS_OFFSET_FLBAS = 26;
@@ -33,14 +34,15 @@ constexpr uint16_t OACS_FORMAT_NVM = 0x0002;
 // CES is bit 0 and OWS is bit 2; the remaining bits (NDI, NODMMAS) describe
 // deallocation behaviour and say nothing about which operations exist, so only
 // these three decide whether the Sanitize command is usable.
-constexpr uint32_t SANICAP_CRYPTO_ERASE = 1U << 0;  ///< CES
-constexpr uint32_t SANICAP_BLOCK_ERASE = 1U << 1;   ///< BES
-constexpr uint32_t SANICAP_OVERWRITE = 1U << 2;     ///< OWS
+constexpr uint32_t SANICAP_CRYPTO_ERASE = 0x01;  ///< CES
+constexpr uint32_t SANICAP_BLOCK_ERASE = 0x02;   ///< BES
+constexpr uint32_t SANICAP_OVERWRITE = 0x04;     ///< OWS
 constexpr uint32_t SANICAP_OPERATION_MASK =
     SANICAP_CRYPTO_ERASE | SANICAP_BLOCK_ERASE | SANICAP_OVERWRITE;
 
 // FNA bit 2: cryptographic erase supported as a Format NVM secure-erase setting
-constexpr uint8_t FNA_CRYPTO_ERASE = 1U << 2;
+constexpr uint8_t FNA_CRYPTO_ERASE = 0x04;
+constexpr uint8_t FNA_SECURE_ERASE_ALL_NAMESPACES = 0x02;
 
 // Sanitize command CDW10 SANACT (bits 2:0) action values
 constexpr uint32_t SANACT_EXIT_FAILURE_MODE = 1;
@@ -111,6 +113,8 @@ struct Capabilities {
     bool overwrite = false;            ///< Sanitize Overwrite supported
     bool format_nvm = false;           ///< Format NVM command supported
     bool format_crypto_erase = false;  ///< Format NVM with cryptographic erase supported
+    bool format_secure_erase_all_namespaces = false;  ///< FNA bit 1 for nonzero SES
+    uint32_t namespace_count = 0;
 };
 
 /**

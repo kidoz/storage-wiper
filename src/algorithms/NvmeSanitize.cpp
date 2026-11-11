@@ -12,12 +12,12 @@ namespace nvme_sanitize {
 namespace {
 
 auto read_le16(const uint8_t* p) -> uint16_t {
-    return static_cast<uint16_t>(p[0] | (static_cast<uint16_t>(p[1]) << 8));
+    return static_cast<uint16_t>(static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8U));
 }
 
 auto read_le32(const uint8_t* p) -> uint32_t {
-    return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
-           (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+    return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8U) |
+           (static_cast<uint32_t>(p[2]) << 16U) | (static_cast<uint32_t>(p[3]) << 24U);
 }
 
 }  // namespace
@@ -36,6 +36,8 @@ auto parse_capabilities(const uint8_t* identify_ctrl) -> Capabilities {
     caps.overwrite = (sanicap & SANICAP_OVERWRITE) != 0;
     caps.format_nvm = (oacs & OACS_FORMAT_NVM) != 0;
     caps.format_crypto_erase = caps.format_nvm && (fna & FNA_CRYPTO_ERASE) != 0;
+    caps.format_secure_erase_all_namespaces = (fna & FNA_SECURE_ERASE_ALL_NAMESPACES) != 0;
+    caps.namespace_count = read_le32(identify_ctrl + ID_CTRL_OFFSET_NN);
     return caps;
 }
 
@@ -89,8 +91,8 @@ auto format_cdw10(uint8_t flbas, uint32_t ses) -> uint32_t {
     // FLBAS carries the format index in bits 3:0 and, on controllers with more
     // than 16 formats, its upper two bits in 6:5. Both halves are copied back
     // into their CDW10 positions so the namespace keeps its current LBA size.
-    const uint32_t lbaf = flbas & FORMAT_CDW10_LBAF_MASK;
-    const uint32_t lbafu = (static_cast<uint32_t>(flbas) >> 5) & 0x3;
+    const uint32_t lbaf = static_cast<uint32_t>(flbas) & FORMAT_CDW10_LBAF_MASK;
+    const uint32_t lbafu = (static_cast<uint32_t>(flbas) >> 5U) & 0x3U;
 
     return lbaf | (ses << FORMAT_CDW10_SES_SHIFT) | (lbafu << FORMAT_CDW10_LBAFU_SHIFT);
 }
@@ -120,7 +122,7 @@ auto parse_log_page(const uint8_t* log_page) -> LogPage {
     // SSTAT status is three bits wide. Masking it to two would fold the
     // "completed, no-deallocate not honoured" value onto "never sanitized",
     // turning a finished erase into an endless poll.
-    switch (sstat & 0x7) {
+    switch (sstat & 0x7U) {
         case 0:
             page.status = SanitizeStatus::NEVER_SANITIZED;
             break;

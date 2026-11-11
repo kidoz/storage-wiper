@@ -128,6 +128,24 @@ TEST(NvmeSanitizeTest, ParseCapabilities_ZeroSanicapMeansNoSanitize) {
     EXPECT_TRUE(caps.format_crypto_erase);
 }
 
+TEST(NvmeSanitizeTest, SecureFormatScopeUsesFnaBitOneNotFormatBitZero) {
+    for (const uint8_t fna : {0x04, 0x05, 0x06, 0x07}) {
+        const auto identify = make_identify_controller({.oacs = 2, .sanicap = 0, .fna = fna});
+        const auto caps = parse_capabilities(identify.data());
+        EXPECT_TRUE(caps.format_crypto_erase);
+        EXPECT_EQ(caps.format_secure_erase_all_namespaces, fna == 0x06 || fna == 0x07);
+    }
+}
+
+TEST(NvmeSanitizeTest, NamespaceCountIsDecodedLittleEndian) {
+    auto identify = make_identify_controller({});
+    identify[516] = 0x78;
+    identify[517] = 0x56;
+    identify[518] = 0x34;
+    identify[519] = 0x12;
+    EXPECT_EQ(parse_capabilities(identify.data()).namespace_count, 0x1234'5678u);
+}
+
 // ==========================================================================
 // choose_erase_plan
 // ==========================================================================
