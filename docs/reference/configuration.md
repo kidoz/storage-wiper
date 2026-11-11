@@ -53,8 +53,8 @@ The [systemd unit](../../data/dbus/storage-wiper-helper.service.in) uses
 `LogsDirectory=storage-wiper` with mode `0750`, allowing writes under its strict
 filesystem protection. Standard output and error go to the journal for a
 systemd-managed helper. If helper file logging cannot initialize, it enables
-console output as a fallback. Direct D-Bus activation does not apply the unit's
-directory management; see [helper activation](../explanation/architecture.md#helper-activation).
+console output as a fallback. D-Bus activation selects that unit on systemd-enabled buses; the fallback
+for buses without systemd does not manage the log directory. For details, see [helper activation](../explanation/architecture.md#helper-activation).
 
 For commands to inspect logs, see [troubleshooting](../how_to/troubleshoot.md#logs-or-certificates-are-missing).
 
@@ -83,6 +83,10 @@ The JSON structure is:
 | `success` | Boolean | Recorded operation result |
 | `device.path`, `device.model`, `device.serial` | String | Device identity |
 | `device.size_bytes` | Integer | Size in bytes |
+| `device.device_number`, `device.disk_sequence`, `device.partition_start` | Integer | Confirmed kernel identity and partition offset |
+| `plan_id` | String | Single-use prepared operation ID |
+| `firmware_method`, `erase_scope` | String | Helper-selected method and scope |
+| `affected_devices` | Array | Confirmed device snapshots and kernel identities |
 | `device.is_partition` | Boolean | Partition selection |
 | `device.parent_disk` | String | Parent path for a partition, otherwise empty |
 | `wipe.algorithm`, `wipe.nist_category` | String | Algorithm name and application category label |
@@ -96,7 +100,8 @@ The JSON structure is:
 
 When `verification.enabled` is false, `verification.passed: false` means there
 is no successful readback verdict; it is not itself a reported verification
-failure. `success: true` can accompany a nonzero bad-block count. Interpret both
+failure. A nonzero bad-block count, failed requested verification, unknown
+outcome, or reported error prevents `success: true`. Interpret these fields
 alongside [verification and media limits](../explanation/sanitization.md).
 
 Certificates are unsigned local records. The application has no certificate

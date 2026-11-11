@@ -10,6 +10,7 @@
 #include "util/JsonEscape.hpp"
 #include "util/Logger.hpp"
 #include "util/WipeCertificate.hpp"
+#include "util/WipePlanDisplay.hpp"
 
 #include <system_error>
 
@@ -296,34 +297,6 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
         return 1;
     }
 
-    // Scope statement: a partition wipe spares its siblings, a disk wipe
-    // takes every partition and the partition table with it.
-    std::string scope_note;
-    if (disk.is_partition) {
-        if (!disk.parent_disk.empty()) {
-            scope_note = "Scope: only this partition is erased. Other partitions and the "
-                         "partition table on " +
-                         disk.parent_disk + " are not touched.";
-        }
-    } else {
-        std::vector<std::string> children;
-        for (const auto& candidate : disks) {
-            if (candidate.is_partition && candidate.parent_disk == disk.path) {
-                children.push_back(candidate.path);
-            }
-        }
-        if (!children.empty()) {
-            scope_note = "Scope: the whole device is erased, including its partitions (";
-            for (size_t i = 0; i < children.size(); ++i) {
-                scope_note += children[i];
-                if (i + 1 < children.size()) {
-                    scope_note += ", ";
-                }
-            }
-            scope_note += ") and the partition table.";
-        }
-    }
-
     // Check if mounted
     if (disk.is_mounted) {
         if (options.force_unmount) {
@@ -342,12 +315,17 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
         }
     }
 
-    // Confirm
-    if (!options.no_confirm) {
-        if (!confirm_wipe(options.device_path, options.algorithm, scope_note)) {
-            std::cout << "Aborted.\n";
-            return 1;
-        }
+    auto prepared = client_->prepare_wipe(options.device_path, *algo, options.verify);
+    if (!prepared) {
+        std::cerr << "Error: Cannot prepare wipe: " << prepared.error().message << "\n";
+        return 1;
+    }
+    const auto& plan = *prepared;
+    const auto& confirmed_disk = plan.device.disk;
+    if (!confirm_wipe(plan, options.algorithm, !options.no_confirm)) {
+        client_->discard_wipe_plan(plan.id);
+        std::cout << "Aborted.\n";
+        return 1;
     }
 
     // Warn early when verification cannot be honored for this algorithm, so
@@ -362,11 +340,15 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
     }
 
     // Set up signal handler for graceful cancellation
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGTERM, signal_handler);
+    if (std::signal(SIGINT, signal_handler) == SIG_ERR ||
+        std::signal(SIGTERM, signal_handler) == SIG_ERR) {
+        client_->discard_wipe_plan(plan.id);
+        std::cerr << "Error: Could not install cancellation signal handlers.\n";
+        return 1;
+    }
 
     // Create progress display
-    ProgressDisplay progress(options.device_path, disk.model, disk.size_bytes,
+    ProgressDisplay progress(confirmed_disk.path, confirmed_disk.model, confirmed_disk.size_bytes,
                              client_->get_algorithm_name(*algo), client_->get_pass_count(*algo));
 
     // Track completion
@@ -387,7 +369,7 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
         bad_blocks_total.store(p.bad_block_count);
         if (p.is_complete) {
             complete.store(true);
-            success.store(!p.has_error);
+            success.store(wipe_succeeded(p));
             verification_enabled_reported.store(p.verification_enabled);
             verification_passed.store(p.verification_passed);
             final_message = p.status;
@@ -400,7 +382,8 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
     };
 
     // Start wipe
-    if (!client_->wipe_disk(options.device_path, *algo, callback, options.verify)) {
+    if (!client_->start_prepared_wipe(plan, callback)) {
+        client_->discard_wipe_plan(plan.id);
         LOG_ERROR("CLI", std::format("Failed to start wipe operation for {}", options.device_path));
         std::cerr << "Error: Failed to start wipe operation.\n";
         return 1;
@@ -413,12 +396,17 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
         // Process GLib events for D-Bus signals
         g_main_context_iteration(main_context, FALSE);
 
-        if (g_cancel_requested.load(std::memory_order_relaxed)) {
-            if (!cancel_reported) {
+        if (g_cancel_requested.load(std::memory_order_relaxed) && !cancel_reported) {
+            cancel_reported = true;
+            if (plan.firmware.cancellable) {
                 std::cerr << "\nCancellation requested...\n";
-                cancel_reported = true;
+                if (!client_->cancel_prepared_wipe(plan.id)) {
+                    std::cerr << "Cancellation was not accepted; continuing to monitor the job.\n";
+                }
+            } else {
+                std::cerr << "\nThis firmware operation cannot be cancelled; continuing to "
+                             "monitor its outcome.\n";
             }
-            client_->cancel_operation(options.device_path);
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds{50});
@@ -429,10 +417,7 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
     // Write the wipe certificate on success
     if (success.load() && !options.certificate_path.empty()) {
         util::WipeCertificateData data{};
-        data.device_path = disk.path;
-        data.model = disk.model;
-        data.serial = disk.serial;
-        data.size_bytes = disk.size_bytes;
+        util::apply_wipe_plan(data, plan);
         data.algorithm_name = client_->get_algorithm_name(*algo);
         data.nist_category = client_->get_nist_category(*algo);
         data.total_passes = client_->get_pass_count(*algo);
@@ -445,10 +430,8 @@ auto CliApplication::cmd_wipe(const CliOptions& options) -> int {
         data.peak_speed_bytes_per_sec = peak_speed.load();
         data.verification_enabled = verification_enabled_reported.load();
         data.verification_passed = verification_passed.load();
-        data.is_partition = disk.is_partition;
-        data.parent_disk = disk.parent_disk;
         data.bad_block_count = bad_blocks_total.load();
-        data.success = true;
+        data.success = success.load();
         data.tool_version = PROJECT_VERSION;
 
         namespace fs = std::filesystem;
@@ -528,22 +511,35 @@ auto CliApplication::algorithm_to_string(WipeAlgorithm algo) -> std::string {
     return "unknown";
 }
 
-auto CliApplication::confirm_wipe(const std::string& device_path, const std::string& algorithm,
-                                  const std::string& scope_note) -> bool {
-    std::cout << "\n";
-    std::cout << "\033[1;31mWARNING: This will PERMANENTLY DESTROY all data on " << device_path
-              << "!\033[0m\n";
-    std::cout << "Algorithm: " << algorithm << "\n";
-    if (algorithm == "ata-secure-erase" && device_path.starts_with("/dev/nvme")) {
-        // Sanitize and Format are controller-scoped, so sibling namespaces go too.
-        std::cout << "\033[1;31mAn NVMe firmware erase is issued to the controller and erases "
-                     "EVERY namespace on it, not only "
-                  << device_path << ".\033[0m\n";
+auto CliApplication::confirm_wipe(const WipePlan& plan, const std::string& algorithm, bool prompt)
+    -> bool {
+    const auto& disk = plan.device.disk;
+    std::cout << "\n\033[1;31mWARNING: This will PERMANENTLY DESTROY all data in the scope "
+                 "below!\033[0m\n";
+    std::cout << "Device: " << disk.path << " / " << disk.model << " / serial " << disk.serial
+              << " / " << disk.size_bytes << " bytes\n";
+    std::cout << "Algorithm: " << algorithm << "\nMethod: " << util::wipe_method_label(plan)
+              << "\nScope: " << util::wipe_scope_label(plan) << "\n";
+    std::cout << "Verification: " << (plan.verify ? "enabled" : "disabled") << "\n";
+    if (!plan.firmware.cancellable) {
+        std::cout << "This operation cannot be stopped after the device accepts it.\n";
     }
-    if (!scope_note.empty()) {
-        std::cout << scope_note << "\n";
+    for (const auto& target : plan.targets) {
+        std::cout << "Affected device: " << target.disk.path << " / " << target.disk.model
+                  << " / serial " << target.disk.serial << " / " << target.disk.size_bytes
+                  << " bytes\n";
+    }
+    if (disk.is_lvm_pv) {
+        std::cout << "WARNING: This device contains an LVM physical volume. Wiping it can "
+                     "destroy logical volumes spanning other disks, even when inactive.\n";
+    } else if (disk.has_dm_holders) {
+        std::cout << "WARNING: This device backs device-mapper mappings, such as encrypted "
+                     "volumes. Wiping it destroys data used by those mappings.\n";
     }
     std::cout << "\n";
+    if (!prompt) {
+        return true;
+    }
     std::cout << "Type 'yes' to confirm: ";
     std::cout.flush();
 
@@ -565,6 +561,9 @@ void CliApplication::print_disks_json(const std::vector<DiskInfo>& disks) {
         std::cout << "    \"is_ssd\": " << (disk.is_ssd ? "true" : "false") << ",\n";
         std::cout << "    \"is_removable\": " << (disk.is_removable ? "true" : "false") << ",\n";
         std::cout << "    \"is_mounted\": " << (disk.is_mounted ? "true" : "false") << ",\n";
+        std::cout << "    \"is_lvm_pv\": " << (disk.is_lvm_pv ? "true" : "false") << ",\n";
+        std::cout << "    \"has_dm_holders\": " << (disk.has_dm_holders ? "true" : "false")
+                  << ",\n";
         std::cout << "    \"mount_point\": \"" << util::json_escape(disk.mount_point) << "\",\n";
         std::cout << "    \"filesystem\": \"" << util::json_escape(disk.filesystem) << "\",\n";
         std::cout << "    \"is_partition\": " << (disk.is_partition ? "true" : "false") << ",\n";
@@ -642,6 +641,11 @@ void CliApplication::print_disks_table(const std::vector<DiskInfo>& disks) {
         }
 
         std::string status = disk.is_mounted ? "Mounted" : "Available";
+        if (disk.is_lvm_pv) {
+            status += "/LVM";
+        } else if (disk.has_dm_holders) {
+            status += "/DM";
+        }
 
         // Truncate model if too long
         std::string model = disk.model;

@@ -202,4 +202,36 @@ TEST(WipeCertificateWriteTest, CreatesMissingDirectories) {
     EXPECT_TRUE(result.has_value()) << result.error();
 }
 
+TEST(WipeCertificatePlanTest, PreservesAllAffectedIdentitiesAndActualFirmwareScope) {
+    WipePlan plan;
+    plan.id = "prepared-certificate";
+    plan.device.disk.path = "/dev/nvme0n1";
+    plan.device.disk.model = "Model \"quoted\"";
+    plan.device.disk.serial = "SERIAL-1";
+    plan.device.disk.size_bytes = 4'096;
+    plan.device.device_number = 259;
+    plan.device.disk_sequence = 77;
+    plan.firmware = {"NVMe Sanitize", "All namespaces on controller /dev/nvme0", false};
+    auto sibling = plan.device;
+    sibling.disk.path = "/dev/nvme0n2";
+    sibling.disk.serial = "SERIAL-2";
+    sibling.disk_sequence = 78;
+    plan.targets = {plan.device, sibling};
+    auto data = sample_data();
+    util::apply_wipe_plan(data, plan);
+    plan.targets.clear();
+    plan.device.disk.serial = "CHANGED";
+    EXPECT_EQ(data.affected_devices.size(), 2u);
+    const auto json = util::wipe_certificate_json(data);
+    const auto text = util::wipe_certificate_text(data);
+    EXPECT_NE(json.find("SERIAL-1"), std::string::npos);
+    EXPECT_NE(json.find("SERIAL-2"), std::string::npos);
+    EXPECT_NE(json.find("\\\"quoted\\\""), std::string::npos);
+    EXPECT_EQ(json.find("CHANGED"), std::string::npos);
+    EXPECT_NE(json.find("\"disk_sequence\": 77"), std::string::npos);
+    EXPECT_NE(json.find("NVMe Sanitize"), std::string::npos);
+    EXPECT_NE(text.find("All namespaces on controller /dev/nvme0"), std::string::npos);
+    EXPECT_NE(text.find("/dev/nvme0n2"), std::string::npos);
+}
+
 }  // namespace

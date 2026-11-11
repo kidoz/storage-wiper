@@ -78,17 +78,52 @@ auto certificate_timestamp(std::chrono::system_clock::time_point time) -> std::s
     return std::format("{:%Y%m%d-%H%M%S}", std::chrono::floor<std::chrono::seconds>(time));
 }
 
+void apply_wipe_plan(WipeCertificateData& data, const WipePlan& plan) {
+    const auto& disk = plan.device.disk;
+    data.plan_id = plan.id;
+    data.device_path = disk.path;
+    data.model = disk.model;
+    data.serial = disk.serial;
+    data.size_bytes = disk.size_bytes;
+    data.is_partition = disk.is_partition;
+    data.parent_disk = disk.parent_disk;
+    data.device_number = plan.device.device_number;
+    data.disk_sequence = plan.device.disk_sequence;
+    data.partition_start = plan.device.partition_start;
+    data.firmware_method = plan.firmware.method;
+    data.erase_scope = plan.firmware.scope;
+    data.affected_devices = plan.targets;
+}
+
 auto wipe_certificate_json(const WipeCertificateData& data) -> std::string {
     std::string json;
     json += "{\n";
     json += "  \"type\": \"storage-wiper-certificate\",\n";
     json += std::format("  \"tool_version\": \"{}\",\n", json_escape(data.tool_version));
     json += std::format("  \"success\": {},\n", data.success ? "true" : "false");
+    json += std::format("  \"plan_id\": \"{}\",\n", json_escape(data.plan_id));
+    json += std::format("  \"firmware_method\": \"{}\",\n", json_escape(data.firmware_method));
+    json += std::format("  \"erase_scope\": \"{}\",\n", json_escape(data.erase_scope));
+    json += "  \"affected_devices\": [";
+    for (size_t i = 0; i < data.affected_devices.size(); ++i) {
+        const auto& target = data.affected_devices[i];
+        if (i != 0)
+            json += ",";
+        json += std::format("{{\"path\":\"{}\",\"model\":\"{}\",\"serial\":\"{}\",\"size_bytes\":{}"
+                            ",\"device_number\":{},\"disk_sequence\":{},\"partition_start\":{}}}",
+                            json_escape(target.disk.path), json_escape(target.disk.model),
+                            json_escape(target.disk.serial), target.disk.size_bytes,
+                            target.device_number, target.disk_sequence, target.partition_start);
+    }
+    json += "],\n";
     json += "  \"device\": {\n";
     json += std::format("    \"path\": \"{}\",\n", json_escape(data.device_path));
     json += std::format("    \"model\": \"{}\",\n", json_escape(data.model));
     json += std::format("    \"serial\": \"{}\",\n", json_escape(data.serial));
     json += std::format("    \"size_bytes\": {},\n", data.size_bytes);
+    json += std::format("    \"device_number\": {},\n", data.device_number);
+    json += std::format("    \"disk_sequence\": {},\n", data.disk_sequence);
+    json += std::format("    \"partition_start\": {},\n", data.partition_start);
     json += std::format("    \"is_partition\": {},\n", data.is_partition ? "true" : "false");
     json += std::format("    \"parent_disk\": \"{}\"\n", json_escape(data.parent_disk));
     json += "  },\n";
@@ -121,13 +156,27 @@ auto wipe_certificate_text(const WipeCertificateData& data) -> std::string {
     text += rule + "\n";
     text += std::format("Status:               {}\n", data.success ? "SUCCESS" : "FAILED");
     text += std::format("Device:               {}\n", data.device_path);
-    text += std::format("Scope:                {}\n",
-                        data.is_partition ? "partition of " + data.parent_disk : "whole disk");
+    text +=
+        std::format("Scope:                {}\n",
+                    !data.erase_scope.empty()
+                        ? data.erase_scope
+                        : (data.is_partition ? "partition of " + data.parent_disk : "whole disk"));
     text += std::format("Model:                {}\n", data.model.empty() ? "Unknown" : data.model);
     text +=
         std::format("Serial:               {}\n", data.serial.empty() ? "Unknown" : data.serial);
     text += std::format("Size:                 {} ({} bytes)\n", format_size(data.size_bytes),
                         data.size_bytes);
+    text += std::format("Plan:                 {}\n", data.plan_id);
+    text += std::format("Method:               {}\n", data.firmware_method);
+    text += std::format("Kernel device:        {} (sequence {}, partition start {})\n",
+                        data.device_number, data.disk_sequence, data.partition_start);
+    for (const auto& target : data.affected_devices) {
+        text += std::format("Affected device:      {} / {} / serial {} / {} bytes / kernel {} / "
+                            "sequence {} / partition start {}\n",
+                            target.disk.path, target.disk.model, target.disk.serial,
+                            target.disk.size_bytes, target.device_number, target.disk_sequence,
+                            target.partition_start);
+    }
     text += std::format("Algorithm:            {}\n", data.algorithm_name);
     text += std::format("Sanitization:         {}\n", data.nist_category);
     text += std::format("Passes:               {}\n", data.total_passes);

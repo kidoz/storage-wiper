@@ -6,6 +6,7 @@
 #pragma once
 
 #include "models/DiskInfo.hpp"
+#include "models/WipePlan.hpp"
 #include "models/WipeTypes.hpp"
 #include "util/Result.hpp"
 
@@ -118,14 +119,13 @@ private:
 
     /**
      * @brief Prompt user for confirmation
-     * @param device_path Device to wipe
+     * @param plan Prepared device identity, method, and erase scope
      * @param algorithm Algorithm name
-     * @param scope_note Scope statement (partition vs whole disk), may be empty
-     * @return true if user confirms
+     * @param prompt Whether to ask for confirmation after printing the plan
+     * @return true if user confirms or prompting is disabled
      */
-    [[nodiscard]] static auto confirm_wipe(const std::string& device_path,
-                                           const std::string& algorithm,
-                                           const std::string& scope_note) -> bool;
+    [[nodiscard]] static auto confirm_wipe(const WipePlan& plan, const std::string& algorithm,
+                                           bool prompt) -> bool;
 
     /**
      * @brief Print disk list as JSON

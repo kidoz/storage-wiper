@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include "models/WipePlan.hpp"
+
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -19,6 +21,13 @@
 namespace util {
 
 struct WipeCertificateData {
+    std::string plan_id;
+    uint64_t device_number = 0;
+    uint64_t disk_sequence = 0;
+    uint64_t partition_start = 0;
+    std::string firmware_method;
+    std::string erase_scope;
+    std::vector<DeviceIdentity> affected_devices;
     std::string device_path;
     std::string model;
     std::string serial;
@@ -50,6 +59,8 @@ struct WipeCertificateData {
  * @brief Compact filesystem-safe timestamp ("20260904-123456") for file names
  */
 [[nodiscard]] auto certificate_timestamp(std::chrono::system_clock::time_point time) -> std::string;
+
+void apply_wipe_plan(WipeCertificateData& data, const WipePlan& plan);
 
 [[nodiscard]] auto wipe_certificate_json(const WipeCertificateData& data) -> std::string;
 

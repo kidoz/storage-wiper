@@ -66,12 +66,13 @@ sectors, skipping sectors that remain unwritable. This lets an operation erase
 as much accessible data as possible instead of abandoning the entire device on
 the first failing sector.
 
-The completion record carries the final pass's unwritable-sector count. A wipe
-can report success with a nonzero count, and those sectors may retain data.
-The count is not a cumulative sum of retries or passes and is not a map of all
-physical locations that contain old data. A procedure requiring complete
-sanitization must account for this evidence rather than interpreting success
-alone as complete coverage.
+The completion record carries the final pass's unwritable-sector count. Any
+nonzero count makes the operation failed because those sectors may retain data;
+it cannot produce a success exit status or success certificate. The count is
+not a cumulative sum of retries or passes and is not a map of all physical
+locations that contain old data. A procedure requiring complete sanitization
+must account for this evidence rather than interpreting completion alone as
+complete coverage.
 
 ## Category labels and standards
 
@@ -92,8 +93,10 @@ medium, implementation, verification evidence, and applicable procedure.
 
 ## What a certificate records
 
-Certificates preserve device identity, the selected algorithm and category,
-timing, observed throughput, final bad-block count, and verification status.
+Certificates preserve the confirmed device snapshot, kernel device number and
+disk sequence, plan ID, prepared method and scope, affected devices, algorithm
+and category, timing, observed throughput, bad-block count, and verification
+status. GUI reports use that operation snapshot even if enumeration later changes.
 They provide a useful audit record of what the application observed.
 
 They are local, unsigned JSON/text files. They do not independently authenticate
