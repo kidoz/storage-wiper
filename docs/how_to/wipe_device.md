@@ -14,12 +14,14 @@ anything you need before continuing.
 3. Decide whether you intend to erase a whole disk or one partition. Whole-disk
    overwrites erase the partition table and all partitions. Hardware erase
    requires a whole disk, and an NVMe hardware operation can affect all
-   namespaces on its controller.
-4. Close applications using the target and unmount affected filesystems. For
-   NVMe hardware erase, every namespace in the controller scope must be
-   unmounted and free of overlapping operations. Use another boot environment
+   namespaces in its subsystem, depending on the prepared method and scope.
+4. Close applications using the target and unmount affected filesystems. Every device in the prepared erase scope must be unmounted and free of
+   overlapping operations. Use another boot environment
    if the target contains your running system.
-5. Choose an [algorithm](../reference/algorithms.md) and decide whether its
+5. Review any LVM or device-mapper warning. An inactive LVM physical volume can
+   still contain data belonging to logical volumes spread across multiple disks.
+   Wiping the selected backing device can make those logical volumes unusable.
+6. Choose an [algorithm](../reference/algorithms.md) and decide whether its
    supported verification meets your requirement. Review
    [sanitization limits](../explanation/sanitization.md) for SSDs or failing media.
 
@@ -30,7 +32,8 @@ supported scope. See [device scope](../explanation/device_scope.md).
 
 1. Select the intended device in the disk list.
 2. Select the algorithm and enable verification if that algorithm supports it.
-3. Start the wipe and read the confirmation's device identity and scope.
+3. Request the wipe plan, authenticate if prompted, and read its device identity,
+   firmware method, and scope in the confirmation.
 4. Confirm only if that scope matches your intent, and complete the polkit
    authentication prompt.
 5. Monitor progress through writing and, when enabled, verification. Select
@@ -77,10 +80,38 @@ Wait for a terminal result. A write pass reaching 100% is not the same as
 finishing verification. Treat a nonzero unwritable-sector count as evidence
 that some locations may retain data, even when the operation reports success.
 
-To request cancellation, use the GUI cancel action for that device or press
-Ctrl+C in its CLI process. Other devices' wipes are unaffected. Cancellation
-does not restore data already erased; a firmware command already accepted by
-the device may continue running. See
+To request cancellation, use the GUI cancel action for that job or press
+Ctrl+C in its CLI process. Cancellation targets the prepared job ID, so it cannot
+accidentally stop a newer job at a reused device path. Other jobs are unaffected.
+Cancellation does not restore data already erased. Noncancellable firmware
+operations remain monitored until they report a terminal result. See
 [firmware cancellation](../explanation/sanitization.md#firmware-erasure).
+
+## Close and reconnect
+
+Closing the GUI while work is pending or running asks how to proceed. **Keep Open**
+continues monitoring. **Stop and Close When Finished** discards pending
+confirmations, requests cancellation of software wipes, and waits for terminal
+results. Noncancellable firmware work must finish before that choice closes the
+window. A cancelled software wipe leaves the target only partially erased.
+**Leave Started Jobs Running and Close** abandons pending confirmations and
+closes the GUI without cancelling accepted jobs. Reopen the GUI to monitor them
+while the helper remains running.
+
+When the GUI connects again, it can recover job snapshots from the running helper.
+Recovered jobs retain their prepared device identity and original start time;
+certificates do not substitute information from a replacement device at the same
+path. A completion racing reconnection is recovered as a terminal result rather
+than leaving the GUI waiting indefinitely.
+
+The helper retains at most 64 jobs. Completed history expires after one hour and
+may be evicted sooner when space is needed. Active jobs stay available while the
+helper runs. History is not persistent across helper restart, power loss, or
+forced termination. If a job disappears after such an event, do not interpret its
+absence as a successful or cancelled erase; firmware may continue independently.
+
+Stopping the helper normally requests cancellation of software work and waits
+for noncancellable firmware monitoring to finish. This can delay service shutdown
+for the duration of a firmware operation.
 
 [How-to guides](README.md) · [Documentation home](../README.md)

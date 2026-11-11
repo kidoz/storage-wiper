@@ -1,11 +1,15 @@
 #include "viewmodels/MainViewModel.hpp"
 
+#include "util/WipePlanDisplay.hpp"
+
 #include <glibmm/main.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <cstdint>
+#include <filesystem>
 #include <format>
 #include <thread>
 #include <utility>
@@ -13,6 +17,17 @@
 #include "config.h"
 
 namespace {
+
+void queue_main(std::function<bool()> callback) {
+    auto* data = new std::function<bool()>(std::move(callback));
+    g_idle_add_full(
+        G_PRIORITY_DEFAULT_IDLE,
+        [](gpointer user_data) -> gboolean {
+            const auto* callback = static_cast<const std::function<bool()>*>(user_data);
+            return (*callback)() ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+        },
+        data, [](gpointer user_data) { delete static_cast<std::function<bool()>*>(user_data); });
+}
 
 auto format_size(uint64_t bytes) -> std::string {
     constexpr auto KIB = 1'024.0;
@@ -49,18 +64,19 @@ MainViewModel::MainViewModel(std::shared_ptr<IDiskService> disk_service,
     cancel_command = std::make_shared<mvvm::RelayCommand>(
         [this]() {
             const auto path = selected_disk_path.get();
-            if (path.empty()) {
+            const auto activity = active_wipes_.find(path);
+            if (activity == active_wipes_.end() || !activity->second.plan.firmware.cancellable)
                 return;
-            }
+            const auto plan_id = activity->second.plan.id;
             show_message(MessageInfo::Type::INFO, "Cancelling",
                          "Wipe operation on " + path + " is being cancelled...");
             auto weak_self = weak_from_this();
             auto wipe_service = wipe_service_;
-            std::thread([weak_self, wipe_service, path]() {
-                const auto cancelled = wipe_service->cancel_operation(path);
+            std::thread([weak_self, wipe_service, plan_id]() {
+                const auto cancelled = wipe_service->cancel_prepared_wipe(plan_id);
                 if (!cancelled) {
-                    Glib::signal_idle().connect([weak_self]() {
-                        if (auto vm = weak_self.lock()) {
+                    queue_main([weak_self]() {
+                        if (auto vm = weak_self.lock(); vm && !vm->cleaned_up_.load()) {
                             vm->show_message(MessageInfo::Type::ERROR, "Cancel Failed",
                                              "The helper could not cancel the wipe operation.");
                         }
@@ -71,7 +87,8 @@ MainViewModel::MainViewModel(std::shared_ptr<IDiskService> disk_service,
         },
         [this]() {
             const auto path = selected_disk_path.get();
-            return !path.empty() && active_wipes_.count(path) > 0;
+            const auto activity = active_wipes_.find(path);
+            return activity != active_wipes_.end() && activity->second.plan.firmware.cancellable;
         });
 
     // Subscribe to property changes that affect can_wipe
@@ -117,16 +134,81 @@ void MainViewModel::initialize() {
 }
 
 void MainViewModel::cleanup() {
+    if (cleaned_up_.exchange(true)) {
+        return;
+    }
+    ++preparation_generation_;
+    ++connection_generation_;
+    std::vector<std::string> plans;
+    if (pending_plan_) {
+        plans.push_back(pending_plan_->id);
+        pending_plan_.reset();
+    }
+    for (const auto& [path, activity] : active_wipes_) {
+        plans.push_back(activity.plan.id);
+    }
+    if (!plans.empty()) {
+        auto service = wipe_service_;
+        std::thread([service, plans = std::move(plans)]() {
+            for (const auto& id : plans)
+                service->discard_wipe_plan(id);
+        }).detach();
+    }
     // Unsubscribe from observables
     selected_disk_path.unsubscribe(selected_disk_subscription_id_);
     selected_algorithm.unsubscribe(selected_algorithm_subscription_id_);
     is_wipe_in_progress.unsubscribe(wipe_in_progress_subscription_id_);
     is_operation_pending.unsubscribe(operation_pending_subscription_id_);
     is_connected.unsubscribe(connection_subscription_id_);
+}
 
-    for (const auto& [path, activity] : active_wipes_) {
-        wipe_service_->cancel_operation(path);
+auto MainViewModel::has_pending_or_active_operations() const -> bool {
+    return is_operation_pending.get() || !active_wipes_.empty();
+}
+
+auto MainViewModel::has_uncancellable_operations() const -> bool {
+    return std::ranges::any_of(
+        active_wipes_, [](const auto& entry) { return !entry.second.plan.firmware.cancellable; });
+}
+
+void MainViewModel::stop_for_close() {
+    if (cleaned_up_.load())
+        return;
+    ++preparation_generation_;
+    std::vector<std::pair<WipePlan, bool>> plans;
+    if (pending_plan_) {
+        plans.emplace_back(*pending_plan_, false);
+        pending_plan_.reset();
+        is_operation_pending.set(false);
     }
+    if (unmount_confirmation_pending_) {
+        unmount_confirmation_pending_ = false;
+        is_operation_pending.set(false);
+    }
+    for (const auto& [path, activity] : active_wipes_)
+        plans.emplace_back(activity.plan, true);
+    auto service = wipe_service_;
+    auto weak_self = weak_from_this();
+    std::thread([service, weak_self, plans = std::move(plans)]() {
+        bool failed = false;
+        for (const auto& [plan, active] : plans) {
+            service->discard_wipe_plan(plan.id);
+            if (active && plan.firmware.cancellable) {
+                failed = !service->cancel_prepared_wipe(plan.id) || failed;
+            }
+        }
+        if (failed) {
+            queue_main([weak_self]() {
+                if (auto vm = weak_self.lock();
+                    vm && !vm->cleaned_up_.load() && vm->has_pending_or_active_operations()) {
+                    vm->show_message(MessageInfo::Type::ERROR, "Cancellation Not Confirmed",
+                                     "Some work could not be cancelled. Keep monitoring until the "
+                                     "helper reports its final outcome.");
+                }
+                return false;
+            });
+        }
+    }).detach();
 }
 
 void MainViewModel::select_disk(const std::string& disk_path) {
@@ -135,6 +217,81 @@ void MainViewModel::select_disk(const std::string& disk_path) {
 
 void MainViewModel::select_algorithm(WipeAlgorithm algorithm) {
     selected_algorithm.set(algorithm);
+}
+
+void MainViewModel::restore_wipe_jobs() {
+    auto weak_self = weak_from_this();
+    auto service = wipe_service_;
+    const auto generation = connection_generation_;
+    std::thread([weak_self, service, generation]() {
+        auto jobs = service->get_wipe_jobs();
+        queue_main([weak_self, service, generation, jobs = std::move(jobs)]() {
+            auto vm = weak_self.lock();
+            if (!vm || vm->cleaned_up_.load() || !vm->is_connected.get() ||
+                vm->connection_generation_ != generation)
+                return false;
+            if (!jobs) {
+                vm->show_message(MessageInfo::Type::ERROR, "Cannot Restore Wipe Jobs",
+                                 jobs.error().message);
+                return false;
+            }
+            for (const auto& job : *jobs) {
+                if (vm->completed_job_ids_.contains(job.plan.id))
+                    continue;
+                const auto& path = job.plan.device.disk.path;
+                WipeActivity activity;
+                activity.plan = job.plan;
+                activity.algorithm = job.plan.algorithm;
+                activity.verify = job.plan.verify;
+                activity.started_at = std::chrono::system_clock::time_point{
+                    std::chrono::seconds{job.started_at_unix}};
+                const auto elapsed =
+                    std::max(std::chrono::system_clock::duration::zero(),
+                             std::chrono::system_clock::now() - activity.started_at);
+                activity.started_steady = std::chrono::steady_clock::now() - elapsed;
+                if (job.completed_at_unix > 0)
+                    activity.completed_at = std::chrono::system_clock::time_point{
+                        std::chrono::seconds{job.completed_at_unix}};
+                activity.peak_speed = job.progress.speed_bytes_per_sec;
+                const auto active = vm->active_wipes_.find(path);
+                if (job.progress.is_complete) {
+                    // History must never occupy a reusable path and hide a newer active job.
+                    if (active != vm->active_wipes_.end() &&
+                        active->second.plan.id == job.plan.id) {
+                        active->second.completed_at = activity.completed_at;
+                        vm->finish_wipe(path, job.progress);
+                    } else {
+                        vm->completed_job_ids_.insert(job.plan.id);
+                        vm->handle_wipe_completion(path, activity, job.progress);
+                    }
+                    continue;
+                }
+                if (active != vm->active_wipes_.end())
+                    continue;
+                vm->active_wipes_.emplace(path, std::move(activity));
+                vm->is_wipe_in_progress.set(true);
+                vm->cancel_command->raise_can_execute_changed();
+                // Queue the snapshot before attaching: buffered newer signals must win.
+                vm->handle_wipe_progress(path, job.plan.id, job.progress);
+                if (!job.progress.is_complete) {
+                    if (!service->observe_wipe_job(job.plan, [weak_self, path, id = job.plan.id](
+                                                                 const WipeProgress& progress) {
+                            if (auto owner = weak_self.lock(); owner && !owner->cleaned_up_.load())
+                                owner->handle_wipe_progress(path, id, progress);
+                        })) {
+                        WipeProgress failure;
+                        failure.is_complete = true;
+                        failure.has_error = true;
+                        failure.outcome_known = false;
+                        failure.error_message =
+                            "Could not attach to the helper job; its outcome is unknown.";
+                        vm->handle_wipe_progress(path, job.plan.id, failure);
+                    }
+                }
+            }
+            return false;
+        });
+    }).detach();
 }
 
 void MainViewModel::load_disks() {
@@ -151,8 +308,8 @@ void MainViewModel::load_disks() {
     disk_service_->get_available_disks(
         [weak_self](std::expected<std::vector<DiskInfo>, util::Error> result) {
             // Schedule update on main thread
-            Glib::signal_idle().connect([weak_self, result = std::move(result)]() {
-                if (auto vm = weak_self.lock()) {
+            queue_main([weak_self, result = std::move(result)]() {
+                if (auto vm = weak_self.lock(); vm && !vm->cleaned_up_.load()) {
                     vm->is_disk_refreshing.set(false);
                     if (result) {
                         vm->disks.set(*result);
@@ -236,18 +393,10 @@ void MainViewModel::update_algorithm_state() {
     }
 }
 
-auto MainViewModel::controller_wide_warning(WipeAlgorithm algorithm, const std::string& path)
-    -> std::string {
-    if (algorithm != WipeAlgorithm::ATA_SECURE_ERASE || !path.starts_with("/dev/nvme")) {
-        return {};
-    }
-
-    return "This NVMe firmware erase is issued to the controller, so it erases EVERY "
-           "namespace on that controller, not only " +
-           path + ".";
-}
-
 void MainViewModel::start_wipe() {
+    if (cleaned_up_.load()) {
+        return;
+    }
     const auto path = selected_disk_path.get();
 
     if (path.empty()) {
@@ -272,31 +421,7 @@ void MainViewModel::start_wipe() {
         return;
     }
     const auto algorithm_name = wipe_service_->get_algorithm_name(algorithm);
-    const auto algorithm_description = wipe_service_->get_algorithm_description(algorithm);
     const auto disk_summary = build_disk_summary(disk_info, path);
-    auto warning = algorithm_warning.get();
-
-    // An NVMe firmware erase runs in the controller and covers every namespace
-    // it owns, not just the selected block device. The user has to see that
-    // before confirming, not in a progress line afterwards.
-    if (const auto scope_warning = controller_wide_warning(algorithm, path);
-        !scope_warning.empty()) {
-        warning = warning.empty() ? scope_warning : warning + "\n\n" + scope_warning;
-    }
-
-    // Make the wipe scope explicit before the destructive confirmation: a
-    // partition wipe spares its siblings, a disk wipe takes every partition.
-    std::vector<std::string> child_partitions;
-    if (disk_info && !disk_info->is_partition) {
-        for (const auto& disk : disks.get()) {
-            if (disk.is_partition && disk.parent_disk == path) {
-                child_partitions.push_back(disk.path);
-            }
-        }
-    }
-    const auto scope_note =
-        disk_info ? build_scope_note(*disk_info, child_partitions) : std::string{};
-
     // Check if disk is mounted - offer to unmount first
     if (disk_info && disk_info->is_mounted) {
         std::ostringstream mounted_message;
@@ -305,53 +430,104 @@ void MainViewModel::start_wipe() {
         mounted_message << disk_summary << "\n\n";
         mounted_message << "Algorithm: " << algorithm_name << "\n";
         mounted_message << "Verification: " << (verify ? "enabled" : "disabled") << "\n\n";
-        if (!warning.empty()) {
-            mounted_message << warning << "\n\n";
-        }
-        if (!scope_note.empty()) {
-            mounted_message << scope_note << "\n\n";
-        }
         mounted_message << "Unmounting may close access to mounted filesystems. Wiping will "
                            "permanently destroy ALL data.";
 
         auto weak_self = weak_from_this();
+        const auto generation = preparation_generation_;
+        unmount_confirmation_pending_ = true;
+        is_operation_pending.set(true);
         show_message(MessageInfo::Type::CONFIRMATION, "Unmount and Wipe?", mounted_message.str(),
-                     [weak_self, path](bool confirmed) {
-                         if (confirmed) {
-                             if (auto vm = weak_self.lock()) {
-                                 vm->unmount_and_wipe(path);
-                             }
+                     [weak_self, path, algorithm, verify, generation](bool confirmed) {
+                         if (auto vm = weak_self.lock();
+                             vm && !vm->cleaned_up_.load() &&
+                             vm->preparation_generation_ == generation &&
+                             vm->unmount_confirmation_pending_) {
+                             vm->unmount_confirmation_pending_ = false;
+                             if (confirmed)
+                                 vm->unmount_and_wipe(path, algorithm, verify);
+                             else
+                                 vm->is_operation_pending.set(false);
                          }
                      });
         return;
     }
 
-    // Show standard confirmation dialog for unmounted disks
-    std::ostringstream message;
-    message << "Are you sure you want to wipe this storage device?\n\n";
-    message << disk_summary << "\n\n";
-    message << "Algorithm: " << algorithm_name << "\n";
-    message << "Description: " << algorithm_description << "\n";
-    message << "Verification: " << (verify ? "enabled" : "disabled") << "\n\n";
-    if (!warning.empty()) {
-        message << warning << "\n\n";
-    }
-    if (!scope_note.empty()) {
-        message << scope_note << "\n\n";
-    }
-    message << "WARNING: This will permanently destroy ALL data on the "
-            << (disk_info && disk_info->is_partition ? "partition" : "disk") << "!\n";
-    message << "This action cannot be undone!";
+    prepare_wipe(path, algorithm, verify);
+}
 
+void MainViewModel::prepare_wipe(const std::string& path, WipeAlgorithm algorithm, bool verify) {
+    if (cleaned_up_.load()) {
+        return;
+    }
+    is_operation_pending.set(true);
     auto weak_self = weak_from_this();
-    show_message(MessageInfo::Type::CONFIRMATION, "Confirm Disk Wipe", message.str(),
-                 [weak_self, path, algorithm, verify](bool confirmed) {
-                     if (confirmed) {
-                         if (auto vm = weak_self.lock()) {
-                             vm->confirm_wipe_for(path, algorithm, verify);
-                         }
-                     }
-                 });
+    auto service = wipe_service_;
+    const auto generation = preparation_generation_;
+    std::thread([weak_self, service, path, algorithm, verify, generation]() {
+        auto result = service->prepare_wipe(path, algorithm, verify);
+        queue_main([weak_self, service, generation, result = std::move(result)]() mutable {
+            auto vm = weak_self.lock();
+            if (!vm || vm->cleaned_up_.load() || vm->preparation_generation_ != generation) {
+                if (vm && !vm->cleaned_up_.load())
+                    vm->is_operation_pending.set(false);
+                if (result) {
+                    std::thread([service, id = result->id]() {
+                        service->discard_wipe_plan(id);
+                    }).detach();
+                }
+                return false;
+            }
+            if (!result) {
+                vm->is_operation_pending.set(false);
+                vm->show_message(MessageInfo::Type::ERROR, "Cannot Prepare Wipe",
+                                 result.error().message);
+                return false;
+            }
+            const auto plan = *result;
+            vm->pending_plan_ = plan;
+            std::ostringstream message;
+            message << vm->build_disk_summary(plan.device.disk, plan.device.disk.path) << "\n\n";
+            message << "Algorithm: " << service->get_algorithm_name(plan.algorithm) << "\n";
+            message << "Method: " << util::wipe_method_label(plan) << "\n";
+            message << "Scope: " << util::wipe_scope_label(plan) << "\n";
+            if (!plan.firmware.cancellable) {
+                message << "This operation cannot be stopped after the device accepts it.\n";
+            }
+            message << "Verification: " << (plan.verify ? "enabled" : "disabled") << "\n";
+            message << "Affected devices:\n";
+            for (const auto& target : plan.targets) {
+                message << vm->build_disk_summary(target.disk, target.disk.path) << "\n";
+            }
+            if (plan.device.disk.is_lvm_pv) {
+                message
+                    << "WARNING: This device contains LVM physical-volume metadata. Logical "
+                       "volumes and volume groups may span other disks; their data may be lost.\n";
+            } else if (plan.device.disk.has_dm_holders) {
+                message << "WARNING: This is a device-mapper backing device (for example, an "
+                           "encrypted volume). Dependent volumes may lose data.\n";
+            }
+            message << "\nWARNING: This will permanently destroy ALL data in the scope "
+                       "above!\nThis action cannot be undone!";
+            vm->show_message(MessageInfo::Type::CONFIRMATION, "Confirm Disk Wipe", message.str(),
+                             [weak_self, service, plan](bool confirmed) {
+                                 if (auto owner = weak_self.lock();
+                                     owner && !owner->cleaned_up_.load() && owner->pending_plan_ &&
+                                     owner->pending_plan_->id == plan.id) {
+                                     owner->pending_plan_.reset();
+                                     owner->is_operation_pending.set(false);
+                                     if (confirmed) {
+                                         owner->confirm_wipe_for(plan);
+                                         return;
+                                     }
+                                 }
+                                 std::thread([service, id = plan.id]() {
+                                     service->discard_wipe_plan(id);
+                                 }).detach();
+                             });
+            return false;
+        });
+    }).detach();
 }
 
 auto MainViewModel::build_scope_note(const DiskInfo& disk,
@@ -381,19 +557,34 @@ auto MainViewModel::build_scope_note(const DiskInfo& disk,
 }
 
 void MainViewModel::confirm_wipe() {
-    confirm_wipe_for(selected_disk_path.get(), selected_algorithm.get(),
-                     verification_enabled.get() && verification_available.get());
+    if (cleaned_up_.load() || !pending_plan_) {
+        return;
+    }
+    const auto plan = *pending_plan_;
+    pending_plan_.reset();
+    is_operation_pending.set(false);
+    confirm_wipe_for(plan);
 }
 
-void MainViewModel::confirm_wipe_for(const std::string& path, WipeAlgorithm algorithm,
-                                     bool verify) {
+void MainViewModel::confirm_wipe_for(const WipePlan& plan) {
+    if (cleaned_up_.load()) {
+        auto service = wipe_service_;
+        std::thread([service, id = plan.id]() { service->discard_wipe_plan(id); }).detach();
+        return;
+    }
+    const auto& path = plan.device.disk.path;
+    const auto algorithm = plan.algorithm;
+    const auto verify = plan.verify;
     WipeActivity activity;
+    activity.plan = plan;
     activity.algorithm = algorithm;
     activity.verify = verify;
     activity.started_at = std::chrono::system_clock::now();
     activity.started_steady = std::chrono::steady_clock::now();
     activity.peak_speed = 0;
     if (!active_wipes_.try_emplace(path, activity).second) {
+        auto service = wipe_service_;
+        std::thread([service, id = plan.id]() { service->discard_wipe_plan(id); }).detach();
         return;
     }
     is_wipe_in_progress.set(true);
@@ -401,21 +592,28 @@ void MainViewModel::confirm_wipe_for(const std::string& path, WipeAlgorithm algo
     cancel_command->raise_can_execute_changed();
 
     auto weak_self = weak_from_this();
-    auto progress_callback = [weak_self, path](const WipeProgress& progress) {
-        if (auto vm = weak_self.lock()) {
-            vm->handle_wipe_progress(path, progress);
+    auto progress_callback = [weak_self, path, plan_id = plan.id](const WipeProgress& progress) {
+        if (auto vm = weak_self.lock(); vm && !vm->cleaned_up_.load()) {
+            vm->handle_wipe_progress(path, plan_id, progress);
         }
     };
 
     auto wipe_service = wipe_service_;
-    std::thread([weak_self, wipe_service, path, algorithm,
+    std::thread([weak_self, wipe_service, path, algorithm, plan,
                  progress_callback = std::move(progress_callback), verify]() mutable {
-        const bool started =
-            wipe_service->wipe_disk(path, algorithm, std::move(progress_callback), verify);
+        {
+            auto owner = weak_self.lock();
+            if (!owner || owner->cleaned_up_.load()) {
+                wipe_service->discard_wipe_plan(plan.id);
+                return;
+            }
+        }
+        const bool started = wipe_service->start_prepared_wipe(plan, std::move(progress_callback));
 
         if (started) {
-            Glib::signal_idle().connect([weak_self, algorithm, verify]() {
-                if (auto vm = weak_self.lock(); vm && vm->settings_save_callback_) {
+            queue_main([weak_self, algorithm, verify]() {
+                if (auto vm = weak_self.lock();
+                    vm && !vm->cleaned_up_.load() && vm->settings_save_callback_) {
                     vm->settings_save_callback_(
                         util::AppSettingsData{.algorithm_id = static_cast<int>(algorithm),
                                               .verification_enabled = verify});
@@ -423,8 +621,9 @@ void MainViewModel::confirm_wipe_for(const std::string& path, WipeAlgorithm algo
                 return false;
             });
         } else {
-            Glib::signal_idle().connect([weak_self, path]() {
-                if (auto vm = weak_self.lock()) {
+            wipe_service->discard_wipe_plan(plan.id);
+            queue_main([weak_self, path]() {
+                if (auto vm = weak_self.lock(); vm && !vm->cleaned_up_.load()) {
                     if (vm->active_wipes_.erase(path) == 0) {
                         return false;
                     }
@@ -435,8 +634,9 @@ void MainViewModel::confirm_wipe_for(const std::string& path, WipeAlgorithm algo
                         MessageInfo::Type::ERROR, "Failed to Start",
                         "Could not start the wipe operation on " + path +
                             ". The helper may have rejected the device, "
-                            "authorization may have failed, or a wipe may already be running "
-                            "on it.");
+                            "authorization may have failed, the prepared plan may have expired, "
+                            "or a wipe may already be running on it. Prepare and confirm a new "
+                            "wipe to retry.");
                 }
                 return false;
             });
@@ -444,23 +644,28 @@ void MainViewModel::confirm_wipe_for(const std::string& path, WipeAlgorithm algo
     }).detach();
 }
 
-void MainViewModel::unmount_and_wipe(const std::string& path) {
+void MainViewModel::unmount_and_wipe(const std::string& path, WipeAlgorithm algorithm,
+                                     bool verify) {
+    if (cleaned_up_.load()) {
+        return;
+    }
     is_operation_pending.set(true);
     update_can_wipe();
 
-    const auto algorithm = selected_algorithm.get();
-    const auto verify = verification_enabled.get() && verification_available.get();
     auto weak_self = weak_from_this();
     auto disk_service = disk_service_;
+    const auto generation = preparation_generation_;
 
-    std::thread([weak_self, disk_service, path, algorithm, verify]() {
+    std::thread([weak_self, disk_service, path, algorithm, verify, generation]() {
         auto unmount_result = disk_service->unmount_disk(path);
 
-        Glib::signal_idle().connect([weak_self, path, algorithm, verify,
-                                     unmount_result = std::move(unmount_result)]() mutable {
-            if (auto vm = weak_self.lock()) {
+        queue_main([weak_self, path, algorithm, verify, generation,
+                    unmount_result = std::move(unmount_result)]() mutable {
+            if (auto vm = weak_self.lock(); vm && !vm->cleaned_up_.load()) {
                 vm->is_operation_pending.set(false);
                 vm->update_can_wipe();
+                if (vm->preparation_generation_ != generation)
+                    return false;
 
                 if (!unmount_result) {
                     std::ostringstream error_msg;
@@ -473,49 +678,21 @@ void MainViewModel::unmount_and_wipe(const std::string& path) {
                     return false;
                 }
 
-                vm->load_disks();
-
-                const auto disk_info = vm->find_disk_info(path);
-                const auto disk_summary = vm->build_disk_summary(disk_info, path);
-                const auto algorithm_name = vm->wipe_service_->get_algorithm_name(algorithm);
-                const auto algorithm_description =
-                    vm->wipe_service_->get_algorithm_description(algorithm);
-                const auto warning = vm->algorithm_warning.get();
-
-                std::ostringstream message;
-                message << "Disk unmounted successfully.\n\n";
-                message << disk_summary << "\n\n";
-                message << "Algorithm: " << algorithm_name << "\n";
-                message << "Description: " << algorithm_description << "\n";
-                message << "Verification: " << (verify ? "enabled" : "disabled") << "\n\n";
-                if (!warning.empty()) {
-                    message << warning << "\n\n";
-                }
-                message << "WARNING: This will permanently destroy ALL data on the disk!\n";
-                message << "This action cannot be undone!";
-
-                vm->show_message(MessageInfo::Type::CONFIRMATION, "Confirm Disk Wipe",
-                                 message.str(),
-                                 [weak_self, path, algorithm, verify](bool confirmed) {
-                                     if (confirmed) {
-                                         if (auto callback_vm = weak_self.lock()) {
-                                             callback_vm->confirm_wipe_for(path, algorithm, verify);
-                                         }
-                                     }
-                                 });
+                vm->prepare_wipe(path, algorithm, verify);
             }
             return false;
         });
     }).detach();
 }
 
-void MainViewModel::handle_wipe_progress(const std::string& path, const WipeProgress& progress) {
+void MainViewModel::handle_wipe_progress(const std::string& path, const std::string& plan_id,
+                                         const WipeProgress& progress) {
     // Schedule UI update on main thread using Glib::signal_idle
     auto weak_self = weak_from_this();
-    Glib::signal_idle().connect([weak_self, path, progress]() {
-        if (auto vm = weak_self.lock()) {
+    queue_main([weak_self, path, plan_id, progress]() {
+        if (auto vm = weak_self.lock(); vm && !vm->cleaned_up_.load()) {
             const auto activity = vm->active_wipes_.find(path);
-            if (activity == vm->active_wipes_.end()) {
+            if (activity == vm->active_wipes_.end() || activity->second.plan.id != plan_id) {
                 return false;
             }
             activity->second.peak_speed =
@@ -541,6 +718,8 @@ void MainViewModel::finish_wipe(const std::string& path, const WipeProgress& pro
     const WipeActivity activity =
         activity_it != active_wipes_.end() ? activity_it->second : WipeActivity{};
     active_wipes_.erase(path);
+    if (progress.outcome_known)
+        completed_job_ids_.insert(activity.plan.id);
 
     auto progresses = wipe_progresses.get();
     progresses.erase(path);
@@ -555,14 +734,16 @@ void MainViewModel::finish_wipe(const std::string& path, const WipeProgress& pro
 
 void MainViewModel::handle_wipe_completion(const std::string& path, const WipeActivity& activity,
                                            const WipeProgress& progress) {
-    const auto disk_info = find_disk_info(path);
+    const auto& disk_info = activity.plan.device.disk;
     const auto disk_summary = build_disk_summary(disk_info, path);
     const auto algorithm_name = wipe_service_->get_algorithm_name(activity.algorithm);
 
-    if (!progress.has_error) {
+    if (wipe_succeeded(progress)) {
         std::ostringstream message;
         message << "Wipe of " << path << " completed successfully.\n\n";
         message << disk_summary << "\n\n";
+        message << "Method: " << util::wipe_method_label(activity.plan) << "\n";
+        message << "Scope: " << util::wipe_scope_label(activity.plan) << "\n";
         message << "Algorithm: " << algorithm_name << "\n";
         message << "Verification: ";
         // What the helper reported, not what was requested: an algorithm that
@@ -578,8 +759,21 @@ void MainViewModel::handle_wipe_completion(const std::string& path, const WipeAc
         }
 
         if (!certificate_directory_.empty()) {
-            const auto certificate = util::write_wipe_certificate(
-                certificate_directory_, build_certificate_data(path, activity, progress));
+            // The plan UUID names one audit record across reconnects. Restrict the
+            // filename component even for alternate service implementations.
+            auto record_id = activity.plan.id;
+            for (auto& character : record_id) {
+                if (!std::isalnum(static_cast<unsigned char>(character)) && character != '-' &&
+                    character != '_')
+                    character = '_';
+            }
+            const auto data = build_certificate_data(path, activity, progress);
+            const auto certificate =
+                record_id.empty()
+                    ? util::write_wipe_certificate(certificate_directory_, data)
+                    : util::write_certificate_to_base(
+                          std::filesystem::path{certificate_directory_} / ("wipe-" + record_id),
+                          data);
             if (certificate) {
                 message << "\n\nCertificate saved to:\n" << certificate->string() << ".txt";
             } else {
@@ -661,19 +855,25 @@ auto MainViewModel::build_disk_summary(const std::optional<DiskInfo>& disk_info,
                 << (disk_info->mount_point.empty() ? "mounted" : disk_info->mount_point);
     }
     if (disk_info->is_lvm_pv) {
-        summary << "\nLVM: physical volume";
+        summary << "\nLVM physical volume (or containing disk)";
+    } else if (disk_info->has_dm_holders) {
+        summary << "\nDevice-mapper backing device";
     }
 
     return summary.str();
 }
 
 void MainViewModel::set_connection_state(bool connected, const std::string& error_message) {
+    if (cleaned_up_.load())
+        return;
+    ++connection_generation_;
     is_connected.set(connected);
     connection_error.set(error_message);
 
     if (connected) {
-        // Refresh disk list when we reconnect
+        // Restore helper-owned jobs as well as the current disk list.
         load_disks();
+        restore_wipe_jobs();
     } else {
         is_disk_refreshing.set(false);
         disks.set({});
@@ -706,31 +906,39 @@ auto MainViewModel::current_settings() const -> util::AppSettingsData {
 auto MainViewModel::build_certificate_data(const std::string& path, const WipeActivity& activity,
                                            const WipeProgress& progress) const
     -> util::WipeCertificateData {
-    const auto disk_info = find_disk_info(path);
+    const auto& disk_info = activity.plan.device.disk;
 
     util::WipeCertificateData data{};
+    util::apply_wipe_plan(data, activity.plan);
     data.device_path = path;
-    data.model = disk_info ? disk_info->model : "";
-    data.serial = disk_info ? disk_info->serial : "";
-    data.size_bytes = disk_info ? disk_info->size_bytes : progress.total_bytes;
+    data.model = disk_info.model;
+    data.serial = disk_info.serial;
+    data.size_bytes = disk_info.size_bytes;
     data.algorithm_name = wipe_service_->get_algorithm_name(activity.algorithm);
     data.nist_category = wipe_service_->get_nist_category(activity.algorithm);
     data.total_passes = progress.total_passes > 0
                             ? progress.total_passes
                             : wipe_service_->get_pass_count(activity.algorithm);
     data.started_at = util::iso8601_utc(activity.started_at);
-    data.completed_at = util::iso8601_utc(std::chrono::system_clock::now());
+    data.completed_at =
+        util::iso8601_utc(activity.completed_at.value_or(std::chrono::system_clock::now()));
     data.duration_seconds = static_cast<uint64_t>(
         std::max<int64_t>(0, std::chrono::duration_cast<std::chrono::seconds>(
                                  std::chrono::steady_clock::now() - activity.started_steady)
                                  .count()));
+    if (activity.completed_at) {
+        data.duration_seconds = static_cast<uint64_t>(
+            std::max<int64_t>(0, std::chrono::duration_cast<std::chrono::seconds>(
+                                     *activity.completed_at - activity.started_at)
+                                     .count()));
+    }
     data.peak_speed_bytes_per_sec = activity.peak_speed;
     data.verification_enabled = progress.verification_enabled;
     data.verification_passed = progress.verification_passed;
-    data.is_partition = disk_info ? disk_info->is_partition : false;
-    data.parent_disk = disk_info ? disk_info->parent_disk : "";
+    data.is_partition = disk_info.is_partition;
+    data.parent_disk = disk_info.parent_disk;
     data.bad_block_count = progress.bad_block_count;
-    data.success = true;
+    data.success = wipe_succeeded(progress);
     data.tool_version = PROJECT_VERSION;
     return data;
 }

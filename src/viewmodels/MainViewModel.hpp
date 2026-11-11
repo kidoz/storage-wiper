@@ -11,15 +11,18 @@
 #include "core/Command.hpp"
 #include "core/Observable.hpp"
 #include "models/ViewTypes.hpp"
+#include "models/WipePlan.hpp"
 #include "services/IDiskService.hpp"
 #include "services/IWipeService.hpp"
 #include "util/AppSettings.hpp"
 #include "util/WipeCertificate.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -156,6 +159,9 @@ public:
      * @brief Clean up resources
      */
     void cleanup();
+    [[nodiscard]] auto has_pending_or_active_operations() const -> bool;
+    [[nodiscard]] auto has_uncancellable_operations() const -> bool;
+    void stop_for_close();
 
     /**
      * @brief Set the selected disk
@@ -221,19 +227,6 @@ public:
     [[nodiscard]] auto current_settings() const -> util::AppSettingsData;
 
     /**
-     * @brief Warning shown when an erase reaches beyond the selected device
-     *
-     * An NVMe firmware erase is issued to the controller, so it destroys every
-     * namespace the controller owns. Public so the wording is unit tested.
-     *
-     * @param algorithm Selected algorithm
-     * @param path Selected device path
-     * @return Warning text, or empty when the erase is limited to the device
-     */
-    [[nodiscard]] static auto controller_wide_warning(WipeAlgorithm algorithm,
-                                                      const std::string& path) -> std::string;
-
-    /**
      * @brief Scope statement shown in the wipe confirmation dialog
      *
      * Makes explicit whether the wipe covers the whole device (including
@@ -254,10 +247,12 @@ private:
      * @brief Per-device bookkeeping for a wipe started from this ViewModel
      */
     struct WipeActivity {
+        WipePlan plan;
         WipeAlgorithm algorithm = WipeAlgorithm::ZERO_FILL;
         bool verify = false;
         std::chrono::system_clock::time_point started_at{};
         std::chrono::steady_clock::time_point started_steady{};
+        std::optional<std::chrono::system_clock::time_point> completed_at;
         uint64_t peak_speed = 0;
     };
 
@@ -274,13 +269,16 @@ private:
     size_t connection_subscription_id_ = 0;
 
     void load_disks();
+    void restore_wipe_jobs();
     void load_algorithms();
     void update_can_wipe();
     void update_algorithm_state();
     void start_wipe();
-    void confirm_wipe_for(const std::string& path, WipeAlgorithm algorithm, bool verify);
-    void unmount_and_wipe(const std::string& path);
-    void handle_wipe_progress(const std::string& path, const WipeProgress& progress);
+    void prepare_wipe(const std::string& path, WipeAlgorithm algorithm, bool verify);
+    void confirm_wipe_for(const WipePlan& plan);
+    void unmount_and_wipe(const std::string& path, WipeAlgorithm algorithm, bool verify);
+    void handle_wipe_progress(const std::string& path, const std::string& plan_id,
+                              const WipeProgress& progress);
     void finish_wipe(const std::string& path, const WipeProgress& progress);
     void handle_wipe_completion(const std::string& path, const WipeActivity& activity,
                                 const WipeProgress& progress);
@@ -295,6 +293,12 @@ private:
 
     // Wipes in flight, keyed by device path (main thread only)
     std::map<std::string, WipeActivity> active_wipes_;
+    std::optional<WipePlan> pending_plan_;
+    std::atomic<bool> cleaned_up_{false};
+    uint64_t preparation_generation_ = 0;
+    uint64_t connection_generation_ = 0;
+    bool unmount_confirmation_pending_ = false;
+    std::set<std::string> completed_job_ids_;
 
     // Certificate output directory; empty disables certificate writing (tests)
     std::string certificate_directory_;
