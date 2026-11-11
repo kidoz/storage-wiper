@@ -61,6 +61,11 @@ MainWindowContent::~MainWindowContent() {
     unbind();
 }
 
+void MainWindowContent::detach() {
+    unbind();
+    view_model_.reset();
+}
+
 void MainWindowContent::unbind() {
     for (const auto& unsubscribe : subscriptions_) {
         unsubscribe();
@@ -417,10 +422,13 @@ void MainWindowContent::update_progress(const WipeProgress& progress) {
     // placeholder (selected device not wiping) and stays hidden.
     update_progress_visibility(!progress.is_complete && progress.total_bytes > 0);
 
-    // Show/hide cancel button during operation
     if (cancel_button_) {
-        cancel_button_->set_visible(!progress.is_complete && !progress.has_error &&
-                                    progress.total_bytes > 0);
+        const bool cancellable = view_model_ && view_model_->cancel_command &&
+                                 view_model_->cancel_command->can_execute();
+        const bool show_cancel =
+            !progress.is_complete && !progress.has_error && progress.total_bytes > 0 && cancellable;
+        cancel_button_->set_sensitive(show_cancel);
+        cancel_button_->set_visible(show_cancel);
     }
 }
 

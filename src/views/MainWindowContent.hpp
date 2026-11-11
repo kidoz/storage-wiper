@@ -49,6 +49,7 @@ public:
      * @param view_model The ViewModel to bind to
      */
     void bind(std::shared_ptr<MainViewModel> view_model);
+    void detach();
 
     /**
      * @brief Get the currently selected disk path

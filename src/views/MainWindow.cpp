@@ -49,13 +49,55 @@ void cleanup_countdown_data(gpointer data) {
 }  // anonymous namespace
 
 MainWindow::MainWindow(AdwApplicationWindow* window)
-    : window_(window), content_(std::make_unique<MainWindowContent>()) {}
+    : window_(window), callback_state_(std::make_shared<CallbackState>(this)),
+      content_(std::make_unique<MainWindowContent>()) {
+    connect_signal(G_OBJECT(window_), "destroy", G_CALLBACK(on_window_destroyed));
+    connect_signal(G_OBJECT(window_), "notify::application",
+                   G_CALLBACK(on_window_application_changed));
+    connect_signal(G_OBJECT(window_), "close-request", G_CALLBACK(on_close_requested));
+}
 
 MainWindow::~MainWindow() {
     unbind();
+    callback_state_->owner = nullptr;
+}
+
+void MainWindow::connect_signal(GObject* object, const char* signal, GCallback callback) {
+    g_signal_connect_data(
+        object, signal, callback, new WeakState(callback_state_),
+        +[](gpointer data, GClosure*) { delete static_cast<WeakState*>(data); }, G_CONNECT_DEFAULT);
+}
+
+void MainWindow::invalidate_window() {
+    unbind();
+    window_ = nullptr;
+    header_bar_ = nullptr;
+    refresh_button_ = nullptr;
+    callback_state_->owner = nullptr;
+}
+
+void MainWindow::on_window_destroyed(GtkWidget*, gpointer user_data) {
+    if (auto state = static_cast<WeakState*>(user_data)->lock(); state && state->owner) {
+        state->owner->invalidate_window();
+    }
+}
+
+void MainWindow::on_window_application_changed(GObject* object, GParamSpec*, gpointer user_data) {
+    if (!gtk_window_get_application(GTK_WINDOW(object))) {
+        on_window_destroyed(GTK_WIDGET(object), user_data);
+    }
+}
+
+auto MainWindow::on_close_requested(GtkWindow*, gpointer user_data) -> gboolean {
+    if (auto state = static_cast<WeakState*>(user_data)->lock(); state && state->owner) {
+        return state->owner->request_close();
+    }
+    return FALSE;
 }
 
 void MainWindow::unbind() {
+    ++callback_state_->generation;
+    content_->detach();
     // Subscription ID zero is valid.
     if (view_model_ && message_subscription_id_.has_value()) {
         view_model_->current_message.unsubscribe(*message_subscription_id_);
@@ -73,6 +115,7 @@ void MainWindow::unbind() {
         view_model_->is_operation_pending.unsubscribe(*refresh_pending_subscription_id_);
         refresh_pending_subscription_id_.reset();
     }
+    view_model_.reset();
 }
 
 void MainWindow::bind(std::shared_ptr<MainViewModel> view_model) {
@@ -103,7 +146,9 @@ void MainWindow::setup_ui() {
 }
 
 void MainWindow::show() {
-    gtk_window_present(GTK_WINDOW(window_));
+    if (window_) {
+        gtk_window_present(GTK_WINDOW(window_));
+    }
 }
 
 void MainWindow::create_header_bar() {
@@ -115,13 +160,13 @@ void MainWindow::create_header_bar() {
     // Refresh button
     refresh_button_ = gtk_button_new_from_icon_name("view-refresh-symbolic");
     gtk_widget_set_tooltip_text(refresh_button_, "Refresh disk list");
-    g_signal_connect(refresh_button_, "clicked", G_CALLBACK(on_refresh_clicked), this);
+    connect_signal(G_OBJECT(refresh_button_), "clicked", G_CALLBACK(on_refresh_clicked));
     adw_header_bar_pack_start(ADW_HEADER_BAR(header_bar_), refresh_button_);
 
     // Primary menu
     auto* action_group = g_simple_action_group_new();
     auto* about_action = g_simple_action_new("about", nullptr);
-    g_signal_connect(about_action, "activate", G_CALLBACK(on_about_action), this);
+    connect_signal(G_OBJECT(about_action), "activate", G_CALLBACK(on_about_action));
     g_action_map_add_action(G_ACTION_MAP(action_group), G_ACTION(about_action));
     gtk_widget_insert_action_group(GTK_WIDGET(window_), "win", G_ACTION_GROUP(action_group));
     g_object_unref(about_action);
@@ -142,29 +187,29 @@ void MainWindow::bind_messages() {
     if (!view_model_)
         return;
 
+    const WeakState weak = callback_state_;
+    const auto generation = callback_state_->generation;
     message_subscription_id_ =
-        view_model_->current_message.subscribe([this](const MessageInfo& message) {
+        view_model_->current_message.subscribe([weak, generation](const MessageInfo& message) {
             if (message.title.empty())
-                return;  // Skip empty messages
-
-            // Use g_idle_add_full with destroy notify to prevent memory leaks
-            // if the idle source is removed before execution
-            auto* data = new std::pair<MainWindow*, MessageInfo*>(this, new MessageInfo(message));
-
+                return;
+            struct QueuedMessage {
+                WeakState state;
+                size_t generation;
+                MessageInfo message;
+            };
+            auto* data = new QueuedMessage{weak, generation, message};
             g_idle_add_full(
                 G_PRIORITY_DEFAULT_IDLE,
-                [](gpointer user_data) -> gboolean {
-                    auto* args = static_cast<std::pair<MainWindow*, MessageInfo*>*>(user_data);
-                    args->first->show_message(*args->second);
+                +[](gpointer user_data) -> gboolean {
+                    const auto& args = *static_cast<QueuedMessage*>(user_data);
+                    if (auto state = args.state.lock();
+                        state && state->owner && state->generation == args.generation) {
+                        state->owner->show_message(args.message);
+                    }
                     return G_SOURCE_REMOVE;
                 },
-                data,
-                [](gpointer user_data) {
-                    // Destroy notify - called when source is removed
-                    auto* args = static_cast<std::pair<MainWindow*, MessageInfo*>*>(user_data);
-                    delete args->second;
-                    delete args;
-                });
+                data, +[](gpointer user_data) { delete static_cast<QueuedMessage*>(user_data); });
         });
 }
 
@@ -172,12 +217,16 @@ void MainWindow::bind_refresh_state() {
     if (!view_model_ || !refresh_button_)
         return;
 
-    refresh_connected_subscription_id_ =
-        view_model_->is_connected.subscribe([this](bool) { update_refresh_button_state(); });
-    refresh_wipe_subscription_id_ =
-        view_model_->is_wipe_in_progress.subscribe([this](bool) { update_refresh_button_state(); });
-    refresh_pending_subscription_id_ = view_model_->is_operation_pending.subscribe(
-        [this](bool) { update_refresh_button_state(); });
+    const WeakState weak = callback_state_;
+    auto update = [weak](bool) {
+        if (auto state = weak.lock(); state && state->owner) {
+            state->owner->update_refresh_button_state();
+            state->owner->update_close_state();
+        }
+    };
+    refresh_connected_subscription_id_ = view_model_->is_connected.subscribe(update);
+    refresh_wipe_subscription_id_ = view_model_->is_wipe_in_progress.subscribe(update);
+    refresh_pending_subscription_id_ = view_model_->is_operation_pending.subscribe(update);
 
     update_refresh_button_state();
 }
@@ -190,8 +239,82 @@ void MainWindow::update_refresh_button_state() {
                                                   view_model_->refresh_command->can_execute());
 }
 
+auto MainWindow::request_close() -> bool {
+    if (allow_close_ || !view_model_ || !view_model_->has_pending_or_active_operations()) {
+        return false;
+    }
+    if (close_dialog_open_)
+        return true;
+    close_dialog_open_ = true;
+    auto body = std::string{
+        "Closing now would leave work unfinished. Keep this window open to monitor its outcome.\n\n"
+        "Stopping cancels pending preparation and authorization, and requests cancellation of "
+        "software wipes. "
+        "A cancelled software wipe can leave data partially erased."};
+    if (view_model_->has_uncancellable_operations()) {
+        body += "\n\nFirmware erases cannot be stopped once accepted by the device. Stopping keeps "
+                "this window "
+                "open until they finish.";
+    }
+    body += "\n\nYou can also leave started jobs running and close. Pending wipe requests will be "
+            "abandoned. Reopen Storage Wiper to monitor jobs and recent results while the helper "
+            "remains running.";
+    auto* dialog =
+        ADW_ALERT_DIALOG(adw_alert_dialog_new("Wipe work is still in progress", body.c_str()));
+    adw_alert_dialog_add_responses(dialog, "keep", "Keep Open", "stop",
+                                   "Stop and Close When Finished", "leave",
+                                   "Leave Started Jobs Running and Close", nullptr);
+    adw_alert_dialog_set_default_response(dialog, "keep");
+    adw_alert_dialog_set_close_response(dialog, "keep");
+    adw_alert_dialog_set_response_appearance(dialog, "stop", ADW_RESPONSE_DESTRUCTIVE);
+    connect_signal(G_OBJECT(dialog), "response",
+                   G_CALLBACK(+[](AdwAlertDialog*, const char* response, gpointer data) {
+                       if (auto state = static_cast<WeakState*>(data)->lock();
+                           state && state->owner) {
+                           auto* self = state->owner;
+                           self->close_dialog_open_ = false;
+                           if (g_strcmp0(response, "leave") == 0) {
+                               self->allow_close_ = true;
+                               if (self->view_model_)
+                                   self->view_model_->cleanup();
+                               gtk_window_close(GTK_WINDOW(self->window_));
+                               return;
+                           }
+                           self->close_when_idle_ = g_strcmp0(response, "stop") == 0;
+                           if (self->close_when_idle_ && self->view_model_) {
+                               self->view_model_->stop_for_close();
+                               self->update_close_state();
+                           }
+                       }
+                   }));
+    adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(window_));
+    return true;
+}
+
+void MainWindow::update_close_state() {
+    if (!close_when_idle_ || close_idle_scheduled_ || !view_model_ ||
+        view_model_->has_pending_or_active_operations())
+        return;
+    close_idle_scheduled_ = true;
+    g_idle_add_full(
+        G_PRIORITY_DEFAULT_IDLE,
+        +[](gpointer data) -> gboolean {
+            if (auto state = static_cast<WeakState*>(data)->lock(); state && state->owner) {
+                auto* self = state->owner;
+                self->close_idle_scheduled_ = false;
+                if (self->close_when_idle_ && self->window_ && self->view_model_ &&
+                    !self->view_model_->has_pending_or_active_operations()) {
+                    gtk_window_close(GTK_WINDOW(self->window_));
+                }
+            }
+            return G_SOURCE_REMOVE;
+        },
+        new WeakState(callback_state_),
+        +[](gpointer data) { delete static_cast<WeakState*>(data); });
+}
+
 void MainWindow::show_message(const MessageInfo& message) {
-    if (!window_ || !GTK_IS_WIDGET(window_))
+    if (!window_)
         return;
 
     if (message.type == MessageInfo::Type::CONFIRMATION) {
@@ -229,7 +352,13 @@ void MainWindow::show_confirmation_dialog(const MessageInfo& message) {
     g_object_set_data_full(G_OBJECT(dialog), "countdown", countdown, cleanup_countdown_data);
 
     if (message.confirmation_callback) {
-        auto* callback_ptr = new std::function<void(bool)>(message.confirmation_callback);
+        const WeakState weak = callback_state_;
+        const auto generation = callback_state_->generation;
+        auto* callback_ptr = new std::function<void(bool)>(
+            [weak, generation, callback = message.confirmation_callback](bool confirmed) {
+                const auto state = weak.lock();
+                callback(confirmed && state && state->owner && state->generation == generation);
+            });
         g_object_set_data_full(
             G_OBJECT(dialog), "callback", callback_ptr,
             +[](gpointer data) { delete static_cast<std::function<void(bool)>*>(data); });
@@ -261,15 +390,18 @@ void MainWindow::show_info_dialog(const MessageInfo& message) {
 // Event handlers for header bar buttons
 
 void MainWindow::on_refresh_clicked(GtkWidget*, gpointer user_data) {
-    auto* self = static_cast<MainWindow*>(user_data);
-    if (self->view_model_ && self->view_model_->refresh_command) {
-        self->view_model_->refresh_command->execute();
+    if (auto state = static_cast<WeakState*>(user_data)->lock(); state && state->owner) {
+        auto* self = state->owner;
+        if (self->view_model_ && self->view_model_->refresh_command) {
+            self->view_model_->refresh_command->execute();
+        }
     }
 }
 
 void MainWindow::on_about_action(GSimpleAction*, GVariant*, gpointer user_data) {
-    auto* self = static_cast<MainWindow*>(user_data);
-    self->show_about_dialog();
+    if (auto state = static_cast<WeakState*>(user_data)->lock(); state && state->owner) {
+        state->owner->show_about_dialog();
+    }
 }
 
 void MainWindow::show_about_dialog() {

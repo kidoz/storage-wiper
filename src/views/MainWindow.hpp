@@ -62,7 +62,19 @@ public:
     void show();
 
 private:
+    // Accessed only on the GTK main thread. C callbacks retain a weak reference,
+    // so neither queued work nor surviving GObjects retain the C++ view.
+    struct CallbackState {
+        MainWindow* owner;
+        size_t generation = 0;
+    };
+    using WeakState = std::weak_ptr<CallbackState>;
     AdwApplicationWindow* window_;
+    std::shared_ptr<CallbackState> callback_state_;
+    bool close_dialog_open_ = false;
+    bool allow_close_ = false;
+    bool close_when_idle_ = false;
+    bool close_idle_scheduled_ = false;
     std::shared_ptr<MainViewModel> view_model_;
 
     // gtkmm4 content widget
@@ -80,6 +92,13 @@ private:
 
     // UI creation methods
     void create_header_bar();
+    void connect_signal(GObject* object, const char* signal, GCallback callback);
+    void invalidate_window();
+    void update_close_state();
+    auto request_close() -> bool;
+    static void on_window_destroyed(GtkWidget*, gpointer user_data);
+    static void on_window_application_changed(GObject*, GParamSpec*, gpointer user_data);
+    static auto on_close_requested(GtkWindow*, gpointer user_data) -> gboolean;
 
     // Message dialog handling (kept as Adwaita for proper styling)
     void unbind();

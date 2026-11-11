@@ -59,9 +59,8 @@ void StorageWiperApp::on_activate(GtkApplication* app, gpointer user_data) {
     auto* self = static_cast<StorageWiperApp*>(user_data);
 
     // Activating an already running instance presents the window it has.
-    // Rebuilding the window would destroy the ViewModel, whose destructor
-    // cancels every wipe in progress, and would orphan the previous window
-    // with its remaining signal handlers pointing at the destroyed view.
+    // Preserve its ViewModel and subscriptions rather than creating a second
+    // monitor for the same helper-owned jobs.
     if (self->main_window_ != nullptr) {
         LOG_INFO("Application", "Presenting the existing window");
         gtk_window_present(GTK_WINDOW(self->main_window_));
@@ -178,11 +177,19 @@ void StorageWiperApp::setup_main_window() {
 }
 
 void StorageWiperApp::cleanup() {
+    if (dbus_client_)
+        dbus_client_->set_connection_state_callback({});
+    if (view_model_)
+        view_model_->set_notification_callback({});
+    view_.reset();
+    if (main_window_) {
+        g_signal_handlers_disconnect_by_data(main_window_, this);
+        gtk_window_destroy(GTK_WINDOW(main_window_));
+        main_window_ = nullptr;
+    }
     if (view_model_) {
         view_model_->cleanup();
         view_model_.reset();
     }
-
-    view_.reset();
     container_.clear();
 }

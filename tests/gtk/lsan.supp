@@ -1,0 +1,4 @@
+# GTK/Pango retain Fontconfig's process-global font cache at shutdown.
+# Limit leak suppression to Fontconfig allocation stacks; application leaks and
+# all AddressSanitizer use-after-free / bounds checks remain enabled.
+leak:libfontconfig.so.1
