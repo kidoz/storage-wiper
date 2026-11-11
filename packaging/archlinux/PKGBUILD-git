@@ -14,11 +14,17 @@ depends=(
   'gtkmm-4.0'
   'libadwaita'
   'polkit'
+  'util-linux-libs'
 )
 makedepends=(
   'meson'
   'ninja'
   'git'
+)
+checkdepends=(
+  'dbus'
+  'gtest'
+  'xorg-server-xvfb'
 )
 provides=("$_pkgname")
 conflicts=("$_pkgname")
@@ -38,6 +44,12 @@ pkgver() {
 build() {
   arch-meson "$_pkgname" build
   meson compile -C build
+}
+
+check() {
+  meson configure build -Denable_tests=true
+  meson compile -C build
+  python3 "$srcdir/$_pkgname/scripts/run_tests.py" -C build --print-errorlogs
 }
 
 package() {

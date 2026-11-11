@@ -33,7 +33,7 @@ compilation.
      --object-path /su/kidoz/storage_wiper/Helper
    ```
 
-4. If you use the systemd helper, inspect its unit and journal:
+4. Inspect the activated helper unit and journal:
 
    ```bash
    systemctl status storage-wiper-helper.service
@@ -44,8 +44,8 @@ compilation.
    [install](install.md). A client built from a checkout still needs an installed
    helper for live device operations.
 
-Direct D-Bus activation does not necessarily appear under the helper's systemd
-unit. See [helper activation](../explanation/architecture.md#helper-activation).
+An older directly activated helper may still own the bus name after an upgrade.
+See [helper activation](../explanation/architecture.md#helper-activation).
 
 ## The client reports a helper from an older version
 
@@ -73,8 +73,7 @@ format string and report no devices instead.
    process can own the helper bus name, so a new instance gives up while an
    older one still holds it.
 3. Repeat the failed command. Listing devices does not write to a disk.
-4. An upgrade stops an idle helper for you; a helper that was in the middle of
-   an operation is deliberately left running. See
+4. An upgrade preserves running helpers to avoid racing with a new operation. See
    [activate an upgraded helper](package_archlinux.md#activate-an-upgraded-helper).
 
 ## Authorization is denied or no password dialog appears

@@ -2,3 +2,4 @@
 Name=su.kidoz.storage_wiper.Helper
 Exec=@LIBDIR@/storage-wiper/storage-wiper-helper
 User=root
+SystemdService=storage-wiper-helper.service

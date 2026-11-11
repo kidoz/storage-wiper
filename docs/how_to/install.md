@@ -37,26 +37,25 @@ Reloading configuration does not replace an already running helper. If you
 are upgrading, let every active wipe finish before replacing or restarting
 the helper; see [helper upgrades](package_archlinux.md#activate-an-upgraded-helper).
 
-## Choose helper activation
+## Helper activation
 
-The installed D-Bus activation file can launch the helper when a client first
-connects. It uses `Exec` directly and does not currently select the systemd
-unit, so that activation path does not apply the unit's sandbox settings.
-
-To run the helper under the provided systemd unit, start it explicitly before
-connecting a client:
+On a systemd-enabled system bus, D-Bus starts `storage-wiper-helper.service` on
+demand, including the unit's sandbox. Enabling it at boot is unnecessary.
+Inspect the activated service with:
 
 ```bash
-sudo systemctl start storage-wiper-helper.service
 systemctl status storage-wiper-helper.service
+journalctl -u storage-wiper-helper.service -b
 ```
 
-Only one helper can own the bus name. If a directly activated helper already
-owns it, wait for all operations to finish before stopping that process and
-starting the unit. Do not terminate a helper whose wipe state is uncertain.
+An older directly activated helper can still own the bus name after upgrading.
+Wait for every operation to finish before stopping it; the next client call
+starts the new helper through systemd. Do not terminate a helper whose wipe
+state is uncertain. Service shutdown waits for firmware operations that cannot
+be cancelled, so stopping the unit may take as long as the device needs.
 
 The [architecture explanation](../explanation/architecture.md#helper-activation)
-describes the two activation paths.
+describes activation and the fallback for buses without systemd support.
 
 ## Verify the installation
 

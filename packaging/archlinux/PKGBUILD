@@ -13,10 +13,16 @@ depends=(
   'gtkmm-4.0'
   'libadwaita'
   'polkit'
+  'util-linux-libs'
 )
 makedepends=(
   'meson'
   'ninja'
+)
+checkdepends=(
+  'dbus'
+  'gtest'
+  'xorg-server-xvfb'
 )
 source=("$pkgname-$pkgver.tar.gz::https://github.com/kidoz/storage-wiper/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('6aba0804cc4f8014377b9d0b0f88d537dd266f75ad2c73d4f869a53eefab0a14')
@@ -24,6 +30,12 @@ sha256sums=('6aba0804cc4f8014377b9d0b0f88d537dd266f75ad2c73d4f869a53eefab0a14')
 build() {
   arch-meson "$pkgname-$pkgver" build
   meson compile -C build
+}
+
+check() {
+  meson configure build -Denable_tests=true
+  meson compile -C build
+  python3 "$srcdir/$pkgname-$pkgver/scripts/run_tests.py" -C build --print-errorlogs
 }
 
 package() {

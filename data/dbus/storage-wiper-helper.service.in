@@ -17,9 +17,12 @@ User=root
 # Restart policy
 Restart=on-failure
 RestartSec=5
+# Firmware erase cannot always be interrupted. Let the helper join its workers.
+TimeoutStopSec=infinity
 
 # Security hardening
-NoNewPrivileges=false
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_RAWIO CAP_DAC_OVERRIDE
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
@@ -32,10 +35,13 @@ RestrictSUIDSGID=true
 MemoryDenyWriteExecute=true
 LockPersonality=true
 
-# Allow access to block devices (required for disk wiping)
+# Allow only supported storage devices and the random-source fallback
 DevicePolicy=closed
-DeviceAllow=block-* rw
-DeviceAllow=char-* rw
+DeviceAllow=/dev/sd* rw
+DeviceAllow=/dev/nvme* rw
+DeviceAllow=/dev/mmcblk* rw
+DeviceAllow=/dev/vd* rw
+DeviceAllow=/dev/urandom r
 
 # Allow read access to /sys for disk detection
 ReadOnlyPaths=/sys

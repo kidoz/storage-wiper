@@ -88,19 +88,18 @@ record while keeping their own path, size, and mount state.
 
 ## Helper activation
 
-The repository ships two launch mechanisms:
+The [D-Bus activation template](../../data/dbus/su.kidoz.storage_wiper.Helper.service.in)
+selects `SystemdService=storage-wiper-helper.service`. On a systemd-enabled system
+bus, an ordinary client request therefore starts the
+[systemd unit](../../data/dbus/storage-wiper-helper.service.in), applying its
+filesystem/device restrictions and journal logging. `Exec` remains the fallback
+for bus implementations without systemd activation; that fallback does not apply
+the unit's sandbox. Only one process can own the helper bus name.
 
-- The [D-Bus activation template](../../data/dbus/su.kidoz.storage_wiper.Helper.service.in)
-  specifies `Name`, `Exec`, and `User=root`. A request can launch the helper
-  directly through this activation path.
-- The [systemd unit](../../data/dbus/storage-wiper-helper.service.in) owns the
-  same bus name with `Type=dbus`, adds filesystem/device restrictions, manages
-  a writable log directory, and sends console output to the journal.
-
-The activation template does not currently contain `SystemdService=`, so an
-automatically D-Bus-activated helper does not necessarily run in the provided
-unit's sandbox. Starting the unit explicitly before a client connects selects
-the systemd path. Only one process can own the helper bus name.
+The unit waits for helper shutdown without a timeout because firmware erase may
+be impossible to interrupt. Package upgrades reload definitions but preserve a
+running helper: checking open descriptors and then restarting has a race with
+new operations. Restart after all operations finish to load the new executable.
 
 See [install](../how_to/install.md) for setup and
 [package upgrades](../how_to/package_archlinux.md#activate-an-upgraded-helper)

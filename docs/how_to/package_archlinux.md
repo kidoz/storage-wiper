@@ -75,33 +75,22 @@ For the packaging tool's options, consult the installed `makepkg(8)` manual.
 
 ## Activate an upgraded helper
 
-The [install hook](../../packaging/archlinux/storage-wiper.install) reloads
-D-Bus configuration and systemd unit definitions on upgrade, and it stops an idle
-helper. Replacing the helper executable on disk does not replace a helper that is
-already running, so without that step a client from the new package would talk to
-the previous protocol.
+The [install hook](../../packaging/archlinux/storage-wiper.install) reloads systemd
+unit definitions before D-Bus configuration. It preserves every running helper,
+including apparently idle ones: a descriptor scan can race with authorization or
+a newly started wipe. Replacing the executable does not update a live process.
 
-A helper that is in the middle of an operation is deliberately left untouched,
-because an upgrade must not interrupt a wipe. That helper keeps serving the
-previous protocol until it is stopped. After the operation reaches a terminal
-result, stop it so the next client call activates the new build:
-
-```bash
-sudo pkill -f storage-wiper-helper
-```
-
-Only one process can own the helper bus name, and a new instance gives up when
-the name is taken. When the helper runs under the systemd unit, reload it through
-the unit instead:
+After all operations reach a terminal result, restart the helper:
 
 ```bash
 sudo systemctl restart storage-wiper-helper.service
 ```
 
-A D-Bus-activated helper does not run in that unit's sandbox, so the unit
-manages a helper only once it is running. See
-[helper activation](../explanation/architecture.md#helper-activation).
-Do not remove the package during a wipe: its removal hook stops the helper.
+For a helper directly activated by an older package, stop that specific process
+only after all operations finish. The next client call activates the installed
+build through the sandboxed systemd unit. An incompatible client reports a
+protocol error until the helper is restarted. Do not remove the package during
+a wipe: removal stops the helper. Shutdown waits for uncancellable firmware work.
 
 Follow [inspect devices](../tutorials/inspect_devices.md) to check the installed
 clients without starting an erase.
