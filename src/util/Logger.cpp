@@ -12,8 +12,13 @@
 
 namespace util {
 
-Logger::~Logger() {
-    shutdown();
+Logger::~Logger() noexcept {
+    try {
+        shutdown();
+    } catch (...) {
+        initialized_ = false;
+        file_.close();
+    }
 }
 
 auto Logger::instance() -> Logger& {

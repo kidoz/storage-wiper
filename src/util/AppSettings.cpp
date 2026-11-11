@@ -65,7 +65,7 @@ auto AppSettings::load() -> AppSettingsData {
                 const int id = std::stoi(value);
                 data.algorithm_id = std::clamp(id, 0, MAX_ALGORITHM_ID);
             } catch (const std::exception&) {
-                // keep default
+                continue;
             }
         } else if (key == "verification") {
             data.verification_enabled = value == "true" || value == "1";

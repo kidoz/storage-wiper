@@ -27,7 +27,7 @@ public:
     bool is_ssd_compatible() const override { return false; }
 
 private:
-    static constexpr size_t BUFFER_SIZE = 1'024 * 1'024;  // 1MB buffer
+    static constexpr size_t BUFFER_SIZE = 1'024UL * 1'024UL;  // 1MB buffer
 
     bool write_pattern(int fd, uint64_t size, std::span<const uint8_t> pattern,
                        ProgressCallback callback, int pass, int total_passes,

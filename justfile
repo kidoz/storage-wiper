@@ -78,13 +78,13 @@ format-check:
 lint:
     @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}} -Denable_clang_tidy=true; fi
     @meson setup {{build_dir}} --reconfigure -Denable_clang_tidy=true >/dev/null
-    meson compile -C {{build_dir}} clang-tidy || echo "clang-tidy not available"
+    meson compile -C {{build_dir}} clang-tidy
 
 # Run clang-tidy with run-clang-tidy for parallel analysis (faster)
 lint-parallel:
     @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}}; fi
     @if command -v run-clang-tidy >/dev/null 2>&1; then \
-        run-clang-tidy -p {{build_dir}} -header-filter='.*' src/; \
+        run-clang-tidy -p {{build_dir}} -header-filter='(^|.*/)src/' src/; \
     else \
         echo "run-clang-tidy not found. Install clang-tools-extra package."; \
     fi
@@ -93,7 +93,7 @@ lint-parallel:
 lint-fix:
     @if [ ! -d {{build_dir}} ]; then meson setup {{build_dir}}; fi
     @if command -v run-clang-tidy >/dev/null 2>&1; then \
-        run-clang-tidy -p {{build_dir}} -header-filter='.*' -fix src/; \
+        run-clang-tidy -p {{build_dir}} -header-filter='(^|.*/)src/' -fix src/; \
     else \
         echo "run-clang-tidy not found. Install clang-tools-extra package."; \
     fi

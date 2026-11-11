@@ -34,9 +34,10 @@ enum class LogLevel {
  * @brief Configuration for log file rotation
  */
 struct LogRotationPolicy {
-    size_t max_file_size_bytes = 10 * 1'024 * 1'024;  ///< Max size before rotation (10MB default)
-    int max_files = 7;                                ///< Number of rotated files to keep
-    bool compress_rotated = false;  ///< Whether to compress rotated files (future)
+    size_t max_file_size_bytes =
+        size_t{10} * 1'024 * 1'024;  ///< Max size before rotation (10MB default)
+    int max_files = 7;               ///< Number of rotated files to keep
+    bool compress_rotated = false;   ///< Whether to compress rotated files (future)
 };
 
 /**
@@ -157,7 +158,7 @@ public:
 
 private:
     Logger() = default;
-    ~Logger();
+    ~Logger() noexcept;
 
     /**
      * @brief Get ISO 8601 timestamp string

@@ -32,5 +32,5 @@ public:
                 const std::atomic<bool>& cancel_flag) override;
 
 private:
-    static constexpr size_t BUFFER_SIZE = 1'024 * 1'024;  // 1MB buffer
+    static constexpr size_t BUFFER_SIZE = 1'024UL * 1'024UL;  // 1MB buffer
 };

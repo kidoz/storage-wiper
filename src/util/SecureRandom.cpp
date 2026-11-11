@@ -16,8 +16,12 @@ namespace util {
 namespace {
 
 [[noreturn]] void fatal(const char* what, int err) noexcept {
-    LOG_ERROR("SecureRandom",
-              std::format("{} failed: {} (errno={})", what, std::strerror(err), err));
+    try {
+        LOG_ERROR("SecureRandom",
+                  std::format("{} failed: {} (errno={})", what, std::strerror(err), err));
+    } catch (...) {
+        std::abort();
+    }
     std::abort();
 }
 

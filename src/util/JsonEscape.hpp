@@ -45,8 +45,9 @@ inline auto json_escape(std::string_view input) -> std::string {
                     constexpr std::array<char, 16> hex{'0', '1', '2', '3', '4', '5', '6', '7',
                                                        '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
                     out.append("\\u00");
-                    out.push_back(hex[(byte >> 4) & 0x0F]);
-                    out.push_back(hex[byte & 0x0F]);
+                    const auto value = static_cast<std::uint32_t>(byte);
+                    out.push_back(hex[(value >> 4U) & 0x0FU]);
+                    out.push_back(hex[value & 0x0FU]);
                 } else {
                     out.push_back(raw);
                 }

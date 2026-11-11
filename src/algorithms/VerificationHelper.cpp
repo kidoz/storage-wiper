@@ -16,7 +16,7 @@
 namespace verification {
 
 namespace {
-constexpr size_t VERIFY_BUFFER_SIZE = 1'024 * 1'024;  // 1MB buffer
+constexpr size_t VERIFY_BUFFER_SIZE = 1'024UL * 1'024UL;  // 1MB buffer
 
 /**
  * @brief Read with retry on EINTR

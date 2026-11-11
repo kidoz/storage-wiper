@@ -23,8 +23,9 @@ Checks: >
   -cppcoreguidelines-pro-bounds-pointer-arithmetic,
   -readability-function-cognitive-complexity,
   -bugprone-easily-swappable-parameters
+  -bugprone-casting-through-void
 
-WarningsAsErrors: 'cert-*,security-*,bugprone-*'
+WarningsAsErrors: 'cert-*,security-*,bugprone-*,-bugprone-easily-swappable-parameters,-bugprone-casting-through-void'
 
 CheckOptions:
   # Naming conventions

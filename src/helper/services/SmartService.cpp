@@ -231,7 +231,7 @@ auto build_ata_passthrough_cdb(bool use_12, uint8_t feature, uint8_t sector_coun
     std::array<uint8_t, 16> cdb{};
     if (use_12) {
         cdb[0] = SCSI_ATA_PASSTHROUGH_12;
-        cdb[1] = static_cast<uint8_t>(protocol << 1);
+        cdb[1] = static_cast<uint8_t>(static_cast<uint32_t>(protocol) << 1U);
         cdb[2] = flags;
         cdb[3] = feature;
         cdb[4] = sector_count;
@@ -242,19 +242,20 @@ auto build_ata_passthrough_cdb(bool use_12, uint8_t feature, uint8_t sector_coun
         cdb[9] = ATA_SMART_CMD;
     } else {
         cdb[0] = SCSI_ATA_PASSTHROUGH_16;
-        cdb[1] = static_cast<uint8_t>(protocol << 1);  // EXTEND = 0 (28-bit command)
+        cdb[1] = static_cast<uint8_t>(static_cast<uint32_t>(protocol)
+                                      << 1U);  // EXTEND = 0 (28-bit command)
         cdb[2] = flags;
-        cdb[3] = 0;                                    // Feature (high)
+        cdb[3] = 0;                            // Feature (high)
         cdb[4] = feature;
-        cdb[5] = 0;                                    // Sector count (high)
+        cdb[5] = 0;                            // Sector count (high)
         cdb[6] = sector_count;
-        cdb[7] = 0;                                    // LBA low (high)
-        cdb[8] = 0;                                    // LBA low
-        cdb[9] = 0;                                    // LBA mid (high)
+        cdb[7] = 0;                            // LBA low (high)
+        cdb[8] = 0;                            // LBA low
+        cdb[9] = 0;                            // LBA mid (high)
         cdb[10] = SMART_LBA_MID_PASS;
-        cdb[11] = 0;                                   // LBA high (high)
+        cdb[11] = 0;                           // LBA high (high)
         cdb[12] = SMART_LBA_HIGH_PASS;
-        cdb[13] = 0;                                   // Device
+        cdb[13] = 0;                           // Device
         cdb[14] = ATA_SMART_CMD;
     }
     return cdb;
@@ -273,7 +274,7 @@ auto parse_ata_return_descriptor(const uint8_t* sense, size_t length, uint8_t& l
         return false;
     }
 
-    const uint8_t response_code = sense[0] & 0x7F;
+    const uint8_t response_code = sense[0] & 0x7FU;
     // Only descriptor-format sense (0x72/0x73) carries the ATA register block.
     if (response_code != 0x72 && response_code != 0x73) {
         return false;
@@ -330,7 +331,8 @@ auto sat_read_smart_data(int fd, bool use_12, uint8_t* out) -> bool {
     // Accept only a clean, complete transfer. A CHECK CONDITION means the bridge
     // rejected the pass-through, and a non-zero residual means fewer than 512
     // bytes arrived, leaving the tail of the buffer undefined.
-    return io.status == 0 && io.host_status == 0 && (io.driver_status & 0x0F) == 0 && io.resid == 0;
+    return io.status == 0 && io.host_status == 0 && (io.driver_status & 0x0FU) == 0 &&
+           io.resid == 0;
 }
 
 /**
@@ -488,9 +490,9 @@ auto SmartService::parse_ata_attribute(const uint8_t* data, uint8_t attr_id) -> 
         // Lower 32 bits of the raw value. The upper two raw bytes are
         // vendor-specific on most attributes and are deliberately ignored.
         const uint32_t raw = static_cast<uint32_t>(data[offset + 5]) |
-                             (static_cast<uint32_t>(data[offset + 6]) << 8) |
-                             (static_cast<uint32_t>(data[offset + 7]) << 16) |
-                             (static_cast<uint32_t>(data[offset + 8]) << 24);
+                             (static_cast<uint32_t>(data[offset + 6]) << 8U) |
+                             (static_cast<uint32_t>(data[offset + 7]) << 16U) |
+                             (static_cast<uint32_t>(data[offset + 8]) << 24U);
         return static_cast<int64_t>(raw);
     }
 
@@ -525,7 +527,7 @@ void SmartService::parse_ata_smart_data(const uint8_t* data, bool rotational, Sm
         if (raw < 0) {
             return -1;
         }
-        const auto celsius = static_cast<int>(raw & 0xFF);
+        const auto celsius = static_cast<int>(static_cast<uint64_t>(raw) & 0xFFU);
         if (celsius < MIN_PLAUSIBLE_TEMPERATURE || celsius > MAX_PLAUSIBLE_TEMPERATURE) {
             return -1;
         }
@@ -666,7 +668,7 @@ auto SmartService::read_nvme_smart(const std::string& device_path) -> SmartData 
         cmd.nsid = 0xFFFF'FFFF;
         cmd.addr = reinterpret_cast<uint64_t>(&smart_log);
         cmd.data_len = sizeof(smart_log);
-        cmd.cdw10 = 0x02 | (((sizeof(smart_log) / 4) - 1) << 16);  // Log ID 2, NUMDL
+        cmd.cdw10 = 0x02U | (((sizeof(smart_log) / 4U) - 1U) << 16U);  // Log ID 2, NUMDL
 
         if (ioctl(device.get(), NVME_IOCTL_ADMIN_CMD, &cmd) == 0) {
             result.available = true;
