@@ -9,6 +9,7 @@ project(
     'werror=true',          # Treat warnings as errors
     'buildtype=release',
     'b_ndebug=if-release',
+    'b_pie=true',
     'optimization=3',       # -O3 for release builds
   ],
   meson_version: '>=0.59.0'
@@ -28,13 +29,20 @@ add_project_arguments(
   ]),
   language: 'cpp'
 )
+add_project_link_arguments(
+  cpp.get_supported_link_arguments([
+    '-Wl,-z,relro,-z,now',
+  ]),
+  language: 'cpp'
+)
 
 # Dependencies
 gtk4_dep = dependency('gtk4', version: '>=4.0', required: true)
 gtkmm_dep = dependency('gtkmm-4.0', version: '>=4.6', required: true)
-adwaita_dep = dependency('libadwaita-1', version: '>=1.0', required: true)
+adwaita_dep = dependency('libadwaita-1', version: '>=1.5', required: true)
 polkit_dep = dependency('polkit-gobject-1', required: true)
 gio_dep = dependency('gio-2.0', required: true)
+blkid_dep = dependency('blkid', required: true)
 
 # Generate config header with version info
 config_data = configuration_data()
@@ -181,7 +189,7 @@ executable(
   shared_sources,
   util_sources,
   include_directories: inc,
-  dependencies: [gio_dep, polkit_dep],
+  dependencies: [gio_dep, polkit_dep, blkid_dep],
   install: true,
   install_dir: get_option('libdir') / 'storage-wiper',
   cpp_args: []
@@ -272,7 +280,7 @@ if clang_tidy.found() and get_option('enable_clang_tidy')
     command: [
       clang_tidy,
       '-p', meson.project_build_root(),
-      '--header-filter=.*',
+      '--header-filter=(^|.*/)src/',
       all_sources
     ]
   )
@@ -356,7 +364,7 @@ if get_option('enable_tests')
     shared_sources,
     test_extra_sources,
     include_directories: test_inc,
-    dependencies: [gtest_dep, gmock_dep, gio_dep, gtkmm_dep],
+    dependencies: [gtest_dep, gmock_dep, gio_dep, gtkmm_dep, blkid_dep],
     cpp_args: ['-DUNIT_TESTING'],
     install: false
   )
@@ -379,7 +387,7 @@ if get_option('enable_tests')
     include_directories: test_inc,
     dependencies: [gtest_dep, gmock_dep, gio_dep, gtkmm_dep],
     link_args: ['-Wl,--wrap=open64,--wrap=close,--wrap=read,--wrap=write',
-                '-Wl,--wrap=pwrite64,--wrap=lseek64,--wrap=fsync,--wrap=ioctl'],
+                '-Wl,--wrap=pwrite64,--wrap=lseek64,--wrap=fsync,--wrap=ioctl,--wrap=fstat64'],
     install: false
   )
   test('device_io_tests', io_test_exe, timeout: 60)
