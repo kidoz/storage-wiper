@@ -88,6 +88,20 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="1.6.0" date="2026-11-12">
+      <description>
+        <p>Feature release: prepared single-use wipe plans with confirmed kernel device identities, reconnectable job history, asynchronous authorization, positive LVM detection, and a sandboxed helper:</p>
+        <ul>
+          <li>PrepareWipe snapshots the device identity, firmware method and erase scope; StartPreparedWipe consumes only a caller-bound, single-use plan ID, and the opened device's kernel sequence, device number, size and partition offset are revalidated before writing</li>
+          <li>GetWipeJobs and PreparedWipeProgress retain jobs across client reconnects, and certificates keep the original identity and peak throughput</li>
+          <li>Polkit authorization runs asynchronously with a deadline, per-sender limits and disconnect cancellation; D-Bus activation starts the sandboxed systemd unit using valid device-group rules</li>
+          <li>GetDisks2 adds positive LVM-signature and device-mapper-holder flags from read-only libblkid inspection, and ambiguous or uninspected targets are withheld</li>
+          <li>ATA Secure Erase sends its security structures through SG_IO PIO Data-Out with a drive-derived erase timeout; NVMe Sanitize terminal status is bound to the submitted command</li>
+          <li>A nonzero unwritable-sector count now fails the wipe: no success exit status or success certificate is produced</li>
+          <li>CLI and GUI certificates record the plan ID, firmware method, erase scope, kernel identity and affected devices; closing the GUI during work offers keep-open, stop-and-wait, and leave-running choices</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.5.4" date="2026-10-10">
       <description>
         <p>Correctness fixes: good random-fill wipes are no longer reported as failed, and activating a running instance no longer cancels its work:</p>

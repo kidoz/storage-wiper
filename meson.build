@@ -1,7 +1,7 @@
 project(
   'storage_wiper',
   'cpp',
-  version: '1.5.4',
+  version: '1.6.0',
   license: 'MIT',
   default_options: [
     'cpp_std=c++23',
