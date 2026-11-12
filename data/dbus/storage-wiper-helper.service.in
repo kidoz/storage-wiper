@@ -35,12 +35,12 @@ RestrictSUIDSGID=true
 MemoryDenyWriteExecute=true
 LockPersonality=true
 
-# Allow only supported storage devices and the random-source fallback
+# Allow block devices and the NVMe controller character nodes. systemd expands
+# wildcards only in device *group* names, never in /dev node paths.
 DevicePolicy=closed
-DeviceAllow=/dev/sd* rw
-DeviceAllow=/dev/nvme* rw
-DeviceAllow=/dev/mmcblk* rw
-DeviceAllow=/dev/vd* rw
+DeviceAllow=block-* rw
+DeviceAllow=char-nvme rw
+DeviceAllow=char-nvme-generic rw
 DeviceAllow=/dev/urandom r
 
 # Allow read access to /sys for disk detection

@@ -27,8 +27,10 @@ class ServiceIntegrationTest(unittest.TestCase):
         self.assertEqual(unit["Service"]["CapabilityBoundingSet"],
                          "CAP_SYS_ADMIN CAP_SYS_RAWIO CAP_DAC_OVERRIDE")
         unit_text = (ROOT / "data/dbus/storage-wiper-helper.service.in").read_text()
-        self.assertNotIn("DeviceAllow=char-*", unit_text)
-        self.assertNotIn("DeviceAllow=block-*", unit_text)
+        # Device-node paths do not expand globs; only group names do.
+        self.assertIn("DeviceAllow=block-* rw", unit_text)
+        self.assertIn("DeviceAllow=char-nvme rw", unit_text)
+        self.assertNotRegex(unit_text, r"DeviceAllow=/dev/\S*\*")
 
     def run_hook(self, hook, running):
         with tempfile.TemporaryDirectory() as directory:
