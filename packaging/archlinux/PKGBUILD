@@ -1,7 +1,7 @@
 # Maintainer: Aleksandr Pavlov <ckidoz@gmail.com>
 
 pkgname=storage-wiper
-pkgver=1.5.4
+pkgver=1.6.0
 pkgrel=1
 pkgdesc='Secure disk wiping tool with GTK4/libadwaita interface and DoD-compliant algorithms'
 arch=('x86_64')
@@ -25,7 +25,7 @@ checkdepends=(
   'xorg-server-xvfb'
 )
 source=("$pkgname-$pkgver.tar.gz::https://github.com/kidoz/storage-wiper/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('6aba0804cc4f8014377b9d0b0f88d537dd266f75ad2c73d4f869a53eefab0a14')
+sha256sums=('1a539d3cafff817884fc780bbf9937349f8bd3e2d97e930319f41527b9535702')
 
 build() {
   arch-meson "$pkgname-$pkgver" build
