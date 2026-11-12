@@ -21,6 +21,8 @@ inline auto encode(const WipeJobSnapshot& job) -> GVariant* {
                           g_variant_new_int64(job.completed_at_unix));
     g_variant_builder_add(&builder, "{sv}", "verification-mismatches",
                           g_variant_new_uint64(p.verification_mismatches));
+    g_variant_builder_add(&builder, "{sv}", "peak-speed",
+                          g_variant_new_uint64(job.peak_speed_bytes_per_sec));
     g_variant_builder_add(
         &builder, "{sv}", "progress",
         g_variant_new(dbus_signatures::WIPE_PROGRESS, job.plan.device.disk.path.c_str(),
@@ -84,6 +86,11 @@ inline auto decode(GVariant* value) -> std::expected<WipeJobSnapshot, util::Erro
     p.verification_passed = verified != FALSE;
     p.bad_block_count = bad_blocks;
     g_variant_unref(progress);
+    // Optional for compatibility with a helper that predates the field; a
+    // missing value stays zero rather than rejecting the whole snapshot.
+    guint64 peak_speed = 0;
+    g_variant_lookup(value, "peak-speed", "t", &peak_speed);
+    job.peak_speed_bytes_per_sec = peak_speed;
     if (!g_variant_lookup(value, "verification-mismatches", "t", &mismatches) || !valid_path ||
         job.started_at_unix <= 0 ||
         (p.is_complete ? job.completed_at_unix < job.started_at_unix

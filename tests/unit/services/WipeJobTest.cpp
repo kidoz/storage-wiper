@@ -49,6 +49,23 @@ TEST(WipeJobRegistryTest, ReconnectSnapshotPreservesIdentityProgressAndOriginalT
     EXPECT_EQ(jobs.active_count(), 0u);
 }
 
+TEST(WipeJobRegistryTest, SnapshotTracksPeakProgressSpeedForReconnectCertificates) {
+    WipeJobRegistry jobs;
+    const auto plan = job_plan();
+    ASSERT_TRUE(jobs.begin(plan));
+    auto progress = finished_progress();
+    progress.is_complete = false;
+    progress.speed_bytes_per_sec = 100;
+    ASSERT_TRUE(jobs.update(plan.id, progress));
+    progress.speed_bytes_per_sec = 900;
+    ASSERT_TRUE(jobs.update(plan.id, progress));
+    progress.speed_bytes_per_sec = 200;
+    progress.is_complete = true;
+    ASSERT_TRUE(jobs.update(plan.id, progress));
+    ASSERT_EQ(jobs.snapshots().size(), 1u);
+    EXPECT_EQ(jobs.snapshots().front().peak_speed_bytes_per_sec, 900u);
+}
+
 TEST(WipeJobRegistryTest, TerminalProgressCannotRegressOrBeReplacedByLateCompletion) {
     WipeJobRegistry jobs;
     const auto plan = job_plan();
@@ -64,6 +81,16 @@ TEST(WipeJobRegistryTest, TerminalProgressCannotRegressOrBeReplacedByLateComplet
     EXPECT_FALSE(jobs.update(plan.id, late));
     ASSERT_EQ(jobs.snapshots().size(), 1u);
     EXPECT_EQ(jobs.snapshots().front().progress, terminal);
+}
+
+TEST(WipeJobRegistryTest, CancellationIsBoundToTheJobOwner) {
+    WipeJobRegistry jobs;
+    const auto plan = job_plan();
+    ASSERT_TRUE(jobs.begin(plan, std::string{":1.42"}));
+    EXPECT_FALSE(jobs.cancellation_target(plan.id, ":1.43"));
+    EXPECT_EQ(jobs.cancellation_target(plan.id, ":1.42"), plan.device.disk.path);
+    // Internal shutdown checks are not tied to a caller.
+    EXPECT_EQ(jobs.cancellation_target(plan.id), plan.device.disk.path);
 }
 
 TEST(WipeJobRegistryTest, OldJobCannotCancelNewJobAtReusedDevicePath) {
@@ -138,6 +165,7 @@ TEST(WipeJobVariantTest, RoundTripPreservesAuditSnapshotAndVerificationMismatche
     job.progress.verification_mismatches = 7;
     job.started_at_unix = 1'000;
     job.completed_at_unix = 1'005;
+    job.peak_speed_bytes_per_sec = 123'456;
     auto* encoded = g_variant_ref_sink(wipe_job_variant::encode(job));
     const auto decoded = wipe_job_variant::decode(encoded);
     ASSERT_TRUE(decoded) << decoded.error().message;
@@ -146,6 +174,7 @@ TEST(WipeJobVariantTest, RoundTripPreservesAuditSnapshotAndVerificationMismatche
     EXPECT_EQ(decoded->progress, job.progress);
     EXPECT_EQ(decoded->started_at_unix, job.started_at_unix);
     EXPECT_EQ(decoded->completed_at_unix, job.completed_at_unix);
+    EXPECT_EQ(decoded->peak_speed_bytes_per_sec, job.peak_speed_bytes_per_sec);
     g_variant_unref(encoded);
 }
 

@@ -28,6 +28,11 @@ public:
 
     [[nodiscard]] auto begin(const WipePlan& plan, Time now = {})
         -> std::expected<void, util::Error> {
+        return begin(plan, std::string{}, now);
+    }
+
+    [[nodiscard]] auto begin(const WipePlan& plan, std::string sender, Time now = {})
+        -> std::expected<void, util::Error> {
         expire(now.steady);
         if (plan.id.empty() || jobs_.contains(plan.id)) {
             return std::unexpected(util::Error{"Invalid or duplicate wipe job ID"});
@@ -57,7 +62,7 @@ public:
         snapshot.progress.total_bytes = plan.device.disk.size_bytes;
         snapshot.progress.verification_enabled = plan.verify;
         snapshot.progress.status = "Starting wipe...";
-        jobs_.emplace(plan.id, Entry{std::move(snapshot), std::nullopt});
+        jobs_.emplace(plan.id, Entry{std::move(snapshot), std::nullopt, std::move(sender)});
         active_by_path_[plan.device.disk.path] = plan.id;
         return {};
     }
@@ -80,6 +85,8 @@ public:
         }
         auto& entry = it->second;
         entry.snapshot.progress = progress;
+        entry.snapshot.peak_speed_bytes_per_sec =
+            std::max(entry.snapshot.peak_speed_bytes_per_sec, progress.speed_bytes_per_sec);
         if (progress.is_complete) {
             entry.completed = now.steady;
             entry.snapshot.completed_at_unix =
@@ -89,11 +96,13 @@ public:
         return true;
     }
 
-    [[nodiscard]] auto cancellation_target(const std::string& id) const
+    [[nodiscard]] auto cancellation_target(const std::string& id,
+                                           const std::string& sender = {}) const
         -> std::optional<std::string> {
         const auto it = jobs_.find(id);
         if (it == jobs_.end() || it->second.snapshot.progress.is_complete ||
-            !it->second.snapshot.plan.firmware.cancellable) {
+            !it->second.snapshot.plan.firmware.cancellable ||
+            (!sender.empty() && it->second.sender != sender)) {
             return std::nullopt;
         }
         const auto& path = it->second.snapshot.plan.device.disk.path;
@@ -138,6 +147,7 @@ private:
     struct Entry {
         WipeJobSnapshot snapshot;
         std::optional<Clock::time_point> completed;
+        std::string sender;
     };
     std::map<std::string, Entry> jobs_;
     std::map<std::string, std::string> active_by_path_;
