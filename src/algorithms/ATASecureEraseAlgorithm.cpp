@@ -25,6 +25,74 @@
 #include <string>
 #include <thread>
 
+#include <scsi/sg.h>
+
+namespace {
+
+// ATA commands that transfer a 512-byte security structure need PIO Data-Out.
+// HDIO_DRIVE_CMD only implements PIO Data-In and a fixed 10-second timeout, so
+// the security commands go through SG_IO ATA PASS-THROUGH(16) instead.
+constexpr uint8_t ATA_PASS_THROUGH_16 = 0x85;
+constexpr uint8_t SAT_PROTOCOL_NON_DATA = 3;
+constexpr uint8_t SAT_PROTOCOL_PIO_DATA_OUT = 5;
+// CDB byte 2: T_LENGTH = sector-count field (2), BYT_BLOK = blocks (1),
+// T_DIR clear for a to-device transfer (bit 3).
+constexpr uint8_t SAT_FLAGS_NON_DATA = 0x00;
+constexpr uint8_t SAT_FLAGS_PIO_DATA_OUT = 0x06;
+constexpr unsigned int ATA_SECURITY_TIMEOUT_MS = 30'000;
+constexpr uint64_t SECURITY_PAYLOAD_SIZE = 512;
+constexpr uint64_t MAX_ATA_ERASE_TIMEOUT_MS = 24ULL * 60 * 60 * 1'000;
+
+/**
+ * Issue an ATA SECURITY command, optionally with its 512-byte data-out
+ * structure. Returns true only for a clean, complete transfer.
+ */
+auto ata_security_command(int fd, uint8_t command, const uint8_t* data_out, unsigned int timeout_ms)
+    -> bool {
+    const bool has_data = data_out != nullptr;
+    std::array<uint8_t, 16> cdb{};
+    cdb[0] = ATA_PASS_THROUGH_16;
+    cdb[1] =
+        static_cast<uint8_t>((has_data ? SAT_PROTOCOL_PIO_DATA_OUT : SAT_PROTOCOL_NON_DATA) << 1U);
+    cdb[2] = has_data ? SAT_FLAGS_PIO_DATA_OUT : SAT_FLAGS_NON_DATA;
+    cdb[5] = 0;                 // sector count high
+    cdb[6] = has_data ? 1 : 0;  // sector count low: one 512-byte block
+    cdb[14] = command;
+    cdb[15] = 0;                // control
+
+    std::array<uint8_t, 32> sense{};
+    sg_io_hdr_t io{};
+    io.interface_id = 'S';
+    io.dxfer_direction = has_data ? SG_DXFER_TO_DEV : SG_DXFER_NONE;
+    io.cmd_len = static_cast<unsigned char>(cdb.size());
+    io.cmdp = cdb.data();
+    io.dxfer_len = has_data ? static_cast<unsigned int>(SECURITY_PAYLOAD_SIZE) : 0;
+    io.dxferp = has_data ? const_cast<uint8_t*>(data_out) : nullptr;
+    io.sbp = sense.data();
+    io.mx_sb_len = static_cast<unsigned char>(sense.size());
+    io.timeout = timeout_ms;
+
+    if (ioctl(fd, SG_IO, &io) != 0) {
+        return false;
+    }
+    return io.status == 0 && io.host_status == 0 && (io.driver_status & 0x0FU) == 0 &&
+           io.resid == 0;
+}
+
+auto ata_erase_timeout_ms(const ATASecurityInfo& info, bool enhanced) -> unsigned int {
+    // IDENTIFY words 89/90 report the normal/enhanced erase time in 2-minute
+    // units. Use the longer estimate with a margin, and cap it at one day.
+    const uint64_t normal = static_cast<uint64_t>(info.erase_time_normal) * 2ULL * 60ULL * 1'000ULL;
+    const uint64_t enhanced_time =
+        static_cast<uint64_t>(info.erase_time_enhanced) * 2ULL * 60ULL * 1'000ULL;
+    const uint64_t selected = enhanced ? enhanced_time : normal;
+    const uint64_t estimate = selected == 0 ? 60ULL * 60ULL * 1'000ULL : selected;
+    const uint64_t with_margin = estimate + 5ULL * 60ULL * 1'000ULL;
+    return static_cast<unsigned int>(std::min(with_margin, MAX_ATA_ERASE_TIMEOUT_MS));
+}
+
+}  // namespace
+
 bool ATASecureEraseAlgorithm::execute([[maybe_unused]] int fd, [[maybe_unused]] uint64_t size,
                                       ProgressCallback callback,
                                       [[maybe_unused]] const std::atomic<bool>& cancel_flag) {
@@ -355,26 +423,7 @@ bool ATASecureEraseAlgorithm::set_security_password(int fd, const char* password
     size_t copy_len = std::min(pwd_len, size_t(32));
     std::memcpy(&buffer[2], password, copy_len);
 
-    // Using HDIO_DRIVE_CMD approach with data transfer
-    uint8_t cmd_data[4 + 512];
-    std::memset(cmd_data, 0, sizeof(cmd_data));
-    cmd_data[0] = ATA_OP_SECURITY_SET_PASSWORD;
-    cmd_data[1] = 1;  // sector count
-    cmd_data[2] = 0;  // features
-    cmd_data[3] = 1;  // nsect for data transfer
-    std::memcpy(&cmd_data[4], buffer, 512);
-
-    // HDIO_DRIVE_CMD_AES for data transfer commands
-    // Actually, HDIO_DRIVE_CMD expects:
-    // [0] = command, [1] = nsect, [2] = feature, [3] = nsect
-    // Then 512 bytes of data
-
-    if (ioctl(fd, HDIO_DRIVE_CMD, cmd_data) != 0) {
-        // Try alternate method
-        return false;
-    }
-
-    return true;
+    return ata_security_command(fd, ATA_OP_SECURITY_SET_PASSWORD, buffer, ATA_SECURITY_TIMEOUT_MS);
 }
 
 bool ATASecureEraseAlgorithm::disable_security_password(int fd, const char* password, bool master) {
@@ -389,15 +438,8 @@ bool ATASecureEraseAlgorithm::disable_security_password(int fd, const char* pass
     size_t copy_len = std::min(pwd_len, size_t(32));
     std::memcpy(&buffer[2], password, copy_len);
 
-    uint8_t cmd_data[4 + 512];
-    std::memset(cmd_data, 0, sizeof(cmd_data));
-    cmd_data[0] = ATA_OP_SECURITY_DISABLE_PASSWORD;
-    cmd_data[1] = 1;
-    cmd_data[2] = 0;
-    cmd_data[3] = 1;
-    std::memcpy(&cmd_data[4], buffer, 512);
-
-    return ioctl(fd, HDIO_DRIVE_CMD, cmd_data) == 0;
+    return ata_security_command(fd, ATA_OP_SECURITY_DISABLE_PASSWORD, buffer,
+                                ATA_SECURITY_TIMEOUT_MS);
 }
 
 bool ATASecureEraseAlgorithm::clear_security_password(int fd) {
@@ -409,11 +451,8 @@ bool ATASecureEraseAlgorithm::clear_security_password(int fd) {
 }
 
 bool ATASecureEraseAlgorithm::security_erase_prepare(int fd) {
-    uint8_t args[4];
-    std::memset(args, 0, sizeof(args));
-    args[0] = ATA_OP_SECURITY_ERASE_PREPARE;
-
-    return ioctl(fd, HDIO_DRIVE_CMD, args) == 0;
+    return ata_security_command(fd, ATA_OP_SECURITY_ERASE_PREPARE, nullptr,
+                                ATA_SECURITY_TIMEOUT_MS);
 }
 
 bool ATASecureEraseAlgorithm::security_erase_unit(int fd, const char* password, bool enhanced,
@@ -437,17 +476,12 @@ bool ATASecureEraseAlgorithm::security_erase_unit(int fd, const char* password, 
     size_t copy_len = std::min(pwd_len, size_t(32));
     std::memcpy(&buffer[2], password, copy_len);
 
-    uint8_t cmd_data[4 + 512];
-    std::memset(cmd_data, 0, sizeof(cmd_data));
-    cmd_data[0] = ATA_OP_SECURITY_ERASE_UNIT;
-    cmd_data[1] = 1;
-    cmd_data[2] = 0;
-    cmd_data[3] = 1;
-    std::memcpy(&cmd_data[4], buffer, 512);
-
-    // This command can take a very long time
-    // The ioctl may timeout - need to use appropriate timeout or async handling
-    return ioctl(fd, HDIO_DRIVE_CMD, cmd_data) == 0;
+    // The erase runs inside the drive and can take minutes to hours. Derive the
+    // SG_IO timeout from the drive's own IDENTIFY estimate so a slow erase is
+    // not reported as a failure while the firmware is still working.
+    const auto info = get_security_info(fd);
+    return ata_security_command(fd, ATA_OP_SECURITY_ERASE_UNIT, buffer,
+                                ata_erase_timeout_ms(info, enhanced));
 }
 
 void ATASecureEraseAlgorithm::report_progress(ProgressCallback& callback, double percentage,
@@ -574,7 +608,8 @@ bool ATASecureEraseAlgorithm::nvme_secure_erase(int fd, const FirmwarePlan& firm
     // Refuse to queue behind an already running sanitize - it would fail
     // anyway, and the log status is how completion is detected below.
     std::array<uint8_t, nvme_sanitize::SANITIZE_LOG_SIZE> log{};
-    bool prior_run_succeeded = false;
+    nvme_sanitize::SanitizeStatus initial_status = nvme_sanitize::SanitizeStatus::UNKNOWN;
+    uint32_t initial_cdw10 = 0;
     const int initial_status_result = nvme_get_sanitize_log(fd, log.data());
     if (nvme_sanitize::is_sanitize_plan(plan) && initial_status_result != 0) {
         report_progress(callback, 5, "Error", true, true,
@@ -582,15 +617,14 @@ bool ATASecureEraseAlgorithm::nvme_secure_erase(int fd, const FirmwarePlan& firm
         return false;
     }
     if (initial_status_result == 0) {
-        const auto status = nvme_sanitize::parse_log_page(log.data()).status;
-        if (status == nvme_sanitize::SanitizeStatus::IN_PROGRESS) {
+        const auto initial_page = nvme_sanitize::parse_log_page(log.data());
+        initial_status = initial_page.status;
+        initial_cdw10 = initial_page.command_dword10;
+        if (initial_status == nvme_sanitize::SanitizeStatus::IN_PROGRESS) {
             report_progress(callback, 5, "Error", true, true,
                             "A sanitize operation is already in progress");
             return false;
         }
-        // Remembered so a success left over from an earlier sanitize is not
-        // mistaken for this one completing instantly.
-        prior_run_succeeded = nvme_sanitize::is_success_status(status);
     }
 
     if (cancel_flag.load()) {
@@ -609,6 +643,7 @@ bool ATASecureEraseAlgorithm::nvme_secure_erase(int fd, const FirmwarePlan& firm
         cmd.data_len = 0;
         // CDW10 carries the action and, for overwrite, the pass count.
         cmd.cdw10 = nvme_sanitize::sanitize_cdw10(plan);
+        const auto submitted_cdw10 = cmd.cdw10;
         // CDW11 is OVRPAT, the 32-bit overwrite pattern, and is ignored by the
         // other actions. Zero is a fine pattern; the pass count is in CDW10.
         cmd.cdw11 = 0;
@@ -696,14 +731,27 @@ bool ATASecureEraseAlgorithm::nvme_secure_erase(int fd, const FirmwarePlan& firm
                 }
                 case nvme_sanitize::SanitizeStatus::COMPLETED_SUCCESS:
                 case nvme_sanitize::SanitizeStatus::COMPLETED_SUCCESS_NO_DEALLOCATE: {
-                    // A drive sanitized before still reports the previous
-                    // run's success until the controller updates the log. If
-                    // this erase was never seen running, give the status time
-                    // to settle rather than certify an erase that may not have
-                    // happened.
-                    if (prior_run_succeeded && !observed_in_progress &&
-                        now - start_time < STATUS_SETTLE_TIME) {
-                        break;
+                    // A controller that was sanitized before still reports the
+                    // previous run's terminal status until it records this
+                    // command. Bind the verdict to SCDW10 (or an observed
+                    // in-progress transition) instead of trusting a stale
+                    // success. If the status never identifies this command,
+                    // fail closed rather than certify an erase that may not
+                    // have happened.
+                    const bool recorded = page.command_dword10 == submitted_cdw10;
+                    const bool command_changed = page.command_dword10 != initial_cdw10;
+                    const bool belongs_to_this_run = observed_in_progress ||
+                                                     page.status != initial_status ||
+                                                     (recorded && command_changed);
+                    if (!belongs_to_this_run) {
+                        if (now - start_time < STATUS_SETTLE_TIME) {
+                            break;
+                        }
+                        report_progress(callback, 10, "Error", true, true,
+                                        "The controller did not record this sanitize command; "
+                                        "cannot certify completion. Check dmesg and the device "
+                                        "state before retrying.");
+                        return false;
                     }
 
                     std::string note =
@@ -719,6 +767,21 @@ bool ATASecureEraseAlgorithm::nvme_secure_erase(int fd, const FirmwarePlan& firm
                     return true;
                 }
                 case nvme_sanitize::SanitizeStatus::COMPLETED_FAILED: {
+                    // A failure left by a previous run must not stop
+                    // monitoring a command this controller has not recorded.
+                    const bool recorded = page.command_dword10 == submitted_cdw10;
+                    const bool command_changed = page.command_dword10 != initial_cdw10;
+                    if (!observed_in_progress && page.status == initial_status &&
+                        !(recorded && command_changed)) {
+                        if (now - start_time < STATUS_SETTLE_TIME) {
+                            break;
+                        }
+                        report_progress(callback, 10, "Error", true, true,
+                                        "The controller did not record this sanitize command; "
+                                        "cannot certify completion. Check dmesg and the device "
+                                        "state before retrying.");
+                        return false;
+                    }
                     report_progress(callback, 10, "Error", true, true,
                                     "The NVMe sanitize operation failed inside the controller "
                                     "(check dmesg for details)");

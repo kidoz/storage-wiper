@@ -48,12 +48,16 @@ public:
     int sanitize_log_reads = 0;
     bool fail_first_sanitize_log_read = false;
     bool previous_sanitize_succeeded = false;
+    bool suppress_sanitize_status_update = false;
+    uint32_t sanitize_cdw10 = 0;
     bool all_namespaces_claimed = false;
     bool ata_password_enabled = false;
     bool fail_ata_disable_password = false;
     bool fail_ata_prepare = false;
     bool fail_ata_erase = false;
     int ata_disable_attempts = 0;
+    int ata_data_out_commands = 0;
+    std::vector<uint8_t> last_ata_payload;
     std::function<void()> before_write;
     std::function<void()> before_identify;
     std::function<void()> during_firmware_command;

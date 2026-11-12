@@ -480,6 +480,25 @@ TEST_F(WipeServiceIoTest, AtaCancellationConfirmsPasswordCleanup) {
     EXPECT_EQ(progress.back().error_message.find("may remain security-enabled"), std::string::npos);
 }
 
+TEST_F(WipeServiceIoTest, AtaSecureEraseSendsDataOutPayloadsAndDisablesPassword) {
+    const auto plan = prepare_ata_plan();
+    ASSERT_TRUE(service->start_prepared(plan, callback()));
+    wait_for_ata_completion();
+    ASSERT_EQ(terminals(), 1u);
+    EXPECT_FALSE(progress.back().has_error);
+    EXPECT_FALSE(io.ata_password_enabled);
+    // SET PASSWORD and ERASE UNIT each send a 512-byte data-out block; a
+    // successful erase disables security in the drive, so no DISABLE follows.
+    EXPECT_EQ(io.ata_data_out_commands, 2);
+    ASSERT_EQ(io.last_ata_payload.size(), 512u);
+    // The fake advertises enhanced erase support, so the control word's
+    // enhanced bit is set (0x0002).
+    EXPECT_EQ(io.last_ata_payload[0], 2);
+    EXPECT_EQ(io.last_ata_payload[1], 0);
+    EXPECT_EQ(std::string(reinterpret_cast<const char*>(io.last_ata_payload.data() + 2), 12),
+              "StorageWiper");
+}
+
 TEST_F(WipeServiceIoTest, UnknownInitialSanitizeStatusCannotYieldStaleSuccess) {
     io.fail_first_sanitize_log_read = true;
     io.previous_sanitize_succeeded = true;
@@ -491,6 +510,22 @@ TEST_F(WipeServiceIoTest, UnknownInitialSanitizeStatusCannotYieldStaleSuccess) {
     ASSERT_EQ(terminals(), 1u);
     EXPECT_TRUE(progress.back().has_error);
     EXPECT_NE(progress.back().error_message.find("initial NVMe sanitize status"),
+              std::string::npos);
+}
+
+TEST_F(WipeServiceIoTest, StaleSanitizeSuccessIsNotCertifiedForNewCommand) {
+    // A controller that was sanitized before keeps reporting the old terminal
+    // status but never records the new command's SCDW10. The helper must not
+    // turn that stale success into this run's certificate.
+    io.previous_sanitize_succeeded = true;
+    io.suppress_sanitize_status_update = true;
+    ATASecureEraseAlgorithm algorithm;
+    const std::atomic<bool> cancelled = false;
+    EXPECT_FALSE(algorithm.execute_on_device(TARGET, 2'048, callback(), cancelled));
+    EXPECT_EQ(io.sanitize_commands, 1);
+    ASSERT_EQ(terminals(), 1u);
+    EXPECT_TRUE(progress.back().has_error);
+    EXPECT_NE(progress.back().error_message.find("did not record this sanitize command"),
               std::string::npos);
 }
 

@@ -103,6 +103,10 @@ struct LogPage {
     /// Completion percentage derived from SPROG, which the spec defines as a
     /// numerator over 65536 rather than a percentage
     uint8_t progress_percent = 0;
+    /// SCDW10 of the sanitize command this status describes. Binding a
+    /// terminal status to the submitted CDW10 prevents a previous run's
+    /// success or failure from being mistaken for this command.
+    uint32_t command_dword10 = 0;
 };
 
 /// Firmware erase capabilities decoded from Identify Controller data

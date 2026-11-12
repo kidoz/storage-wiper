@@ -14,6 +14,8 @@
 #include <cstdarg>
 #include <cstring>
 
+#include <scsi/sg.h>
+
 FakeDeviceIO* FakeDeviceIO::active = nullptr;
 
 FakeDeviceIO::FakeDeviceIO() {
@@ -147,6 +149,69 @@ auto FakeDeviceIO::ioctl(int fd, unsigned long request, void* argument) -> int {
         identify[128] = 0x0021U | (ata_password_enabled ? 0x0002U : 0U);
         return 0;
     }
+    if (request == SG_IO) {
+        auto& io = *static_cast<sg_io_hdr_t*>(argument);
+        if (!io.cmdp || io.cmd_len != 16 || io.cmdp[0] != 0x85) {
+            errno = ENOTTY;
+            return -1;
+        }
+        const auto command = io.cmdp[14];
+        if (during_ata_command) {
+            during_ata_command(command);
+        }
+        const bool data_out = io.dxfer_direction == SG_DXFER_TO_DEV;
+        if (command == 0xF1 || command == 0xF4 || command == 0xF6) {
+            if (!data_out || io.dxfer_len != 512 || io.dxferp == nullptr) {
+                errno = EINVAL;
+                return -1;
+            }
+        } else if (command == 0xF3) {
+            if (data_out) {
+                errno = EINVAL;
+                return -1;
+            }
+        } else {
+            errno = ENOTTY;
+            return -1;
+        }
+
+        if (data_out) {
+            const auto* payload = static_cast<const uint8_t*>(io.dxferp);
+            last_ata_payload.assign(payload, payload + io.dxfer_len);
+            ++ata_data_out_commands;
+        }
+        switch (command) {
+            case 0xF1:
+                ata_password_enabled = true;
+                break;
+            case 0xF3:
+                if (fail_ata_prepare) {
+                    errno = EIO;
+                    return -1;
+                }
+                break;
+            case 0xF4:
+                if (fail_ata_erase) {
+                    errno = EIO;
+                    return -1;
+                }
+                ata_password_enabled = false;
+                break;
+            case 0xF6:
+                ++ata_disable_attempts;
+                if (fail_ata_disable_password) {
+                    errno = EIO;
+                    return -1;
+                }
+                ata_password_enabled = false;
+                break;
+        }
+        io.status = 0;
+        io.host_status = 0;
+        io.driver_status = 0;
+        io.resid = 0;
+        return 0;
+    }
     if (request == HDIO_DRIVE_CMD) {
         const auto command = *static_cast<uint8_t*>(argument);
         switch (command) {
@@ -218,6 +283,12 @@ auto FakeDeviceIO::ioctl(int fd, unsigned long request, void* argument) -> int {
         }
         std::memset(data, 0, cmd.data_len);
         data[2] = previous_sanitize_succeeded ? 1 : (sanitize_commands > 0 ? 1 : 0);
+        const uint32_t cdw10 =
+            (sanitize_commands > 0 && !suppress_sanitize_status_update) ? sanitize_cdw10 : 0;
+        data[4] = static_cast<uint8_t>(cdw10 & 0xFFU);
+        data[5] = static_cast<uint8_t>((cdw10 >> 8U) & 0xFFU);
+        data[6] = static_cast<uint8_t>((cdw10 >> 16U) & 0xFFU);
+        data[7] = static_cast<uint8_t>((cdw10 >> 24U) & 0xFFU);
     } else if (cmd.opcode == 0x84 || cmd.opcode == 0x80) {
         all_namespaces_claimed = true;
         for (const auto& [path, device] : devices) {
@@ -227,6 +298,9 @@ auto FakeDeviceIO::ioctl(int fd, unsigned long request, void* argument) -> int {
         }
         if (cmd.opcode == 0x84) {
             ++sanitize_commands;
+            if (!suppress_sanitize_status_update) {
+                sanitize_cdw10 = cmd.cdw10;
+            }
         } else {
             formatted_namespace = cmd.nsid;
             format_command = cmd.cdw10;

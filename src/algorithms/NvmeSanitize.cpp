@@ -147,6 +147,9 @@ auto parse_log_page(const uint8_t* log_page) -> LogPage {
     constexpr uint32_t SPROG_DENOMINATOR = 65'536;
     const auto percent = (static_cast<uint32_t>(sprog) * 100) / SPROG_DENOMINATOR;
     page.progress_percent = static_cast<uint8_t>(percent > 100 ? 100 : percent);
+    // SCDW10 is the command DWORD10 of the sanitize operation this status
+    // belongs to, not a value from the current poll.
+    page.command_dword10 = read_le32(log_page + 4);
     return page;
 }
 

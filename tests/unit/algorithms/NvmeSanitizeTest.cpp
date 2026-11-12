@@ -314,6 +314,15 @@ TEST(NvmeSanitizeTest, ParseLogPage_CompletedSuccess) {
     EXPECT_TRUE(is_success_status(page.status));
 }
 
+TEST(NvmeSanitizeTest, ParseLogPage_ReadsScw10CommandDword) {
+    auto log = make_sanitize_log(65'535, 0x0001);
+    log[4] = 0x34;
+    log[5] = 0x12;
+    log[6] = 0x00;
+    log[7] = 0x00;
+    EXPECT_EQ(parse_log_page(log.data()).command_dword10, 0x1234u);
+}
+
 TEST(NvmeSanitizeTest, ParseLogPage_CompletedSuccessWithoutDeallocate) {
     // SSTAT value 4 is a real terminal success. Masking the field to two bits
     // folded it onto "never sanitized" and polled until the 24-hour timeout.
