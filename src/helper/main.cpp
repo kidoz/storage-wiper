@@ -421,7 +421,9 @@ void handle_start_prepared_wipe(GDBusMethodInvocation* invocation, GVariant* par
             invocation, g_variant_new("(bs)", FALSE, plan.error().message.c_str()));
         return;
     }
-    if (auto registered = g_wipe_jobs.begin(*plan); !registered) {
+    if (auto registered =
+            g_wipe_jobs.begin(*plan, std::string{g_dbus_method_invocation_get_sender(invocation)});
+        !registered) {
         g_dbus_method_invocation_return_value(
             invocation, g_variant_new("(bs)", FALSE, registered.error().message.c_str()));
         return;
@@ -449,6 +451,16 @@ void handle_start_prepared_wipe(GDBusMethodInvocation* invocation, GVariant* par
 
     const auto started = g_wipe_service->start_prepared(*plan, progress_callback);
     if (!started) {
+        // The job was registered before the service could reject the start.
+        // Observers (another GUI, or one reconnecting now) must receive a
+        // terminal event rather than wait forever for a job that never ran.
+        WipeProgress failure{};
+        failure.is_complete = true;
+        failure.has_error = true;
+        failure.outcome_known = true;
+        failure.status = "Wipe could not start";
+        failure.error_message = started.error().message;
+        emit_wipe_progress(plan->id, device, failure);
         g_wipe_jobs.abandon(plan->id);
         g_dbus_method_invocation_return_value(
             invocation, g_variant_new(dbus_signatures::START_WIPE_REPLY, FALSE,
@@ -480,7 +492,8 @@ void handle_get_wipe_jobs(GDBusMethodInvocation* invocation) {
 void handle_cancel_prepared_wipe(GDBusMethodInvocation* invocation, GVariant* parameters) {
     const char* id = nullptr;
     g_variant_get(parameters, "(&s)", &id);
-    const auto target = g_wipe_jobs.cancellation_target(id);
+    const auto target =
+        g_wipe_jobs.cancellation_target(id, g_dbus_method_invocation_get_sender(invocation));
     const bool cancelled = target && g_wipe_service->cancel_operation(*target);
     g_dbus_method_invocation_return_value(invocation, g_variant_new("(b)", cancelled));
 }
