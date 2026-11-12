@@ -750,10 +750,11 @@ auto WipeService::start_internal(const std::string& disk_path, WipeAlgorithm alg
                 wipe_result = false;
             }
 
-            // Firmware may finish successfully after a cancellation request that
-            // it cannot honor. Preserve the actual completed outcome in reports.
-            const bool cancelled = state->cancel_requested.load() &&
-                                   !(plan && !plan->firmware.cancellable && wipe_result);
+            // A cancellation request is authoritative only when the wipe did
+            // not complete. Firmware may finish after a request it cannot
+            // honor, and a software wipe can finish between the final write
+            // and the request; both preserve the actual completed outcome.
+            const bool cancelled = state->cancel_requested.load() && !wipe_result;
             auto final_progress =
                 build_completion_status(wipe_result, do_verify, verify_result, cancelled,
                                         last_write.bad_block_count, trim_issued);
