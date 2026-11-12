@@ -593,7 +593,19 @@ void DBusClient::get_available_disks(
             GVariant* result = g_dbus_proxy_call_finish(proxy, res, &error);
 
             if (!result) {
-                (*cb)(std::unexpected(util::Error{error ? error->message : "Unknown error"}));
+                std::string message = error ? error->message : "Unknown error";
+                if (g_error_matches(error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD) ||
+                    g_error_matches(error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_INTERFACE)) {
+                    // A helper activated by an earlier package answers GetDisks2 with
+                    // UnknownMethod rather than a different record layout.
+                    message = std::format(
+                        "storage-wiper-helper does not provide GetDisks2 ({}): the running helper "
+                        "is an older version. Finish active jobs, then restart "
+                        "storage-wiper-helper.service; the next client call starts the installed "
+                        "build.",
+                        message);
+                }
+                (*cb)(std::unexpected(util::Error{std::move(message)}));
                 g_clear_error(&error);
             } else {
                 std::vector<DiskInfo> disks;

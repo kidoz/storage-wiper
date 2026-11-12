@@ -556,3 +556,12 @@ TEST_F(PathOnlyHelperDBusClientTest, OldHelperCannotTriggerPathOnlyFallback) {
     EXPECT_FALSE(client->prepare_wipe("/dev/sda", WipeAlgorithm::ZERO_FILL, false));
     EXPECT_EQ(path_only_starts.load(), 0);
 }
+
+TEST_F(PathOnlyHelperDBusClientTest, MissingGetDisks2IsReportedAsOlderHelper) {
+    std::optional<std::expected<std::vector<DiskInfo>, util::Error>> result;
+    client->get_available_disks([&](auto value) { result = std::move(value); });
+    ASSERT_TRUE(pump_until([&] { return result.has_value(); }));
+    ASSERT_FALSE(result->has_value());
+    EXPECT_NE(result->error().message.find("older version"), std::string::npos);
+    EXPECT_NE(result->error().message.find("GetDisks2"), std::string::npos);
+}
