@@ -174,6 +174,7 @@ auto MainViewModel::has_uncancellable_operations() const -> bool {
 void MainViewModel::stop_for_close() {
     if (cleaned_up_.load())
         return;
+    stop_requested_.store(true);
     ++preparation_generation_;
     std::vector<std::pair<WipePlan, bool>> plans;
     if (pending_plan_) {
@@ -252,7 +253,7 @@ void MainViewModel::restore_wipe_jobs() {
                 if (job.completed_at_unix > 0)
                     activity.completed_at = std::chrono::system_clock::time_point{
                         std::chrono::seconds{job.completed_at_unix}};
-                activity.peak_speed = job.progress.speed_bytes_per_sec;
+                activity.peak_speed = job.peak_speed_bytes_per_sec;
                 const auto active = vm->active_wipes_.find(path);
                 if (job.progress.is_complete) {
                     // History must never occupy a reusable path and hide a newer active job.
@@ -611,12 +612,19 @@ void MainViewModel::confirm_wipe_for(const WipePlan& plan) {
         const bool started = wipe_service->start_prepared_wipe(plan, std::move(progress_callback));
 
         if (started) {
-            queue_main([weak_self, algorithm, verify]() {
-                if (auto vm = weak_self.lock();
-                    vm && !vm->cleaned_up_.load() && vm->settings_save_callback_) {
-                    vm->settings_save_callback_(
-                        util::AppSettingsData{.algorithm_id = static_cast<int>(algorithm),
-                                              .verification_enabled = verify});
+            queue_main([weak_self, wipe_service, plan_id = plan.id, algorithm, verify]() {
+                if (auto vm = weak_self.lock(); vm && !vm->cleaned_up_.load()) {
+                    // A stop requested while this start was waiting for
+                    // authorization could not find the job yet. Cancel it as
+                    // soon as the helper has accepted it.
+                    if (vm->stop_requested_.load()) {
+                        wipe_service->cancel_prepared_wipe(plan_id);
+                    }
+                    if (vm->settings_save_callback_) {
+                        vm->settings_save_callback_(
+                            util::AppSettingsData{.algorithm_id = static_cast<int>(algorithm),
+                                                  .verification_enabled = verify});
+                    }
                 }
                 return false;
             });

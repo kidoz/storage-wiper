@@ -850,6 +850,39 @@ auto reconnect_job(const std::string& id, bool complete = false) -> WipeJobSnaps
 }
 }  // namespace
 
+TEST_F(MainViewModelTest, RestoredCompletedJobWritesCertificateWithSnapshotPeakSpeed) {
+    TempTestFile root;
+    ASSERT_TRUE(root.valid());
+    const auto directory = root.path() + "-restored-peak-certificate";
+    struct Cleanup {
+        std::string path;
+        ~Cleanup() { std::filesystem::remove_all(path); }
+    } cleanup{directory};
+    view_model->set_certificate_directory(directory);
+
+    auto job = reconnect_job("restored-peak", true);
+    job.peak_speed_bytes_per_sec = 123'456'789;
+    EXPECT_CALL(*mock_wipe_service, get_wipe_jobs())
+        .WillOnce(Return(std::vector<WipeJobSnapshot>{job}));
+    SimulateConnected();
+
+    ASSERT_TRUE(wait_for([&] {
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::directory_iterator(directory, ec)) {
+            if (entry.path().extension() == ".json")
+                return true;
+        }
+        return false;
+    }));
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+        if (entry.path().extension() != ".json")
+            continue;
+        std::ifstream input(entry.path());
+        const std::string json{std::istreambuf_iterator<char>{input}, {}};
+        EXPECT_NE(json.find("123456789"), std::string::npos);
+    }
+}
+
 TEST_F(MainViewModelTest, ReconnectHistoryDoesNotHideNewActiveJobOnSamePath) {
     const auto old_job = reconnect_job("old-completed", true);
     const auto live_job = reconnect_job("new-active");

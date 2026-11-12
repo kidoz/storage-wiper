@@ -295,6 +295,7 @@ private:
     std::map<std::string, WipeActivity> active_wipes_;
     std::optional<WipePlan> pending_plan_;
     std::atomic<bool> cleaned_up_{false};
+    std::atomic<bool> stop_requested_{false};
     uint64_t preparation_generation_ = 0;
     uint64_t connection_generation_ = 0;
     bool unmount_confirmation_pending_ = false;
