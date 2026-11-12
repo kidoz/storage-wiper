@@ -56,8 +56,9 @@ to select the device, whether a backup is adequate, or whether an external
 storage stack is still relying on it. The helper prepares a snapshot before confirmation and validates the opened
 device's kernel disk sequence, device number, size, and partition offset again
 before writes. A replacement under the same path is rejected. Devices lacking
-`BLKGETDISKSEQ` support cannot be wiped. Firmware commands use the same validated
-descriptor rather than reopening the path.
+`BLKGETDISKSEQ` support cannot be wiped; the ioctl is available from Linux 5.15.
+Firmware commands use the same validated descriptor rather than reopening the
+path.
 
 ## LVM and device-mapper
 

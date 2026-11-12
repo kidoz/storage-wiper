@@ -9,7 +9,7 @@ certificates.
 
 | Requirement | Purpose |
 | --- | --- |
-| Linux | Block devices, sysfs, mount information, and device ioctls |
+| Linux kernel ≥ 5.15 | Block devices, sysfs, mount information, device ioctls, and `BLKGETDISKSEQ` generation checks (wiping is refused where the ioctl is unavailable) |
 | C++23 compiler and standard library | `std::format`, `std::expected`, ranges, and other language/library features |
 | Meson ≥ 0.59.0, Ninja, pkg-config | Configure, compile, and locate libraries |
 | `gtk4` ≥ 4.0 | GTK GUI |

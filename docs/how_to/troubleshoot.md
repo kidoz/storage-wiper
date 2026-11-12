@@ -61,17 +61,19 @@ storage-wiper-helper did not reply with a(sssxbbsbsubbxiiiiiiibs) (got a(sssxbbs
 Clients that predate that check print a `GLib-CRITICAL` about a `GVariant`
 format string and report no devices instead.
 
-1. Stop the running helper; D-Bus activation starts the current build on the
+1. After every active operation has reached a terminal result, restart the
+   helper through its unit; D-Bus activation starts the installed build on the
    next client call:
 
    ```bash
-   sudo pkill -f storage-wiper-helper
+   sudo systemctl restart storage-wiper-helper.service
    ```
 
-2. If the helper runs under the systemd unit, use
-   `sudo systemctl restart storage-wiper-helper.service` instead. Only one
-   process can own the helper bus name, so a new instance gives up while an
-   older one still holds it.
+2. Only when an older package activated the helper directly, stop that specific
+   process after all operations finish. A forced kill during a wipe or firmware
+   erase leaves the device running without monitoring. Only one process can own
+   the helper bus name, so a new instance gives up while an older one still
+   holds it.
 3. Repeat the failed command. Listing devices does not write to a disk.
 4. An upgrade preserves running helpers to avoid racing with a new operation. See
    [activate an upgraded helper](package_archlinux.md#activate-an-upgraded-helper).

@@ -65,8 +65,9 @@ The client displays the returned snapshot before confirming. Start transmits onl
 the ID; it cannot change the prepared device, method, scope, or verification.
 Unknown plan versions and missing required fields fail closed.
 `CancelPreparedWipe` checks that the UUID still identifies the current active job
-for its path and that the prepared method is cancellable. It returns false for
-finished, unknown, replaced, or noncancellable jobs. The legacy path-only
+for its path, that the prepared method is cancellable, and that the caller owns
+the job. It returns false for finished, unknown, replaced, foreign, or
+noncancellable jobs. The legacy path-only
 `CancelWipe` always returns false; it cannot cancel a replacement job.
 
 `GetAlgorithms` records contain ID, name, description, and pass count. IDs are
@@ -77,9 +78,11 @@ listed in the [algorithm reference](algorithms.md).
 `GetWipeJobs` returns up to 64 job dictionaries. Each version-1 job dictionary
 contains `version` (u), `plan` (a{sv}, the immutable prepared plan), `progress`
 (the same tuple used by `PreparedWipeProgress`), `started-at` and `completed-at`
-(x, Unix seconds), and `verification-mismatches` (t). `completed-at` is zero
-until a terminal result. Reattached clients use the original identity and times
-for certificates rather than looking up the current occupant of a device path.
+(x, Unix seconds), `verification-mismatches` (t), and `peak-speed` (t, the
+maximum observed progress speed; a helper that predates the field omits it).
+`completed-at` is zero until a terminal result. Reattached clients use the
+original identity, times and peak speed for certificates rather than looking up
+the current occupant of a device path.
 
 Job UUIDs survive caller disconnect within the running helper process. Completed
 jobs expire after one hour and may be evicted sooner to keep the 64-job bound.
@@ -258,10 +261,12 @@ also check the published XML. When changing the contract, update the helper,
 client, constants, published XML, and related tests together.
 
 The client checks reply types against those constants before parsing. A
-`WipeProgress` signal that does not match is ignored, and a `GetDisks` reply with
-an unexpected type is reported as a named version skew showing both record types
-instead of an empty device list. In practice such a reply comes from a helper
-process left over from an earlier package version; see
+`PreparedWipeProgress` signal that does not match is ignored, and a `GetDisks2`
+reply with an unexpected type is reported as a named version skew showing both
+record types instead of an empty device list. An older helper that does not
+implement `GetDisks2` at all is reported as an older running helper. In practice
+such a reply comes from a helper process left over from an earlier package
+version; see
 [activate an upgraded helper](../how_to/package_archlinux.md#activate-an-upgraded-helper).
 
 [Reference](README.md) · [Documentation home](../README.md)

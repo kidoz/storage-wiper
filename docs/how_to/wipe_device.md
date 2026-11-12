@@ -77,8 +77,9 @@ See the [CLI reference](../reference/cli.md) for flags and exit statuses, and
 ## Check completion or request cancellation
 
 Wait for a terminal result. A write pass reaching 100% is not the same as
-finishing verification. Treat a nonzero unwritable-sector count as evidence
-that some locations may retain data, even when the operation reports success.
+finishing verification. A nonzero unwritable-sector count is a failure: those
+locations may retain data, and the operation cannot report success or write a
+success certificate.
 
 To request cancellation, use the GUI cancel action for that job or press
 Ctrl+C in its CLI process. Cancellation targets the prepared job ID, so it cannot

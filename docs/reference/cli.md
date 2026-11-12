@@ -62,9 +62,9 @@ numeric IDs, and verification support are in the
 
 No command prints help after attempting to connect to the helper. An unknown
 algorithm is a runtime error, not an option-parsing error. A successful wipe
-with a certificate write failure still exits `0` and prints a warning. Success
-can also include reported unwritable sectors; check the result record when
-your workflow requires complete coverage.
+with a certificate write failure still exits `0` and prints a warning. A wipe
+that reports unwritable sectors is a failure: it exits `1` and writes no
+success certificate.
 
 ## JSON device list
 
@@ -87,6 +87,8 @@ exit status to distinguish a failure from a successful empty list.
 | `filesystem` | String | Reported filesystem type, or empty |
 | `is_partition` | Boolean | Whether the entry represents a partition |
 | `parent_disk` | String | Parent path for a partition; empty for a whole disk |
+| `is_lvm_pv` | Boolean | Positive LVM1/LVM2 signature on the device or a child partition |
+| `has_dm_holders` | Boolean | The device or a child partition backs device-mapper mappings |
 | `smart_status` | String | Health display label |
 | `smart` | Object | Health attributes below |
 
